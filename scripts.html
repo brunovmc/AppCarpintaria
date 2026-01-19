@@ -49,7 +49,8 @@
   const buscaState = {
     texto: '',
     tipo: '',
-    categoria: ''
+    categoria: '',
+    unidade: ''
   };
 
   function debounce(fn, delay = 250) {
@@ -68,9 +69,11 @@
   function lerFiltrosDoPainel() {
     const tipo = document.getElementById('filtroTipo');
     const categoria = document.getElementById('filtroCategoria');
+    const unidade = document.getElementById('filtroUnidade');
 
     buscaState.tipo = tipo ? (tipo.value || '') : buscaState.tipo;
     buscaState.categoria = categoria ? (categoria.value || '') : buscaState.categoria;
+    buscaState.unidade = unidade ? (unidade.value || '') : buscaState.unidade;
   }
 
   function aplicarBuscaEstoque() {
@@ -82,11 +85,13 @@
     const texto = (buscaState.texto || '').trim();
     const tipo = (buscaState.tipo || '').trim();
     const categoria = (buscaState.categoria || '').trim();
+    const unidade = (buscaState.unidade || '').trim();
 
     const lista = EstoqueStore.filter({
       texto: texto || undefined,
       tipo: tipo || undefined,
-      categoria: categoria || undefined
+      categoria: categoria || undefined,
+      unidade: unidade || undefined
     });
 
     EstoqueUI.renderLista(lista);
@@ -150,12 +155,15 @@
   function limparFiltros() {
     buscaState.tipo = '';
     buscaState.categoria = '';
+    buscaState.unidade = '';
 
     const tipo = document.getElementById('filtroTipo');
     const categoria = document.getElementById('filtroCategoria');
+    const unidade = document.getElementById('filtroUnidade');
 
     if (tipo) tipo.value = '';
     if (categoria) categoria.value = '';
+    if (unidade) unidade.value = '';
 
     aplicarBuscaEstoque();
   }
@@ -195,20 +203,25 @@
 
     const tipos = uniqueSorted(itens.map(i => i.tipo));
     const categorias = uniqueSorted(itens.map(i => i.categoria));
+    const unidades = uniqueSorted(itens.map(i => i.unidade));
 
     const selTipo = document.getElementById('filtroTipo');
     const selCategoria = document.getElementById('filtroCategoria');
+    const selUnidade = document.getElementById('filtroUnidade');
 
     // preserva seleção atual (se já tiver)
     const tipoAtual = selTipo ? selTipo.value : '';
     const catAtual = selCategoria ? selCategoria.value : '';
+    const unidadeAtual = selUnidade ? selUnidade.value : '';
 
     preencherSelect(selTipo, tipos, 'Tipo (todos)');
+    preencherSelect(selUnidade, unidades, 'Unidade (todas)');
     preencherSelect(selCategoria, categorias, 'Categoria (todas)');
 
     // restaura se ainda existir
     if (selTipo && tipos.includes(tipoAtual)) selTipo.value = tipoAtual;
     if (selCategoria && categorias.includes(catAtual)) selCategoria.value = catAtual;
+    if (selUnidade && unidades.includes(unidadeAtual)) selUnidade.value = unidadeAtual;
   }
 
   // espera o EstoqueStore carregar (sem travar nada)
@@ -260,10 +273,11 @@
 
     const tipo = document.getElementById('filtroTipo');
     const categoria = document.getElementById('filtroCategoria');
+    const unidade = document.getElementById('filtroUnidade');
     const btnLimpar = document.getElementById('btnLimparFiltros'); // ✅ seu ID correto
 
     // muda e aplica automaticamente
-    [tipo, categoria].forEach(sel => {
+    [tipo, categoria, unidade].forEach(sel => {
       if (!sel) return;
       sel.addEventListener('change', () => {
         lerFiltrosDoPainel();
