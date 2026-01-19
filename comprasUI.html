@@ -1,5 +1,5 @@
 <script>
-  window.EstoqueUI = (() => {
+  window.ComprasUI = (() => {
     let cardAberto = null;
     let delegationInit = false;
 
@@ -8,30 +8,26 @@
     ========================== */
     function el() {
       return {
-        formulario: document.getElementById('formulario'),
-        lista: document.getElementById('lista'),
+        formulario: document.getElementById('formularioCompra'),
+        lista: document.getElementById('listaCompras'),
 
         // Form
-        tipo: document.getElementById('tipo'),
-        item: document.getElementById('item'),
-        quantidade: document.getElementById('quantidade'),
-        unidade: document.getElementById('unidade'),
-        categoria: document.getElementById('categoria'),
-        fornecedor: document.getElementById('fornecedor'),
-        valor_unit: document.getElementById('valor_unit'),
-        observacao: document.getElementById('observacao'),
+        tipo: document.getElementById('compraTipo'),
+        item: document.getElementById('compraItem'),
+        quantidade: document.getElementById('compraQuantidade'),
+        unidade: document.getElementById('compraUnidade'),
+        categoria: document.getElementById('compraCategoria'),
+        fornecedor: document.getElementById('compraFornecedor'),
+        valor_unit: document.getElementById('compraValorUnit'),
+        observacao: document.getElementById('compraObservacao'),
 
-        potencia: document.getElementById('potencia'),
-        voltagem: document.getElementById('voltagem'),
-        comprado_em: document.getElementById('comprado_em'),
-        vida_util_mes: document.getElementById('vida_util_mes'),
+        potencia: document.getElementById('compraPotencia'),
+        voltagem: document.getElementById('compraVoltagem'),
+        comprado_em: document.getElementById('compraCompradoEm'),
+        vida_util_mes: document.getElementById('compraVidaUtilMes'),
 
-        equipamentoFields: document.getElementById('equipamentoFields'),
-        formTitulo: document.getElementById('formTitulo'),
-
-        // Painel de filtro (inline)
-        filtroTipo: document.getElementById('filtroTipo'),
-        filtroCategoria: document.getElementById('filtroCategoria')
+        equipamentoFields: document.getElementById('compraEquipamentoFields'),
+        formTitulo: document.getElementById('compraFormTitulo')
       };
     }
 
@@ -42,7 +38,7 @@
     }
 
     /* =========================
-       FORMULÁRIO
+       FORMULARIO
     ========================== */
     function abrirFormularioNovo() {
       resetFormulario();
@@ -67,23 +63,20 @@
       formulario.style.display = 'none';
       resetFormulario();
 
-      if (window.EstoqueController) {
-        EstoqueController.limparEdicao();
+      if (window.ComprasController) {
+        ComprasController.limparEdicao();
       }
     }
 
     function preencherFormulario(data) {
       const f = el();
-      console.log('DATA EDITAR:', data);
 
-      // selects JÁ carregados (controller chama render*)
       if (f.tipo) f.tipo.value = data.tipo || '';
       if (f.unidade) f.unidade.value = data.unidade || '';
 
       if (f.item) f.item.value = data.item || '';
       if (f.quantidade) f.quantidade.value = data.quantidade || '';
 
-      // categoria/fornecedor podem ser <select> ou <input> dependendo do seu HTML:
       if (f.categoria) f.categoria.value = data.categoria || '';
       if (f.fornecedor) f.fornecedor.value = data.fornecedor || '';
 
@@ -95,7 +88,7 @@
       if (f.comprado_em) f.comprado_em.value = data.comprado_em || '';
       if (f.vida_util_mes) f.vida_util_mes.value = data.vida_util_mes || '';
 
-      if (f.formTitulo) f.formTitulo.innerText = 'Editar Item';
+      if (f.formTitulo) f.formTitulo.innerText = 'Editar Compra';
       handleTipoChange();
     }
 
@@ -118,7 +111,7 @@
       ].forEach(i => i && (i.value = ''));
 
       if (f.equipamentoFields) f.equipamentoFields.classList.add('hidden');
-      if (f.formTitulo) f.formTitulo.innerText = 'Novo Item';
+      if (f.formTitulo) f.formTitulo.innerText = 'Nova Compra';
     }
 
     function handleTipoChange() {
@@ -170,7 +163,6 @@
 
       const clean = limparVazios(lista);
 
-      // Se for <select>, preenche opções; se for <input>, não faz nada (só mantém value)
       if (categoria.tagName === 'SELECT') {
         categoria.innerHTML = '<option value="">Selecione</option>';
         clean.forEach(v => {
@@ -200,40 +192,6 @@
     }
 
     /* =========================
-       SELECTS DO PAINEL DE FILTRO
-       (NOVO — NÃO AFETA O FORM)
-    ========================== */
-    function renderFiltroTipos(lista) {
-      const { filtroTipo } = el();
-      if (!filtroTipo) return;
-
-      const clean = limparVazios(lista);
-
-      filtroTipo.innerHTML = '<option value="">Tipo (todos)</option>';
-      clean.forEach(v => {
-        const o = document.createElement('option');
-        o.value = v;
-        o.textContent = v;
-        filtroTipo.appendChild(o);
-      });
-    }
-
-    function renderFiltroCategorias(lista) {
-      const { filtroCategoria } = el();
-      if (!filtroCategoria) return;
-
-      const clean = limparVazios(lista);
-
-      filtroCategoria.innerHTML = '<option value="">Categoria (todas)</option>';
-      clean.forEach(v => {
-        const o = document.createElement('option');
-        o.value = v;
-        o.textContent = v;
-        filtroCategoria.appendChild(o);
-      });
-    }
-
-    /* =========================
        LISTA + CARDS
     ========================== */
     function renderLista(itens) {
@@ -243,7 +201,7 @@
       lista.innerHTML = '';
 
       if (!Array.isArray(itens) || itens.length === 0) {
-        lista.innerHTML = '<p>Nenhum item no estoque.</p>';
+        lista.innerHTML = '<p>Nenhum item em compras.</p>';
         return;
       }
 
@@ -255,27 +213,28 @@
         div.innerHTML = `
           <div class="card-resumo">
             <strong>${i.item}</strong><br>
-            ${i.tipo} • ${i.categoria || '-'}<br>
+            ${i.tipo} > ${i.categoria || '-'}<br>
             ${i.quantidade || 0} ${i.unidade || ''}
           </div>
 
           <button class="ver-mais">Ver mais</button>
 
           <div class="card-detalhes">
-            <button class="fechar-card">✕</button>
+            <button class="fechar-card">X</button>
 
             <p><b>Fornecedor:</b> ${i.fornecedor || '-'}</p>
-            <p><b>Valor unitário:</b> R$ ${Number(i.valor_unit || 0).toFixed(2)}</p>
-            <p><b>Observação:</b> ${i.observacao || '-'}</p>
+            <p><b>Valor unitario:</b> R$ ${Number(i.valor_unit || 0).toFixed(2)}</p>
+            <p><b>Observacao:</b> ${i.observacao || '-'}</p>
 
             ${i.tipo === 'EQUIPAMENTO' ? `
-              <p><b>Potência:</b> ${i.potencia || '-'}</p>
+              <p><b>Potencia:</b> ${i.potencia || '-'}</p>
               <p><b>Voltagem:</b> ${i.voltagem || '-'}</p>
             ` : ''}
 
             <div class="acoes">
-              <button onclick="EstoqueController.editar('${i.ID}')">✏️ Editar</button>
-              <button onclick="EstoqueController.excluir('${i.ID}')">🗑️ Excluir</button>
+              <button onclick="ComprasController.adicionarAoEstoque('${i.ID}')">Adicionar ao estoque</button>
+              <button onclick="ComprasController.editar('${i.ID}')">Editar</button>
+              <button onclick="ComprasController.excluir('${i.ID}')">Excluir</button>
             </div>
           </div>
         `;
@@ -287,7 +246,7 @@
     }
 
     /* =========================
-       EVENT DELEGATION (CORE)
+       EVENT DELEGATION
     ========================== */
     function initDelegation() {
       if (delegationInit) return;
@@ -295,7 +254,7 @@
 
       document.addEventListener('click', e => {
         const card = e.target.closest('.card');
-        const lista = document.getElementById('lista');
+        const lista = document.getElementById('listaCompras');
 
         if (card && lista && !lista.contains(card)) return;
 
@@ -334,7 +293,7 @@
     }
 
     /* =========================
-       API PÚBLICA
+       API PUBLICA
     ========================== */
     return {
       abrirFormularioNovo,
@@ -348,11 +307,7 @@
       renderTipos,
       renderUnidades,
       renderCategorias,
-      renderFornecedores,
-
-      // ✅ novos (painel)
-      renderFiltroTipos,
-      renderFiltroCategorias
+      renderFornecedores
     };
 
   })();

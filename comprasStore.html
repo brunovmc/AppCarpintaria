@@ -1,0 +1,102 @@
+<script>
+  window.ComprasStore = (() => {
+
+    let itens = [];
+    let carregado = false;
+
+    /* =========================
+       BASICO
+    ========================== */
+    function set(lista) {
+      itens = Array.isArray(lista) ? [...lista] : [];
+      carregado = true;
+    }
+
+    function get() {
+      return [...itens];
+    }
+
+    function isLoaded() {
+      return carregado;
+    }
+
+    function clear() {
+      itens = [];
+      carregado = false;
+    }
+
+    /* =========================
+       CRUD LOCAL
+    ========================== */
+    function add(item) {
+      if (!item || !item.ID) return;
+      itens.unshift(item);
+    }
+
+    function update(id, dados) {
+      const idx = itens.findIndex(i => i.ID === id);
+      if (idx === -1) return;
+
+      itens[idx] = {
+        ...itens[idx],
+        ...dados
+      };
+    }
+
+    function remove(id) {
+      itens = itens.filter(i => i.ID !== id);
+    }
+
+    function getById(id) {
+      return itens.find(i => i.ID === id) || null;
+    }
+
+    /* =========================
+       FILTROS
+    ========================== */
+    function filter({ texto, tipo, unidade, categoria } = {}) {
+      let resultado = [...itens];
+
+      if (texto) {
+        const t = texto.toLowerCase();
+        const toText = v => String(v ?? '');
+        resultado = resultado.filter(i =>
+          toText(i.item).toLowerCase().includes(t) ||
+          toText(i.fornecedor).toLowerCase().includes(t)
+        );
+      }
+
+      if (tipo) {
+        resultado = resultado.filter(i => i.tipo === tipo);
+      }
+
+      if (unidade) {
+        resultado = resultado.filter(i => i.unidade === unidade);
+      }
+
+      if (categoria) {
+        resultado = resultado.filter(i => i.categoria === categoria);
+      }
+
+      return resultado;
+    }
+
+    /* =========================
+       API PUBLICA
+    ========================== */
+    return {
+      set,
+      get,
+      isLoaded,
+      clear,
+
+      add,
+      update,
+      remove,
+      getById,
+
+      filter
+    };
+
+  })();
+</script>

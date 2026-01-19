@@ -8,11 +8,28 @@
 
     const aba = document.getElementById('aba-' + nome);
     if (aba) aba.classList.remove('hidden');
+    setTopBars(nome);
 
     if (nome === 'estoque' && window.EstoqueController) {
       EstoqueController.init();
       aplicarBuscaEstoque(); // reaplica filtros ao voltar pra aba
     }
+
+    if (nome === 'compras' && window.ComprasController) {
+      ComprasController.init();
+      aplicarBuscaCompras();
+    }
+  }
+
+  function setTopBars(nome) {
+    const topEstoque = document.getElementById('topBarEstoque');
+    const topCompras = document.getElementById('topBarCompras');
+
+    if (topEstoque) topEstoque.classList.toggle('hidden', nome !== 'estoque');
+    if (topCompras) topCompras.classList.toggle('hidden', nome !== 'compras');
+
+    if (nome !== 'estoque') fecharPainelFiltro();
+    if (nome !== 'compras') fecharPainelFiltroCompras();
   }
 
   function acaoPrimaria() {
@@ -24,6 +41,12 @@
         EstoqueUI.abrirFormularioNovo();
       } else if (window.EstoqueUI?.abrirFormulario) {
         EstoqueUI.abrirFormulario();
+      }
+    } else if (abaAtiva.id === 'aba-compras') {
+      if (window.ComprasUI?.abrirFormularioNovo) {
+        ComprasUI.abrirFormularioNovo();
+      } else if (window.ComprasUI?.abrirFormulario) {
+        ComprasUI.abrirFormulario();
       }
     }
   }
@@ -53,6 +76,13 @@
     unidade: ''
   };
 
+  const buscaStateCompras = {
+    texto: '',
+    tipo: '',
+    categoria: '',
+    unidade: ''
+  };
+
   function debounce(fn, delay = 250) {
     let t = null;
     return (...args) => {
@@ -66,6 +96,11 @@
     return abaEstoque && !abaEstoque.classList.contains('hidden');
   }
 
+  function comprasEstaAtivo() {
+    const abaCompras = document.getElementById('aba-compras');
+    return abaCompras && !abaCompras.classList.contains('hidden');
+  }
+
   function lerFiltrosDoPainel() {
     const tipo = document.getElementById('filtroTipo');
     const categoria = document.getElementById('filtroCategoria');
@@ -74,6 +109,16 @@
     buscaState.tipo = tipo ? (tipo.value || '') : buscaState.tipo;
     buscaState.categoria = categoria ? (categoria.value || '') : buscaState.categoria;
     buscaState.unidade = unidade ? (unidade.value || '') : buscaState.unidade;
+  }
+
+  function lerFiltrosDoPainelCompras() {
+    const tipo = document.getElementById('filtroTipoCompras');
+    const categoria = document.getElementById('filtroCategoriaCompras');
+    const unidade = document.getElementById('filtroUnidadeCompras');
+
+    buscaStateCompras.tipo = tipo ? (tipo.value || '') : buscaStateCompras.tipo;
+    buscaStateCompras.categoria = categoria ? (categoria.value || '') : buscaStateCompras.categoria;
+    buscaStateCompras.unidade = unidade ? (unidade.value || '') : buscaStateCompras.unidade;
   }
 
   function aplicarBuscaEstoque() {
@@ -98,6 +143,29 @@
   }
 
   const aplicarBuscaEstoqueDebounced = debounce(aplicarBuscaEstoque, 200);
+
+  function aplicarBuscaCompras() {
+    if (!comprasEstaAtivo()) return;
+
+    if (!window.ComprasStore || !window.ComprasUI) return;
+    if (!ComprasStore.isLoaded()) return;
+
+    const texto = (buscaStateCompras.texto || '').trim();
+    const tipo = (buscaStateCompras.tipo || '').trim();
+    const categoria = (buscaStateCompras.categoria || '').trim();
+    const unidade = (buscaStateCompras.unidade || '').trim();
+
+    const lista = ComprasStore.filter({
+      texto: texto || undefined,
+      tipo: tipo || undefined,
+      categoria: categoria || undefined,
+      unidade: unidade || undefined
+    });
+
+    ComprasUI.renderLista(lista);
+  }
+
+  const aplicarBuscaComprasDebounced = debounce(aplicarBuscaCompras, 200);
 
   /* =========================
      PAINEL DE FILTRO (UI)
@@ -152,6 +220,55 @@
     fecharPainelFiltro();
   }
 
+  function painelFiltroComprasExiste() {
+    return !!document.getElementById('painelFiltroCompras');
+  }
+
+  let listenerFecharForaComprasAtivo = false;
+
+  function abrirPainelFiltroCompras() {
+    const p = document.getElementById('painelFiltroCompras');
+    if (!p) return;
+
+    p.classList.remove('hidden');
+
+    if (!listenerFecharForaComprasAtivo) {
+      listenerFecharForaComprasAtivo = true;
+      document.addEventListener('pointerdown', fecharFiltroComprasAoClicarFora, { capture: true });
+    }
+  }
+
+  function fecharPainelFiltroCompras() {
+    const p = document.getElementById('painelFiltroCompras');
+    if (!p) return;
+
+    p.classList.add('hidden');
+
+    if (listenerFecharForaComprasAtivo) {
+      listenerFecharForaComprasAtivo = false;
+      document.removeEventListener('pointerdown', fecharFiltroComprasAoClicarFora, { capture: true });
+    }
+  }
+
+  function togglePainelFiltroCompras() {
+    const p = document.getElementById('painelFiltroCompras');
+    if (!p) return;
+
+    if (p.classList.contains('hidden')) abrirPainelFiltroCompras();
+    else fecharPainelFiltroCompras();
+  }
+
+  function fecharFiltroComprasAoClicarFora(e) {
+    const p = document.getElementById('painelFiltroCompras');
+    if (!p || p.classList.contains('hidden')) return;
+
+    const btn = document.getElementById('btnFiltroCompras');
+    if (p.contains(e.target)) return;
+    if (btn && btn.contains(e.target)) return;
+
+    fecharPainelFiltroCompras();
+  }
+
   function limparFiltros() {
     buscaState.tipo = '';
     buscaState.categoria = '';
@@ -166,6 +283,22 @@
     if (unidade) unidade.value = '';
 
     aplicarBuscaEstoque();
+  }
+
+  function limparFiltrosCompras() {
+    buscaStateCompras.tipo = '';
+    buscaStateCompras.categoria = '';
+    buscaStateCompras.unidade = '';
+
+    const tipo = document.getElementById('filtroTipoCompras');
+    const categoria = document.getElementById('filtroCategoriaCompras');
+    const unidade = document.getElementById('filtroUnidadeCompras');
+
+    if (tipo) tipo.value = '';
+    if (categoria) categoria.value = '';
+    if (unidade) unidade.value = '';
+
+    aplicarBuscaCompras();
   }
 
   /* =========================
@@ -241,6 +374,47 @@
     }, 300);
   }
 
+  function popularFiltrosDoPainelCompras() {
+    if (!window.ComprasStore) return;
+    if (!ComprasStore.isLoaded()) return;
+
+    const itens = ComprasStore.get();
+
+    const tipos = uniqueSorted(itens.map(i => i.tipo));
+    const categorias = uniqueSorted(itens.map(i => i.categoria));
+    const unidades = uniqueSorted(itens.map(i => i.unidade));
+
+    const selTipo = document.getElementById('filtroTipoCompras');
+    const selCategoria = document.getElementById('filtroCategoriaCompras');
+    const selUnidade = document.getElementById('filtroUnidadeCompras');
+
+    const tipoAtual = selTipo ? selTipo.value : '';
+    const catAtual = selCategoria ? selCategoria.value : '';
+    const unidadeAtual = selUnidade ? selUnidade.value : '';
+
+    preencherSelect(selTipo, tipos, 'Tipo (todos)');
+    preencherSelect(selUnidade, unidades, 'Unidade (todas)');
+    preencherSelect(selCategoria, categorias, 'Categoria (todas)');
+
+    if (selTipo && tipos.includes(tipoAtual)) selTipo.value = tipoAtual;
+    if (selCategoria && categorias.includes(catAtual)) selCategoria.value = catAtual;
+    if (selUnidade && unidades.includes(unidadeAtual)) selUnidade.value = unidadeAtual;
+  }
+
+  let filtroPollCompras = null;
+  function iniciarPollFiltrosCompras() {
+    if (!painelFiltroComprasExiste()) return;
+    if (filtroPollCompras) return;
+
+    filtroPollCompras = setInterval(() => {
+      if (window.ComprasStore && ComprasStore.isLoaded()) {
+        popularFiltrosDoPainelCompras();
+        clearInterval(filtroPollCompras);
+        filtroPollCompras = null;
+      }
+    }, 300);
+  }
+
   /* =========================
      INIT BUSCA/FILTRO
   ========================== */
@@ -295,8 +469,55 @@
     iniciarPollFiltros();
   }
 
+  function initBuscaEFiltroCompras() {
+    const input = document.getElementById('buscaCompras');
+    const btnFiltro = document.getElementById('btnFiltroCompras');
+
+    if (input) {
+      input.addEventListener('input', () => {
+        buscaStateCompras.texto = input.value || '';
+        aplicarBuscaComprasDebounced();
+      });
+    }
+
+    if (btnFiltro) {
+      btnFiltro.addEventListener('click', () => {
+        if (!painelFiltroComprasExiste()) {
+          mostrarToast('Filtro avanAado em breve');
+          return;
+        }
+        togglePainelFiltroCompras();
+      });
+    }
+
+    const p = document.getElementById('painelFiltroCompras');
+    if (!p) return;
+
+    const tipo = document.getElementById('filtroTipoCompras');
+    const categoria = document.getElementById('filtroCategoriaCompras');
+    const unidade = document.getElementById('filtroUnidadeCompras');
+    const btnLimpar = document.getElementById('btnLimparFiltrosCompras');
+
+    [tipo, categoria, unidade].forEach(sel => {
+      if (!sel) return;
+      sel.addEventListener('change', () => {
+        lerFiltrosDoPainelCompras();
+        aplicarBuscaCompras();
+      });
+    });
+
+    if (btnLimpar) {
+      btnLimpar.addEventListener('click', () => {
+        limparFiltrosCompras();
+      });
+    }
+
+    iniciarPollFiltrosCompras();
+  }
+
   document.addEventListener('DOMContentLoaded', () => {
     trocarAba('estoque');
     initBuscaEFiltroEstoque();
+    initBuscaEFiltroCompras();
   });
 </script>

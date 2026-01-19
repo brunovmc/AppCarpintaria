@@ -1,0 +1,207 @@
+<script>
+  window.ComprasController = (() => {
+
+    let editandoId = null;
+    let iniciado = false;
+
+    let validacoes = null;
+
+    function init() {
+      if (iniciado) return;
+
+      carregarValidacoes();
+      carregarCompras();
+
+      iniciado = true;
+    }
+
+    function carregarValidacoes() {
+      google.script.run
+        .withSuccessHandler(data => {
+          validacoes = data || {};
+
+          validacoes.tipos ||= [];
+          validacoes.unidades ||= [];
+          validacoes.categorias ||= [];
+          validacoes.fornecedores ||= [];
+
+          ComprasUI.renderTipos?.(validacoes.tipos);
+          ComprasUI.renderUnidades?.(validacoes.unidades);
+          ComprasUI.renderCategorias?.(validacoes.categorias);
+          ComprasUI.renderFornecedores?.(validacoes.fornecedores);
+        })
+        .obterValidacoes();
+    }
+
+    function renderListaAtual() {
+      if (window.aplicarBuscaCompras) {
+        aplicarBuscaCompras();
+        return;
+      }
+      ComprasUI.renderLista(ComprasStore.get());
+    }
+
+    function carregarCompras() {
+      google.script.run
+        .withSuccessHandler(lista => {
+          ComprasStore.set(lista);
+          renderListaAtual();
+        })
+        .listarCompras();
+    }
+
+    function salvar() {
+      const get = id => document.getElementById(id)?.value || '';
+
+      const dados = {
+        tipo: get('compraTipo'),
+        item: get('compraItem'),
+        quantidade: Number(get('compraQuantidade')) || 0,
+        unidade: get('compraUnidade'),
+        categoria: get('compraCategoria'),
+        fornecedor: get('compraFornecedor'),
+        valor_unit: Number(get('compraValorUnit')) || 0,
+        observacao: get('compraObservacao'),
+
+        potencia: get('compraPotencia'),
+        voltagem: get('compraVoltagem'),
+        comprado_em: get('compraCompradoEm'),
+        vida_util_mes: Number(get('compraVidaUtilMes')) || ''
+      };
+
+      if (editandoId) {
+        const idAtual = editandoId;
+        const snapshot = { ...ComprasStore.getById(idAtual) };
+
+        ComprasStore.update(idAtual, dados);
+        renderListaAtual();
+        finalizarUX();
+
+        google.script.run
+          .withFailureHandler(() => {
+            ComprasStore.update(idAtual, snapshot);
+            renderListaAtual();
+            mostrarToast('Erro ao salvar edicao', 'erro');
+          })
+          .withSuccessHandler(() => {
+            mostrarToast('Salvo com sucesso');
+          })
+          .atualizarItemCompra(idAtual, dados);
+
+        editandoId = null;
+        return;
+      }
+
+      const tempId = `tmp_${Date.now()}`;
+
+      const itemTemp = {
+        ID: tempId,
+        ...dados
+      };
+
+      ComprasStore.add(itemTemp);
+      renderListaAtual();
+      finalizarUX();
+      mostrarToast('Salvando...');
+
+      google.script.run
+        .withFailureHandler(() => {
+          ComprasStore.remove(tempId);
+          renderListaAtual();
+          mostrarToast('Erro ao salvar compra', 'erro');
+        })
+        .withSuccessHandler(itemSalvo => {
+          ComprasStore.remove(tempId);
+
+          if (!itemSalvo || !itemSalvo.ID) {
+            mostrarToast('Salvo. Atualizando lista...');
+            carregarCompras();
+            return;
+          }
+
+          ComprasStore.add(itemSalvo);
+          renderListaAtual();
+          mostrarToast('Salvo com sucesso');
+        })
+        .criarItemCompra(dados);
+    }
+
+    function finalizarUX() {
+      ComprasUI.fecharFormulario();
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    function editar(id) {
+      const item = ComprasStore.getById(id);
+
+      if (!item) {
+        mostrarToast('Item nao encontrado', 'erro');
+        return;
+      }
+
+      editandoId = id;
+      ComprasUI.preencherFormulario(item);
+      ComprasUI.mostrarFormulario();
+    }
+
+    function excluir(id) {
+      if (!confirm('Deseja remover esta compra?')) return;
+
+      const snapshot = ComprasStore.getById(id);
+
+      ComprasStore.remove(id);
+      renderListaAtual();
+      mostrarToast('Compra removida');
+
+      google.script.run
+        .withFailureHandler(() => {
+          ComprasStore.add(snapshot);
+          renderListaAtual();
+          mostrarToast('Erro ao remover', 'erro');
+        })
+        .deletarItemCompra(id);
+    }
+
+    function adicionarAoEstoque(id) {
+      if (!confirm('Adicionar esta compra ao estoque?')) return;
+
+      const snapshot = ComprasStore.getById(id);
+      if (!snapshot) {
+        mostrarToast('Compra nao encontrada', 'erro');
+        return;
+      }
+
+      ComprasStore.remove(id);
+      renderListaAtual();
+      mostrarToast('Adicionando ao estoque...');
+
+      google.script.run
+        .withFailureHandler(() => {
+          ComprasStore.add(snapshot);
+          renderListaAtual();
+          mostrarToast('Erro ao adicionar ao estoque', 'erro');
+        })
+        .withSuccessHandler(resp => {
+          if (resp?.itemEstoqueCriado && window.EstoqueStore) {
+            EstoqueStore.add(resp.itemEstoqueCriado);
+          }
+          mostrarToast('Adicionado ao estoque');
+        })
+        .adicionarCompraAoEstoque(id);
+    }
+
+    function limparEdicao() {
+      editandoId = null;
+    }
+
+    return {
+      init,
+      salvar,
+      editar,
+      excluir,
+      adicionarAoEstoque,
+      limparEdicao
+    };
+
+  })();
+</script>

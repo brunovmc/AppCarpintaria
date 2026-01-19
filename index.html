@@ -17,8 +17,8 @@
       <button onclick="trocarAba('producao')">Produção</button>
     </div>
 
-    <!-- BUSCA + FILTRO -->
-    <div class="top-bar">
+    <!-- BUSCA + FILTRO (ESTOQUE) -->
+    <div id="topBarEstoque" class="top-bar">
       <input id="buscaEstoque" type="text" placeholder="Buscar...">
       <button id="btnFiltro" type="button">Filtrar</button>
     </div>
@@ -40,6 +40,28 @@
       <button id="btnLimparFiltros" type="button">Limpar filtros</button>
     </div>
 
+    <!-- BUSCA + FILTRO (COMPRAS) -->
+    <div id="topBarCompras" class="top-bar hidden">
+      <input id="buscaCompras" type="text" placeholder="Buscar...">
+      <button id="btnFiltroCompras" type="button">Filtrar</button>
+    </div>
+
+    <div id="painelFiltroCompras" class="hidden" style="margin: 0 0 12px 0;">
+      <select id="filtroTipoCompras">
+        <option value="">Tipo (todos)</option>
+      </select>
+
+      <select id="filtroUnidadeCompras">
+        <option value="">Unidade (todas)</option>
+      </select>
+
+      <select id="filtroCategoriaCompras">
+        <option value="">Categoria (todas)</option>
+      </select>
+
+      <button id="btnLimparFiltrosCompras" type="button">Limpar filtros</button>
+    </div>
+
     <!-- ABAS -->
     <div id="aba-estoque" class="aba">
       <?!= include('estoque'); ?>
@@ -55,7 +77,7 @@
 
     <!-- BARRA INFERIOR -->
     <div class="bottom-bar">
-      <button onclick="EstoqueUI.abrirFormularioNovo()">+ Adicionar</button>
+      <button onclick="acaoPrimaria()">+ Adicionar</button>
     </div>
 
     <!-- SCRIPTS -->
@@ -66,7 +88,9 @@
     <?!= include('estoqueUI'); ?>
     <?!= include('estoqueController'); ?>
 
-    <?!= include('comprasScripts'); ?>
+    <?!= include('comprasStore'); ?>
+    <?!= include('comprasUI'); ?>
+    <?!= include('comprasController'); ?>
     <?!= include('producaoScripts'); ?>
 
     <script>

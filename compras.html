@@ -1,53 +1,42 @@
-<!DOCTYPE html>
-<html>
-  <head>
-    <base target="_top">
-  </head>
-  <body>
+<h1>Compras</h1>
 
-    <h1>Compras</h1>
+<div id="listaCompras"></div>
 
-    <!-- Lista visual -->
-    <div id="listaCompras">
-      <div class="card">
-        <strong>Compra exemplo</strong><br>
-        Fornecedor X<br>
-        R$ 1.234,00
-      </div>
+<div id="formularioCompra" class="form-modal" style="display:none; margin-top:32px;">
+  <h2 id="compraFormTitulo">Nova Compra</h2>
 
-      <div class="card">
-        <strong>Outra compra</strong><br>
-        Fornecedor Y<br>
-        R$ 567,00
-      </div>
-    </div>
+  <!-- Tipo -->
+  <select id="compraTipo" onchange="ComprasUI.handleTipoChange()"></select>
 
-    <!-- Barra inferior -->
-    <div style="
-      position: fixed;
-      bottom: 0;
-      left: 0;
-      right: 0;
-      padding: 12px;
-      background: #fff;
-      border-top: 1px solid #ddd;
-      text-align: center;
-    ">
-      <button onclick="abrirFormularioCompra()">+ Nova Compra</button>
-    </div>
+  <!-- Item -->
+  <input id="compraItem" placeholder="Item">
 
-    <!-- Formulário (visual only) -->
-    <div id="formularioCompra" style="display:none; margin-top:32px;">
-      <h2>Nova Compra</h2>
+  <!-- Quantidade -->
+  <input id="compraQuantidade" type="number" placeholder="Quantidade">
 
-      <input placeholder="Fornecedor">
-      <input placeholder="Descrição">
-      <input type="number" placeholder="Valor total">
-      <input type="date">
+  <!-- Unidade -->
+  <select id="compraUnidade"></select>
 
-      <button>Salvar</button>
-      <button onclick="fecharFormularioCompra()">Cancelar</button>
-    </div>
+  <!-- Categoria -->
+  <input id="compraCategoria" placeholder="Categoria">
 
-  </body>
-</html>
+  <!-- Fornecedor -->
+  <input id="compraFornecedor" placeholder="Fornecedor">
+
+  <!-- Valor unitario -->
+  <input id="compraValorUnit" type="number" placeholder="Valor unitario">
+
+  <!-- Observacao -->
+  <textarea id="compraObservacao" placeholder="Observacao"></textarea>
+
+  <!-- Campos especificos de equipamento -->
+  <div id="compraEquipamentoFields" class="hidden">
+    <input id="compraPotencia" placeholder="Potencia">
+    <input id="compraVoltagem" placeholder="Voltagem">
+    <input id="compraCompradoEm" type="date">
+    <input id="compraVidaUtilMes" type="number" placeholder="Vida util (meses)">
+  </div>
+
+  <button onclick="ComprasController.salvar()">Salvar</button>
+  <button onclick="ComprasUI.fecharFormulario()">Cancelar</button>
+</div>
