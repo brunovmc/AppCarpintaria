@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <base target="_top">
+  </head>
+  <body>
+    <script>
+
+      /*
+        comprasScripts.html
+        -------------------
+        Script exclusivo da aba Compras.
+        Por enquanto apenas controle visual.
+      */
+
+      function abrirFormularioCompra() {
+        document.getElementById('formularioCompra').style.display = 'block';
+        document.getElementById('formularioCompra')
+          .scrollIntoView({ behavior: 'smooth' });
+      }
+
+      function fecharFormularioCompra() {
+        document.getElementById('formularioCompra').style.display = 'none';
+      }
+
+    </script>
+  </body>
+</html>

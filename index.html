@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <base target="_top">
+    <?!= include('styles'); ?>
+  </head>
+
+  <body>
+    <!-- 🔔 TOAST -->
+    <div id="toast" class="toast"></div>
+
+    <!-- NAVBAR -->
+    <div class="navbar">
+      <button onclick="trocarAba('estoque')">Estoque</button>
+      <button onclick="trocarAba('compras')">Compras</button>
+      <button onclick="trocarAba('producao')">Produção</button>
+    </div>
+
+    <!-- BUSCA + FILTRO -->
+    <div class="top-bar">
+      <input id="buscaEstoque" type="text" placeholder="Buscar...">
+      <button id="btnFiltro" type="button">Filtrar</button>
+    </div>
+
+    <!-- ✅ PAINEL INLINE DE FILTRO (passo 1: só markup) -->
+    <div id="painelFiltroEstoque" class="hidden" style="margin: 0 0 12px 0;">
+      <select id="filtroTipo">
+        <option value="">Tipo (todos)</option>
+      </select>
+
+      <select id="filtroCategoria">
+        <option value="">Categoria (todas)</option>
+      </select>
+
+      <button id="btnLimparFiltros" type="button">Limpar filtros</button>
+    </div>
+
+    <!-- ABAS -->
+    <div id="aba-estoque" class="aba">
+      <?!= include('estoque'); ?>
+    </div>
+
+    <div id="aba-compras" class="aba hidden">
+      <?!= include('compras'); ?>
+    </div>
+
+    <div id="aba-producao" class="aba hidden">
+      <?!= include('producao'); ?>
+    </div>
+
+    <!-- BARRA INFERIOR -->
+    <div class="bottom-bar">
+      <button onclick="EstoqueUI.abrirFormularioNovo()">+ Adicionar</button>
+    </div>
+
+    <!-- SCRIPTS -->
+    <?!= include('scripts'); ?>
+
+    <!-- ✅ ordem correta: Store → UI → Controller -->
+    <?!= include('estoqueStore'); ?>
+    <?!= include('estoqueUI'); ?>
+    <?!= include('estoqueController'); ?>
+
+    <?!= include('comprasScripts'); ?>
+    <?!= include('producaoScripts'); ?>
+
+    <script>
+      window.onload = () => {
+        EstoqueController.init();
+      };
+    </script>
+
+  </body>
+</html>

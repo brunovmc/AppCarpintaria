@@ -1,0 +1,181 @@
+<script>
+  window.EstoqueController = (() => {
+
+    let editandoId = null;
+    let iniciado = false;
+
+    let validacoes = null;
+
+    function init() {
+      if (iniciado) return;
+
+      carregarValidacoes();
+      carregarEstoque();
+
+      iniciado = true;
+    }
+
+    function carregarValidacoes() {
+      google.script.run
+        .withSuccessHandler(data => {
+          validacoes = data || {};
+
+          validacoes.tipos ||= [];
+          validacoes.unidades ||= [];
+          validacoes.categorias ||= [];
+          validacoes.fornecedores ||= [];
+
+          EstoqueUI.renderTipos?.(validacoes.tipos);
+          EstoqueUI.renderUnidades?.(validacoes.unidades);
+          EstoqueUI.renderCategorias?.(validacoes.categorias);
+          EstoqueUI.renderFornecedores?.(validacoes.fornecedores);
+
+          EstoqueUI.renderFiltroTipos?.(validacoes.tipos);
+          EstoqueUI.renderFiltroCategorias?.(validacoes.categorias);
+        })
+        .obterValidacoes();
+    }
+
+    function carregarEstoque() {
+      google.script.run
+        .withSuccessHandler(lista => {
+          EstoqueStore.set(lista);
+          EstoqueUI.renderLista(EstoqueStore.get());
+        })
+        .listarEstoque();
+    }
+
+    function salvar() {
+      const get = id => document.getElementById(id)?.value || '';
+
+      const dados = {
+        tipo: get('tipo'),
+        item: get('item'),
+        quantidade: Number(get('quantidade')) || 0,
+        unidade: get('unidade'),
+        categoria: get('categoria'),
+        fornecedor: get('fornecedor'),
+        valor_unit: Number(get('valor_unit')) || 0,
+        observacao: get('observacao'),
+
+        potencia: get('potencia'),
+        voltagem: get('voltagem'),
+        comprado_em: get('comprado_em'),
+        vida_util_mes: Number(get('vida_util_mes')) || ''
+      };
+
+      /* =========
+         EDIÇÃO
+      ========= */
+      if (editandoId) {
+        const idAtual = editandoId;
+        const snapshot = { ...EstoqueStore.getById(idAtual) };
+
+        EstoqueStore.update(idAtual, dados);
+        EstoqueUI.renderLista(EstoqueStore.get());
+        finalizarUX();
+
+        google.script.run
+          .withFailureHandler(() => {
+            EstoqueStore.update(idAtual, snapshot);
+            EstoqueUI.renderLista(EstoqueStore.get());
+            mostrarToast('Erro ao salvar edição', 'erro');
+          })
+          .withSuccessHandler(() => {
+            mostrarToast('Salvo com sucesso');
+          })
+          .atualizarItemEstoque(idAtual, dados);
+
+        editandoId = null;
+        return;
+      }
+
+      /* =========
+         CRIAÇÃO
+      ========= */
+      const tempId = `tmp_${Date.now()}`;
+
+      const itemTemp = {
+        ID: tempId,
+        ...dados
+      };
+
+      EstoqueStore.add(itemTemp);
+      EstoqueUI.renderLista(EstoqueStore.get());
+      finalizarUX();
+      mostrarToast('Salvando...');
+
+      google.script.run
+        .withFailureHandler(() => {
+          EstoqueStore.remove(tempId);
+          EstoqueUI.renderLista(EstoqueStore.get());
+          mostrarToast('Erro ao salvar item', 'erro');
+        })
+        .withSuccessHandler(itemSalvo => {
+          // ✅ sempre remove o temporário
+          EstoqueStore.remove(tempId);
+
+          // ✅ se o backend não devolveu objeto com ID, faz refetch (fallback robusto)
+          if (!itemSalvo || !itemSalvo.ID) {
+            mostrarToast('Salvo. Atualizando lista…');
+            carregarEstoque();
+            return;
+          }
+
+          EstoqueStore.add(itemSalvo);
+          EstoqueUI.renderLista(EstoqueStore.get());
+          mostrarToast('Salvo com sucesso');
+        })
+        .criarItemEstoque(dados);
+    }
+
+    function finalizarUX() {
+      EstoqueUI.fecharFormulario();
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    function editar(id) {
+      const item = EstoqueStore.getById(id);
+
+      if (!item) {
+        mostrarToast('Item não encontrado', 'erro');
+        return;
+      }
+
+      editandoId = id;
+      EstoqueUI.preencherFormulario(item);
+      EstoqueUI.mostrarFormulario();
+    }
+
+    function excluir(id) {
+      if (!confirm('Deseja remover este item?')) return;
+
+      const snapshot = EstoqueStore.getById(id);
+
+      EstoqueStore.remove(id);
+      EstoqueUI.renderLista(EstoqueStore.get());
+      mostrarToast('Item removido');
+
+      google.script.run
+        .withFailureHandler(() => {
+          EstoqueStore.add(snapshot);
+          EstoqueUI.renderLista(EstoqueStore.get());
+          mostrarToast('Erro ao remover', 'erro');
+        })
+        .deletarItemEstoque(id);
+    }
+
+    function limparEdicao() {
+      editandoId = null;
+    }
+
+    return {
+      init,
+      salvar,
+      editar,
+      excluir,
+      limparEdicao
+    };
+
+  })();
+</script>

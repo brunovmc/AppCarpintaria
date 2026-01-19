@@ -1,0 +1,288 @@
+<script>
+  /* =========================
+     NAV / ABAS
+  ========================== */
+  function trocarAba(nome) {
+    document.querySelectorAll('.aba')
+      .forEach(a => a.classList.add('hidden'));
+
+    const aba = document.getElementById('aba-' + nome);
+    if (aba) aba.classList.remove('hidden');
+
+    if (nome === 'estoque' && window.EstoqueController) {
+      EstoqueController.init();
+      aplicarBuscaEstoque(); // reaplica filtros ao voltar pra aba
+    }
+  }
+
+  function acaoPrimaria() {
+    const abaAtiva = document.querySelector('.aba:not(.hidden)');
+    if (!abaAtiva) return;
+
+    if (abaAtiva.id === 'aba-estoque') {
+      if (window.EstoqueUI?.abrirFormularioNovo) {
+        EstoqueUI.abrirFormularioNovo();
+      } else if (window.EstoqueUI?.abrirFormulario) {
+        EstoqueUI.abrirFormulario();
+      }
+    }
+  }
+
+  /* =========================
+     TOAST
+  ========================== */
+  function mostrarToast(msg, tipo = '') {
+    const t = document.getElementById('toast');
+    if (!t) return;
+
+    t.textContent = msg;
+    t.className = `toast show ${tipo}`;
+
+    setTimeout(() => {
+      t.classList.remove('show');
+    }, 2500);
+  }
+
+  /* =========================
+     BUSCA + FILTROS (STATE)
+  ========================== */
+  const buscaState = {
+    texto: '',
+    tipo: '',
+    categoria: ''
+  };
+
+  function debounce(fn, delay = 250) {
+    let t = null;
+    return (...args) => {
+      clearTimeout(t);
+      t = setTimeout(() => fn(...args), delay);
+    };
+  }
+
+  function estoqueEstaAtivo() {
+    const abaEstoque = document.getElementById('aba-estoque');
+    return abaEstoque && !abaEstoque.classList.contains('hidden');
+  }
+
+  function lerFiltrosDoPainel() {
+    const tipo = document.getElementById('filtroTipo');
+    const categoria = document.getElementById('filtroCategoria');
+
+    buscaState.tipo = tipo ? (tipo.value || '') : buscaState.tipo;
+    buscaState.categoria = categoria ? (categoria.value || '') : buscaState.categoria;
+  }
+
+  function aplicarBuscaEstoque() {
+    if (!estoqueEstaAtivo()) return;
+
+    if (!window.EstoqueStore || !window.EstoqueUI) return;
+    if (!EstoqueStore.isLoaded()) return;
+
+    const texto = (buscaState.texto || '').trim();
+    const tipo = (buscaState.tipo || '').trim();
+    const categoria = (buscaState.categoria || '').trim();
+
+    const lista = EstoqueStore.filter({
+      texto: texto || undefined,
+      tipo: tipo || undefined,
+      categoria: categoria || undefined
+    });
+
+    EstoqueUI.renderLista(lista);
+  }
+
+  const aplicarBuscaEstoqueDebounced = debounce(aplicarBuscaEstoque, 200);
+
+  /* =========================
+     PAINEL DE FILTRO (UI)
+  ========================== */
+  function painelFiltroExiste() {
+    return !!document.getElementById('painelFiltroEstoque');
+  }
+
+  let listenerFecharForaAtivo = false;
+
+  function abrirPainelFiltro() {
+    const p = document.getElementById('painelFiltroEstoque');
+    if (!p) return;
+
+    p.classList.remove('hidden');
+
+    // evita adicionar o listener várias vezes
+    if (!listenerFecharForaAtivo) {
+      listenerFecharForaAtivo = true;
+      document.addEventListener('pointerdown', fecharFiltroAoClicarFora, { capture: true });
+    }
+  }
+
+  function fecharPainelFiltro() {
+    const p = document.getElementById('painelFiltroEstoque');
+    if (!p) return;
+
+    p.classList.add('hidden');
+
+    if (listenerFecharForaAtivo) {
+      listenerFecharForaAtivo = false;
+      document.removeEventListener('pointerdown', fecharFiltroAoClicarFora, { capture: true });
+    }
+  }
+
+  function togglePainelFiltro() {
+    const p = document.getElementById('painelFiltroEstoque');
+    if (!p) return;
+
+    if (p.classList.contains('hidden')) abrirPainelFiltro();
+    else fecharPainelFiltro();
+  }
+
+  function fecharFiltroAoClicarFora(e) {
+    const p = document.getElementById('painelFiltroEstoque');
+    if (!p || p.classList.contains('hidden')) return;
+
+    const btn = document.getElementById('btnFiltro');
+    if (p.contains(e.target)) return;
+    if (btn && btn.contains(e.target)) return;
+
+    fecharPainelFiltro();
+  }
+
+  function limparFiltros() {
+    buscaState.tipo = '';
+    buscaState.categoria = '';
+
+    const tipo = document.getElementById('filtroTipo');
+    const categoria = document.getElementById('filtroCategoria');
+
+    if (tipo) tipo.value = '';
+    if (categoria) categoria.value = '';
+
+    aplicarBuscaEstoque();
+  }
+
+  /* =========================
+     POPULAR SELECTS DO PAINEL
+     (usa o cache do EstoqueStore)
+  ========================== */
+  function uniqueSorted(arr) {
+    return [...new Set(arr.filter(v => String(v || '').trim() !== ''))]
+      .map(v => String(v).trim())
+      .sort((a, b) => a.localeCompare(b));
+  }
+
+  function preencherSelect(selectEl, valores, placeholder) {
+    if (!selectEl) return;
+
+    selectEl.innerHTML = '';
+    const opt0 = document.createElement('option');
+    opt0.value = '';
+    opt0.textContent = placeholder;
+    selectEl.appendChild(opt0);
+
+    valores.forEach(v => {
+      const o = document.createElement('option');
+      o.value = v;
+      o.textContent = v;
+      selectEl.appendChild(o);
+    });
+  }
+
+  function popularFiltrosDoPainel() {
+    if (!window.EstoqueStore) return;
+    if (!EstoqueStore.isLoaded()) return;
+
+    const itens = EstoqueStore.get();
+
+    const tipos = uniqueSorted(itens.map(i => i.tipo));
+    const categorias = uniqueSorted(itens.map(i => i.categoria));
+
+    const selTipo = document.getElementById('filtroTipo');
+    const selCategoria = document.getElementById('filtroCategoria');
+
+    // preserva seleção atual (se já tiver)
+    const tipoAtual = selTipo ? selTipo.value : '';
+    const catAtual = selCategoria ? selCategoria.value : '';
+
+    preencherSelect(selTipo, tipos, 'Tipo (todos)');
+    preencherSelect(selCategoria, categorias, 'Categoria (todas)');
+
+    // restaura se ainda existir
+    if (selTipo && tipos.includes(tipoAtual)) selTipo.value = tipoAtual;
+    if (selCategoria && categorias.includes(catAtual)) selCategoria.value = catAtual;
+  }
+
+  // espera o EstoqueStore carregar (sem travar nada)
+  let filtroPoll = null;
+  function iniciarPollFiltros() {
+    if (!painelFiltroExiste()) return;
+
+    // evita múltiplos polls
+    if (filtroPoll) return;
+
+    filtroPoll = setInterval(() => {
+      if (window.EstoqueStore && EstoqueStore.isLoaded()) {
+        popularFiltrosDoPainel();
+        clearInterval(filtroPoll);
+        filtroPoll = null;
+      }
+    }, 300);
+  }
+
+  /* =========================
+     INIT BUSCA/FILTRO
+  ========================== */
+  function initBuscaEFiltroEstoque() {
+    const input = document.getElementById('buscaEstoque');
+    const btnFiltro = document.getElementById('btnFiltro');
+
+    // busca
+    if (input) {
+      input.addEventListener('input', () => {
+        buscaState.texto = input.value || '';
+        aplicarBuscaEstoqueDebounced();
+      });
+    }
+
+    // botão filtro
+    if (btnFiltro) {
+      btnFiltro.addEventListener('click', () => {
+        if (!painelFiltroExiste()) {
+          mostrarToast('Filtro avançado em breve');
+          return;
+        }
+        togglePainelFiltro();
+      });
+    }
+
+    // listeners do painel (se existir)
+    const p = document.getElementById('painelFiltroEstoque');
+    if (!p) return;
+
+    const tipo = document.getElementById('filtroTipo');
+    const categoria = document.getElementById('filtroCategoria');
+    const btnLimpar = document.getElementById('btnLimparFiltros'); // ✅ seu ID correto
+
+    // muda e aplica automaticamente
+    [tipo, categoria].forEach(sel => {
+      if (!sel) return;
+      sel.addEventListener('change', () => {
+        lerFiltrosDoPainel();
+        aplicarBuscaEstoque();
+      });
+    });
+
+    if (btnLimpar) {
+      btnLimpar.addEventListener('click', () => {
+        limparFiltros();
+      });
+    }
+
+    // garante opções preenchidas assim que o store carregar
+    iniciarPollFiltros();
+  }
+
+  document.addEventListener('DOMContentLoaded', () => {
+    trocarAba('estoque');
+    initBuscaEFiltroEstoque();
+  });
+</script>

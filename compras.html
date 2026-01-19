@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <base target="_top">
+  </head>
+  <body>
+
+    <h1>Compras</h1>
+
+    <!-- Lista visual -->
+    <div id="listaCompras">
+      <div class="card">
+        <strong>Compra exemplo</strong><br>
+        Fornecedor X<br>
+        R$ 1.234,00
+      </div>
+
+      <div class="card">
+        <strong>Outra compra</strong><br>
+        Fornecedor Y<br>
+        R$ 567,00
+      </div>
+    </div>
+
+    <!-- Barra inferior -->
+    <div style="
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      padding: 12px;
+      background: #fff;
+      border-top: 1px solid #ddd;
+      text-align: center;
+    ">
+      <button onclick="abrirFormularioCompra()">+ Nova Compra</button>
+    </div>
+
+    <!-- Formulário (visual only) -->
+    <div id="formularioCompra" style="display:none; margin-top:32px;">
+      <h2>Nova Compra</h2>
+
+      <input placeholder="Fornecedor">
+      <input placeholder="Descrição">
+      <input type="number" placeholder="Valor total">
+      <input type="date">
+
+      <button>Salvar</button>
+      <button onclick="fecharFormularioCompra()">Cancelar</button>
+    </div>
+
+  </body>
+</html>

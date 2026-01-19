@@ -1,0 +1,42 @@
+<h1>Estoque</h1>
+
+<div id="lista"></div>
+
+<div id="formulario" class="form-modal" style="display:none; margin-top:32px;">
+  <h2 id="formTitulo">Novo Item</h2>
+
+  <!-- Tipo -->
+  <select id="tipo" onchange="EstoqueUI.handleTipoChange()"></select>
+
+  <!-- Item -->
+  <input id="item" placeholder="Item">
+
+  <!-- Quantidade -->
+  <input id="quantidade" type="number" placeholder="Quantidade">
+
+  <!-- Unidade -->
+  <select id="unidade"></select>
+
+  <!-- Categoria -->
+  <input id="categoria" placeholder="Categoria">
+
+  <!-- Fornecedor -->
+  <input id="fornecedor" placeholder="Fornecedor">
+
+  <!-- Valor unitário -->
+  <input id="valor_unit" type="number" placeholder="Valor unitário">
+
+  <!-- Observação -->
+  <textarea id="observacao" placeholder="Observação"></textarea>
+
+  <!-- Campos específicos de equipamento -->
+  <div id="equipamentoFields" class="hidden">
+    <input id="potencia" placeholder="Potência">
+    <input id="voltagem" placeholder="Voltagem">
+    <input id="comprado_em" type="date">
+    <input id="vida_util_mes" type="number" placeholder="Vida útil (meses)">
+  </div>
+
+  <button onclick="EstoqueController.salvar()">Salvar</button>
+  <button onclick="EstoqueUI.fecharFormulario()">Cancelar</button>
+</div>

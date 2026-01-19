@@ -1,0 +1,356 @@
+<script>
+  window.EstoqueUI = (() => {
+    let cardAberto = null;
+    let delegationInit = false;
+
+    /* =========================
+       HELPERS
+    ========================== */
+    function el() {
+      return {
+        formulario: document.getElementById('formulario'),
+        lista: document.getElementById('lista'),
+
+        // Form
+        tipo: document.getElementById('tipo'),
+        item: document.getElementById('item'),
+        quantidade: document.getElementById('quantidade'),
+        unidade: document.getElementById('unidade'),
+        categoria: document.getElementById('categoria'),
+        fornecedor: document.getElementById('fornecedor'),
+        valor_unit: document.getElementById('valor_unit'),
+        observacao: document.getElementById('observacao'),
+
+        potencia: document.getElementById('potencia'),
+        voltagem: document.getElementById('voltagem'),
+        comprado_em: document.getElementById('comprado_em'),
+        vida_util_mes: document.getElementById('vida_util_mes'),
+
+        equipamentoFields: document.getElementById('equipamentoFields'),
+        formTitulo: document.getElementById('formTitulo'),
+
+        // Painel de filtro (inline)
+        filtroTipo: document.getElementById('filtroTipo'),
+        filtroCategoria: document.getElementById('filtroCategoria')
+      };
+    }
+
+    function limparVazios(lista) {
+      return (Array.isArray(lista) ? lista : [])
+        .map(v => (v ?? '').toString().trim())
+        .filter(v => v !== '');
+    }
+
+    /* =========================
+       FORMULÁRIO
+    ========================== */
+    function abrirFormularioNovo() {
+      resetFormulario();
+      mostrarFormulario();
+    }
+
+    function mostrarFormulario() {
+      const { formulario } = el();
+      if (!formulario) return;
+
+      formulario.style.display = 'block';
+
+      requestAnimationFrame(() => {
+        formulario.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
+    }
+
+    function fecharFormulario() {
+      const { formulario } = el();
+      if (!formulario) return;
+
+      formulario.style.display = 'none';
+      resetFormulario();
+
+      if (window.EstoqueController) {
+        EstoqueController.limparEdicao();
+      }
+    }
+
+    function preencherFormulario(data) {
+      const f = el();
+      console.log('DATA EDITAR:', data);
+
+      // selects JÁ carregados (controller chama render*)
+      if (f.tipo) f.tipo.value = data.tipo || '';
+      if (f.unidade) f.unidade.value = data.unidade || '';
+
+      if (f.item) f.item.value = data.item || '';
+      if (f.quantidade) f.quantidade.value = data.quantidade || '';
+
+      // categoria/fornecedor podem ser <select> ou <input> dependendo do seu HTML:
+      if (f.categoria) f.categoria.value = data.categoria || '';
+      if (f.fornecedor) f.fornecedor.value = data.fornecedor || '';
+
+      if (f.valor_unit) f.valor_unit.value = data.valor_unit || '';
+      if (f.observacao) f.observacao.value = data.observacao || '';
+
+      if (f.potencia) f.potencia.value = data.potencia || '';
+      if (f.voltagem) f.voltagem.value = data.voltagem || '';
+      if (f.comprado_em) f.comprado_em.value = data.comprado_em || '';
+      if (f.vida_util_mes) f.vida_util_mes.value = data.vida_util_mes || '';
+
+      if (f.formTitulo) f.formTitulo.innerText = 'Editar Item';
+      handleTipoChange();
+    }
+
+    function resetFormulario() {
+      const f = el();
+
+      [
+        f.tipo,
+        f.item,
+        f.quantidade,
+        f.unidade,
+        f.categoria,
+        f.fornecedor,
+        f.valor_unit,
+        f.observacao,
+        f.potencia,
+        f.voltagem,
+        f.comprado_em,
+        f.vida_util_mes
+      ].forEach(i => i && (i.value = ''));
+
+      if (f.equipamentoFields) f.equipamentoFields.classList.add('hidden');
+      if (f.formTitulo) f.formTitulo.innerText = 'Novo Item';
+    }
+
+    function handleTipoChange() {
+      const { tipo, equipamentoFields } = el();
+      if (!tipo || !equipamentoFields) return;
+
+      equipamentoFields.classList.toggle(
+        'hidden',
+        tipo.value !== 'EQUIPAMENTO'
+      );
+    }
+
+    /* =========================
+       SELECTS (RENDER ONLY)
+    ========================== */
+    function renderTipos(lista) {
+      const { tipo } = el();
+      if (!tipo) return;
+
+      const clean = limparVazios(lista);
+
+      tipo.innerHTML = '<option value="">Selecione</option>';
+      clean.forEach(v => {
+        const o = document.createElement('option');
+        o.value = v;
+        o.textContent = v;
+        tipo.appendChild(o);
+      });
+    }
+
+    function renderUnidades(lista) {
+      const { unidade } = el();
+      if (!unidade) return;
+
+      const clean = limparVazios(lista);
+
+      unidade.innerHTML = '<option value="">Selecione</option>';
+      clean.forEach(v => {
+        const o = document.createElement('option');
+        o.value = v;
+        o.textContent = v;
+        unidade.appendChild(o);
+      });
+    }
+
+    function renderCategorias(lista) {
+      const { categoria } = el();
+      if (!categoria) return;
+
+      const clean = limparVazios(lista);
+
+      // Se for <select>, preenche opções; se for <input>, não faz nada (só mantém value)
+      if (categoria.tagName === 'SELECT') {
+        categoria.innerHTML = '<option value="">Selecione</option>';
+        clean.forEach(v => {
+          const o = document.createElement('option');
+          o.value = v;
+          o.textContent = v;
+          categoria.appendChild(o);
+        });
+      }
+    }
+
+    function renderFornecedores(lista) {
+      const { fornecedor } = el();
+      if (!fornecedor) return;
+
+      const clean = limparVazios(lista);
+
+      if (fornecedor.tagName === 'SELECT') {
+        fornecedor.innerHTML = '<option value="">Selecione</option>';
+        clean.forEach(v => {
+          const o = document.createElement('option');
+          o.value = v;
+          o.textContent = v;
+          fornecedor.appendChild(o);
+        });
+      }
+    }
+
+    /* =========================
+       SELECTS DO PAINEL DE FILTRO
+       (NOVO — NÃO AFETA O FORM)
+    ========================== */
+    function renderFiltroTipos(lista) {
+      const { filtroTipo } = el();
+      if (!filtroTipo) return;
+
+      const clean = limparVazios(lista);
+
+      filtroTipo.innerHTML = '<option value="">Tipo (todos)</option>';
+      clean.forEach(v => {
+        const o = document.createElement('option');
+        o.value = v;
+        o.textContent = v;
+        filtroTipo.appendChild(o);
+      });
+    }
+
+    function renderFiltroCategorias(lista) {
+      const { filtroCategoria } = el();
+      if (!filtroCategoria) return;
+
+      const clean = limparVazios(lista);
+
+      filtroCategoria.innerHTML = '<option value="">Categoria (todas)</option>';
+      clean.forEach(v => {
+        const o = document.createElement('option');
+        o.value = v;
+        o.textContent = v;
+        filtroCategoria.appendChild(o);
+      });
+    }
+
+    /* =========================
+       LISTA + CARDS
+    ========================== */
+    function renderLista(itens) {
+      const { lista } = el();
+      if (!lista) return;
+
+      lista.innerHTML = '';
+
+      if (!Array.isArray(itens) || itens.length === 0) {
+        lista.innerHTML = '<p>Nenhum item no estoque.</p>';
+        return;
+      }
+
+      itens.forEach(i => {
+        const div = document.createElement('div');
+        div.className = 'card';
+        div.dataset.id = i.ID;
+
+        div.innerHTML = `
+          <div class="card-resumo">
+            <strong>${i.item}</strong><br>
+            ${i.tipo} • ${i.categoria || '-'}<br>
+            ${i.quantidade || 0} ${i.unidade || ''}
+          </div>
+
+          <button class="ver-mais">Ver mais</button>
+
+          <div class="card-detalhes">
+            <button class="fechar-card">✕</button>
+
+            <p><b>Fornecedor:</b> ${i.fornecedor || '-'}</p>
+            <p><b>Valor unitário:</b> R$ ${Number(i.valor_unit || 0).toFixed(2)}</p>
+            <p><b>Observação:</b> ${i.observacao || '-'}</p>
+
+            ${i.tipo === 'EQUIPAMENTO' ? `
+              <p><b>Potência:</b> ${i.potencia || '-'}</p>
+              <p><b>Voltagem:</b> ${i.voltagem || '-'}</p>
+            ` : ''}
+
+            <div class="acoes">
+              <button onclick="EstoqueController.editar('${i.ID}')">✏️ Editar</button>
+              <button onclick="EstoqueController.excluir('${i.ID}')">🗑️ Excluir</button>
+            </div>
+          </div>
+        `;
+
+        lista.appendChild(div);
+      });
+
+      initDelegation();
+    }
+
+    /* =========================
+       EVENT DELEGATION (CORE)
+    ========================== */
+    function initDelegation() {
+      if (delegationInit) return;
+      delegationInit = true;
+
+      document.addEventListener('click', e => {
+        const card = e.target.closest('.card');
+
+        if (e.target.classList.contains('ver-mais')) {
+          e.stopPropagation();
+          abrirCard(card);
+          return;
+        }
+
+        if (e.target.classList.contains('fechar-card')) {
+          e.stopPropagation();
+          fecharCard();
+          return;
+        }
+
+        if (cardAberto && !cardAberto.contains(e.target)) {
+          fecharCard();
+        }
+      });
+    }
+
+    function abrirCard(card) {
+      if (!card) return;
+
+      if (cardAberto && cardAberto !== card) {
+        fecharCard();
+      }
+      card.classList.add('aberto');
+      cardAberto = card;
+    }
+
+    function fecharCard() {
+      if (!cardAberto) return;
+      cardAberto.classList.remove('aberto');
+      cardAberto = null;
+    }
+
+    /* =========================
+       API PÚBLICA
+    ========================== */
+    return {
+      abrirFormularioNovo,
+      mostrarFormulario,
+      fecharFormulario,
+      preencherFormulario,
+      resetFormulario,
+      handleTipoChange,
+      renderLista,
+
+      renderTipos,
+      renderUnidades,
+      renderCategorias,
+      renderFornecedores,
+
+      // ✅ novos (painel)
+      renderFiltroTipos,
+      renderFiltroCategorias
+    };
+
+  })();
+</script>

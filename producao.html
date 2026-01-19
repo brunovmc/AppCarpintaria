@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <base target="_top">
+  </head>
+  <body>
+
+    <h1>Produção</h1>
+
+    <!-- Lista visual -->
+    <div id="listaProducao">
+      <div class="card">
+        <strong>Banquinho Redondo</strong><br>
+        Em produção<br>
+        3 unidades
+      </div>
+
+      <div class="card">
+        <strong>Mesa Zizu</strong><br>
+        Finalizado<br>
+        1 unidade
+      </div>
+    </div>
+
+    <!-- Barra inferior -->
+    <div style="
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      padding: 12px;
+      background: #fff;
+      border-top: 1px solid #ddd;
+      text-align: center;
+    ">
+      <button onclick="abrirFormularioProducao()">+ Nova Produção</button>
+    </div>
+
+    <!-- Formulário (visual only) -->
+    <div id="formularioProducao" style="display:none; margin-top:32px;">
+      <h2>Nova Produção</h2>
+
+      <input placeholder="Produto">
+      <input type="number" placeholder="Quantidade">
+      <select>
+        <option>Status</option>
+        <option>Planejado</option>
+        <option>Em produção</option>
+        <option>Finalizado</option>
+      </select>
+      <input type="date">
+
+      <button>Salvar</button>
+      <button onclick="fecharFormularioProducao()">Cancelar</button>
+    </div>
+
+  </body>
+</html>

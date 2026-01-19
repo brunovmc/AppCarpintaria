@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <base target="_top">
+  </head>
+  <body>
+    <script>
+
+      /*
+        producaoScripts.html
+        --------------------
+        Script exclusivo da aba Produção.
+        Por enquanto apenas controle visual.
+      */
+
+      function abrirFormularioProducao() {
+        document.getElementById('formularioProducao').style.display = 'block';
+        document.getElementById('formularioProducao')
+          .scrollIntoView({ behavior: 'smooth' });
+      }
+
+      function fecharFormularioProducao() {
+        document.getElementById('formularioProducao').style.display = 'none';
+      }
+
+    </script>
+  </body>
+</html>
