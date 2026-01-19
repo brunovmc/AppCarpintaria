@@ -1,6 +1,5 @@
 <script>
   window.EstoqueStore = (() => {
-
     let itens = [];
     let carregado = false;
 
@@ -34,21 +33,21 @@
     }
 
     function update(id, dados) {
-      const idx = itens.findIndex(i => i.ID === id);
+      const idx = itens.findIndex((i) => i.ID === id);
       if (idx === -1) return;
 
       itens[idx] = {
         ...itens[idx],
-        ...dados
+        ...dados,
       };
     }
 
     function remove(id) {
-      itens = itens.filter(i => i.ID !== id);
+      itens = itens.filter((i) => i.ID !== id);
     }
 
     function getById(id) {
-      return itens.find(i => i.ID === id) || null;
+      return itens.find((i) => i.ID === id) || null;
     }
 
     /* =========================
@@ -59,22 +58,24 @@
 
       if (texto) {
         const t = texto.toLowerCase();
-        resultado = resultado.filter(i =>
-          (i.item || '').toLowerCase().includes(t) ||
-          (i.fornecedor || '').toLowerCase().includes(t)
+        const toText = (v) => String(v ?? "");
+        resultado = resultado.filter(
+          (i) =>
+            toText(i.item).toLowerCase().includes(t) ||
+            toText(i.fornecedor).toLowerCase().includes(t),
         );
       }
 
       if (tipo) {
-        resultado = resultado.filter(i => i.tipo === tipo);
+        resultado = resultado.filter((i) => i.tipo === tipo);
       }
 
       if (unidade) {
-        resultado = resultado.filter(i => i.unidade === unidade);
+        resultado = resultado.filter((i) => i.unidade === unidade);
       }
 
       if (categoria) {
-        resultado = resultado.filter(i => i.categoria === categoria);
+        resultado = resultado.filter((i) => i.categoria === categoria);
       }
 
       return resultado;
@@ -94,8 +95,7 @@
       remove,
       getById,
 
-      filter
+      filter,
     };
-
   })();
 </script>
