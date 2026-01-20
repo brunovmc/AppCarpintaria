@@ -37,6 +37,14 @@ const PRODUCAO_CONSUMO_SCHEMA = [
   'ativo'
 ];
 
+function formatDateSafe(value, pattern) {
+  if (!value) return '';
+  const dt = value instanceof Date ? value : new Date(value);
+  if (!(dt instanceof Date) || isNaN(dt)) return '';
+  const fmt = pattern || 'yyyy-MM-dd';
+  return Utilities.formatDate(dt, Session.getScriptTimeZone(), fmt);
+}
+
 function listarProducao() {
   const sheet = SpreadsheetApp.getActive().getSheetByName(ABA_PRODUCAO);
   if (!sheet) return [];
@@ -56,8 +64,13 @@ function listarProducao() {
   etapasRows
     .filter(i => String(i.ativo).toLowerCase() === 'true')
     .forEach(e => {
-      if (!etapasMap[e.producao_id]) etapasMap[e.producao_id] = [];
-      etapasMap[e.producao_id].push(e);
+      const etapa = {
+        ...e,
+        feito: String(e.feito).toLowerCase() === 'true',
+        data_feito: formatDateSafe(e.data_feito, 'yyyy-MM-dd')
+      };
+      if (!etapasMap[etapa.producao_id]) etapasMap[etapa.producao_id] = [];
+      etapasMap[etapa.producao_id].push(etapa);
     });
 
   Object.keys(etapasMap).forEach(id => {
@@ -75,16 +88,16 @@ function listarProducao() {
         unidade_produto: prod.unidade_produto || '',
         qtd_planejada: parseNumeroBR(i.qtd_planejada),
         criado_em: i.criado_em
-          ? Utilities.formatDate(new Date(i.criado_em), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm')
+          ? formatDateSafe(i.criado_em, 'yyyy-MM-dd HH:mm')
           : '',
         data_inicio: i.data_inicio
-          ? Utilities.formatDate(new Date(i.data_inicio), Session.getScriptTimeZone(), 'yyyy-MM-dd')
+          ? formatDateSafe(i.data_inicio, 'yyyy-MM-dd')
           : '',
         data_prevista_termino: i.data_prevista_termino
-          ? Utilities.formatDate(new Date(i.data_prevista_termino), Session.getScriptTimeZone(), 'yyyy-MM-dd')
+          ? formatDateSafe(i.data_prevista_termino, 'yyyy-MM-dd')
           : '',
         data_conclusao: i.data_conclusao
-          ? Utilities.formatDate(new Date(i.data_conclusao), Session.getScriptTimeZone(), 'yyyy-MM-dd')
+          ? formatDateSafe(i.data_conclusao, 'yyyy-MM-dd')
           : '',
         etapas: etapasMap[i.producao_id] || []
       };
@@ -170,6 +183,11 @@ function listarEtapasProducao(producaoId) {
   return rows
     .filter(i => String(i.ativo).toLowerCase() === 'true')
     .filter(i => i.producao_id === producaoId)
+    .map(i => ({
+      ...i,
+      feito: String(i.feito).toLowerCase() === 'true',
+      data_feito: formatDateSafe(i.data_feito, 'yyyy-MM-dd')
+    }))
     .sort((a, b) => parseNumeroBR(a.ordem) - parseNumeroBR(b.ordem));
 }
 
