@@ -1,0 +1,391 @@
+<script>
+  window.ProdutosController = (() => {
+
+    let editandoId = null;
+    let iniciado = false;
+
+    let estoqueOpcoes = [];
+
+    function init() {
+      if (iniciado) return;
+
+      carregarEstoqueOpcoes();
+      carregarProdutos();
+
+      iniciado = true;
+    }
+
+    function atualizarOpcoesComposicao() {
+      if (!window.ProdutosUI || !window.ProdutosStore) return;
+      const produtos = ProdutosStore.get();
+      ProdutosUI.setOpcoesComposicao({
+        estoque: estoqueOpcoes,
+        produtos
+      });
+    }
+
+    function renderListaAtual() {
+      if (window.aplicarBuscaProdutos) {
+        aplicarBuscaProdutos();
+        return;
+      }
+      ProdutosUI.renderLista(ProdutosStore.get());
+    }
+
+    function carregarEstoqueOpcoes() {
+      google.script.run
+        .withSuccessHandler(lista => {
+          estoqueOpcoes = Array.isArray(lista) ? lista : [];
+          atualizarOpcoesComposicao();
+        })
+        .listarEstoque();
+    }
+
+    function carregarProdutos() {
+      google.script.run
+        .withSuccessHandler(lista => {
+          ProdutosStore.set(lista);
+          atualizarOpcoesComposicao();
+          renderListaAtual();
+        })
+        .listarProdutos();
+    }
+
+    function salvar() {
+      const get = id => document.getElementById(id)?.value || '';
+
+      const dados = {
+        nome_produto: get('produtoNome'),
+        descricao: get('produtoDescricao'),
+        observacao: get('produtoObservacao')
+      };
+
+      if (editandoId) {
+        const idAtual = editandoId;
+        const snapshot = { ...ProdutosStore.getById(idAtual) };
+
+        ProdutosStore.update(idAtual, dados);
+        renderListaAtual();
+        finalizarUX();
+
+        google.script.run
+          .withFailureHandler(() => {
+            ProdutosStore.update(idAtual, snapshot);
+            renderListaAtual();
+            mostrarToast('Erro ao salvar edicao', 'erro');
+          })
+          .withSuccessHandler(() => {
+            atualizarOpcoesComposicao();
+            mostrarToast('Salvo com sucesso');
+          })
+          .atualizarProduto(idAtual, dados);
+
+        editandoId = null;
+        return;
+      }
+
+      const tempId = `tmp_${Date.now()}`;
+
+      const itemTemp = {
+        produto_id: tempId,
+        custo_previsto: 0,
+        ...dados
+      };
+
+      ProdutosStore.add(itemTemp);
+      renderListaAtual();
+      finalizarUX();
+      mostrarToast('Salvando...');
+
+      google.script.run
+        .withFailureHandler(() => {
+          ProdutosStore.remove(tempId);
+          renderListaAtual();
+          mostrarToast('Erro ao salvar produto', 'erro');
+        })
+        .withSuccessHandler(itemSalvo => {
+          ProdutosStore.remove(tempId);
+
+          if (!itemSalvo || !itemSalvo.produto_id) {
+            mostrarToast('Salvo. Atualizando lista...');
+            carregarProdutos();
+            return;
+          }
+
+          ProdutosStore.add({
+            ...itemSalvo,
+            custo_previsto: itemSalvo.custo_previsto || 0
+          });
+          atualizarOpcoesComposicao();
+          renderListaAtual();
+          mostrarToast('Salvo com sucesso');
+        })
+        .criarProduto(dados);
+    }
+
+    function finalizarUX() {
+      ProdutosUI.fecharFormulario();
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    function editar(id) {
+      const item = ProdutosStore.getById(id);
+
+      if (!item) {
+        mostrarToast('Produto nao encontrado', 'erro');
+        return;
+      }
+
+      editandoId = id;
+      ProdutosUI.preencherFormulario(item);
+      ProdutosUI.mostrarFormulario();
+    }
+
+    function excluir(id) {
+      if (!confirm('Deseja remover este produto?')) return;
+
+      const snapshot = ProdutosStore.getById(id);
+
+      ProdutosStore.remove(id);
+      renderListaAtual();
+      mostrarToast('Produto removido');
+
+      google.script.run
+        .withFailureHandler(() => {
+          ProdutosStore.add(snapshot);
+          renderListaAtual();
+          mostrarToast('Erro ao remover', 'erro');
+        })
+        .withSuccessHandler(() => {
+          atualizarOpcoesComposicao();
+        })
+        .deletarProduto(id);
+    }
+
+    function carregarComposicao(produtoId, forcar = false) {
+      const item = ProdutosStore.getById(produtoId);
+      if (!item) return;
+
+      if (item.composicaoCarregada && !forcar) return;
+
+      google.script.run
+        .withSuccessHandler(linhas => {
+          ProdutosStore.update(produtoId, {
+            composicao: Array.isArray(linhas) ? linhas : [],
+            composicaoCarregada: true
+          });
+          renderListaAtual();
+        })
+        .withFailureHandler(() => {
+          mostrarToast('Erro ao carregar composicao', 'erro');
+        })
+        .listarComposicaoProduto(produtoId);
+    }
+
+    function validarLinhaComposicao(produtoId, linha) {
+      const tipo = String(linha.tipo_item || '').trim().toUpperCase();
+      const itemId = String(linha.item_id || '').trim();
+      const quantidadeRaw = String(linha.quantidade || '').trim();
+
+      if (!tipo || !itemId) return 'Informe tipo e item';
+      if (tipo !== 'ESTOQUE' && tipo !== 'PRODUTO') return 'Tipo invalido';
+      if (tipo === 'PRODUTO' && itemId === produtoId) return 'Produto nao pode referenciar ele mesmo';
+
+      const qtd = Number(quantidadeRaw.replace(',', '.'));
+      if (!quantidadeRaw || isNaN(qtd) || qtd <= 0) return 'Quantidade invalida';
+
+      return '';
+    }
+
+    function garantirComposicaoCarregada(produtoId) {
+      const item = ProdutosStore.getById(produtoId);
+      if (!item) return false;
+
+      if (!item.composicaoCarregada) {
+        mostrarToast('Carregue a composicao antes de editar', 'erro');
+        carregarComposicao(produtoId, true);
+        return false;
+      }
+
+      return true;
+    }
+
+    function adicionarComposicaoItem(produtoId, linha) {
+      const item = ProdutosStore.getById(produtoId);
+      if (!item) return;
+
+      if (!garantirComposicaoCarregada(produtoId)) return;
+
+      const erro = validarLinhaComposicao(produtoId, linha);
+      if (erro) {
+        mostrarToast(erro, 'erro');
+        return;
+      }
+
+      const snapshot = { ...item };
+      const composicao = Array.isArray(item.composicao) ? [...item.composicao] : [];
+
+      composicao.push({
+        id: `tmp_${Date.now()}`,
+        tipo_item: String(linha.tipo_item || '').trim().toUpperCase(),
+        item_id: linha.item_id,
+        quantidade: linha.quantidade,
+        unidade: linha.unidade || '',
+        observacao: linha.observacao || ''
+      });
+
+      ProdutosStore.update(produtoId, { composicao, composicaoCarregada: true });
+      renderListaAtual();
+      salvarComposicao(produtoId, snapshot);
+    }
+
+    function iniciarEdicaoComposicao(produtoId, compId) {
+      const item = ProdutosStore.getById(produtoId);
+      if (!item) return;
+
+      if (!garantirComposicaoCarregada(produtoId)) return;
+
+      const composicao = Array.isArray(item.composicao) ? [...item.composicao] : [];
+      const idx = composicao.findIndex(c => c.id === compId);
+      if (idx === -1) return;
+
+      composicao[idx] = { ...composicao[idx], _editing: true };
+      ProdutosStore.update(produtoId, { composicao });
+      renderListaAtual();
+    }
+
+    function cancelarEdicaoComposicao(produtoId, compId) {
+      const item = ProdutosStore.getById(produtoId);
+      if (!item) return;
+
+      if (!garantirComposicaoCarregada(produtoId)) return;
+
+      const composicao = Array.isArray(item.composicao) ? [...item.composicao] : [];
+      const idx = composicao.findIndex(c => c.id === compId);
+      if (idx === -1) return;
+
+      composicao[idx] = { ...composicao[idx], _editing: false };
+      ProdutosStore.update(produtoId, { composicao });
+      renderListaAtual();
+    }
+
+    function salvarEdicaoComposicao(produtoId, compId, linha) {
+      const item = ProdutosStore.getById(produtoId);
+      if (!item) return;
+
+      if (!garantirComposicaoCarregada(produtoId)) return;
+
+      const erro = validarLinhaComposicao(produtoId, linha);
+      if (erro) {
+        mostrarToast(erro, 'erro');
+        return;
+      }
+
+      const snapshot = { ...item };
+      const composicao = Array.isArray(item.composicao) ? [...item.composicao] : [];
+      const idx = composicao.findIndex(c => c.id === compId);
+      if (idx === -1) return;
+
+      composicao[idx] = {
+        ...composicao[idx],
+        tipo_item: String(linha.tipo_item || '').trim().toUpperCase(),
+        item_id: linha.item_id,
+        quantidade: linha.quantidade,
+        unidade: linha.unidade || '',
+        observacao: linha.observacao || '',
+        _editing: false
+      };
+
+      ProdutosStore.update(produtoId, { composicao });
+      renderListaAtual();
+      salvarComposicao(produtoId, snapshot);
+    }
+
+    function removerComposicaoItem(produtoId, compId) {
+      if (!confirm('Deseja remover este item da composicao?')) return;
+
+      const item = ProdutosStore.getById(produtoId);
+      if (!item) return;
+
+      if (!garantirComposicaoCarregada(produtoId)) return;
+
+      const snapshot = { ...item };
+      const composicao = Array.isArray(item.composicao) ? [...item.composicao] : [];
+      const novaComposicao = composicao.filter(c => c.id !== compId);
+
+      ProdutosStore.update(produtoId, { composicao: novaComposicao });
+      renderListaAtual();
+      salvarComposicao(produtoId, snapshot);
+    }
+
+    function salvarComposicao(produtoId, snapshot) {
+      const item = ProdutosStore.getById(produtoId);
+      if (!item) return;
+
+      if (!garantirComposicaoCarregada(produtoId)) return;
+
+      const linhas = (Array.isArray(item.composicao) ? item.composicao : [])
+        .map(l => ({
+          tipo_item: String(l.tipo_item || '').trim().toUpperCase(),
+          item_id: l.item_id,
+          quantidade: l.quantidade,
+          unidade: l.unidade || '',
+          observacao: l.observacao || ''
+        }))
+        .filter(l => l.tipo_item && l.item_id);
+
+      google.script.run
+        .withFailureHandler(() => {
+          if (snapshot) {
+            ProdutosStore.update(produtoId, snapshot);
+            renderListaAtual();
+          }
+          mostrarToast('Erro ao salvar composicao', 'erro');
+        })
+        .withSuccessHandler(() => {
+          carregarComposicao(produtoId, true);
+          recalcularCusto(produtoId);
+          mostrarToast('Composicao salva');
+        })
+        .salvarComposicaoProduto(produtoId, linhas);
+    }
+
+    function recalcularCusto(produtoId) {
+      google.script.run
+        .withFailureHandler(() => {
+          mostrarToast('Erro ao recalcular custo', 'erro');
+        })
+        .withSuccessHandler(custo => {
+          ProdutosStore.update(produtoId, {
+            custo_previsto: Number(custo) || 0,
+            custo_erro: ''
+          });
+          renderListaAtual();
+        })
+        .calcularCustoProduto(produtoId);
+    }
+
+    function limparEdicao() {
+      editandoId = null;
+    }
+
+    return {
+      init,
+      salvar,
+      editar,
+      excluir,
+
+      carregarComposicao,
+      adicionarComposicaoItem,
+      iniciarEdicaoComposicao,
+      cancelarEdicaoComposicao,
+      salvarEdicaoComposicao,
+      removerComposicaoItem,
+      salvarComposicao,
+      recalcularCusto,
+
+      limparEdicao
+    };
+
+  })();
+</script>

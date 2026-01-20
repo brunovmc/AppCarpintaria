@@ -264,6 +264,51 @@ textarea {
   white-space: nowrap;
 }
 
+.linha-composicao,
+.linha-composicao-edit,
+.linha-composicao-add {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+.comp-info {
+  flex: 1;
+  min-width: 160px;
+}
+
+.comp-meta {
+  font-size: 12px;
+  color: #666;
+}
+
+.comp-acoes {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.linha-composicao-add select,
+.linha-composicao-add input,
+.linha-composicao-edit select,
+.linha-composicao-edit input {
+  flex: 1 1 120px;
+  min-width: 0;
+  margin-bottom: 0;
+}
+
+.linha-composicao-add button,
+.linha-composicao-edit button,
+.comp-acoes button {
+  width: auto;
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 8px 12px;
+  white-space: nowrap;
+}
+
 .modal {
   position: fixed;
   top: 0;

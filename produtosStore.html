@@ -1,0 +1,90 @@
+<script>
+  window.ProdutosStore = (() => {
+
+    let itens = [];
+    let carregado = false;
+
+    /* =========================
+       BASICO
+    ========================== */
+    function set(lista) {
+      itens = Array.isArray(lista) ? [...lista] : [];
+      carregado = true;
+    }
+
+    function get() {
+      return [...itens];
+    }
+
+    function isLoaded() {
+      return carregado;
+    }
+
+    function clear() {
+      itens = [];
+      carregado = false;
+    }
+
+    /* =========================
+       CRUD LOCAL
+    ========================== */
+    function add(item) {
+      if (!item || !item.produto_id) return;
+      itens.unshift(item);
+    }
+
+    function update(id, dados) {
+      const idx = itens.findIndex(i => i.produto_id === id);
+      if (idx === -1) return;
+
+      itens[idx] = {
+        ...itens[idx],
+        ...dados
+      };
+    }
+
+    function remove(id) {
+      itens = itens.filter(i => i.produto_id !== id);
+    }
+
+    function getById(id) {
+      return itens.find(i => i.produto_id === id) || null;
+    }
+
+    /* =========================
+       FILTROS
+    ========================== */
+    function filter({ texto } = {}) {
+      let resultado = [...itens];
+
+      if (texto) {
+        const t = texto.toLowerCase();
+        const toText = v => String(v ?? '');
+        resultado = resultado.filter(i =>
+          toText(i.nome_produto).toLowerCase().includes(t) ||
+          toText(i.descricao).toLowerCase().includes(t)
+        );
+      }
+
+      return resultado;
+    }
+
+    /* =========================
+       API PUBLICA
+    ========================== */
+    return {
+      set,
+      get,
+      isLoaded,
+      clear,
+
+      add,
+      update,
+      remove,
+      getById,
+
+      filter
+    };
+
+  })();
+</script>

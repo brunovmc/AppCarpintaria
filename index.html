@@ -14,6 +14,7 @@
     <div class="navbar">
       <button onclick="trocarAba('estoque')">Estoque</button>
       <button onclick="trocarAba('compras')">Compras</button>
+      <button onclick="trocarAba('produtos')">Produtos</button>
       <button onclick="trocarAba('producao')">Produção</button>
     </div>
 
@@ -62,6 +63,12 @@
       <button id="btnLimparFiltrosCompras" type="button">Limpar filtros</button>
     </div>
 
+    <!-- BUSCA (PRODUTOS) -->
+    <div id="topBarProdutos" class="top-bar hidden">
+      <input id="buscaProdutos" type="text" placeholder="Buscar...">
+      <button id="btnFiltroProdutos" type="button">Filtrar</button>
+    </div>
+
     <!-- ABAS -->
     <div id="aba-estoque" class="aba">
       <?!= include('estoque'); ?>
@@ -69,6 +76,10 @@
 
     <div id="aba-compras" class="aba hidden">
       <?!= include('compras'); ?>
+    </div>
+
+    <div id="aba-produtos" class="aba hidden">
+      <?!= include('produtos'); ?>
     </div>
 
     <div id="aba-producao" class="aba hidden">
@@ -91,6 +102,11 @@
     <?!= include('comprasStore'); ?>
     <?!= include('comprasUI'); ?>
     <?!= include('comprasController'); ?>
+
+    <?!= include('produtosStore'); ?>
+    <?!= include('produtosUI'); ?>
+    <?!= include('produtosController'); ?>
+
     <?!= include('producaoStore'); ?>
     <?!= include('producaoUI'); ?>
     <?!= include('producaoController'); ?>

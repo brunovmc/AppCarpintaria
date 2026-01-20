@@ -1,0 +1,14 @@
+<h1>Produtos</h1>
+
+<div id="listaProdutos"></div>
+
+<div id="formularioProduto" class="form-modal" style="display:none; margin-top:32px;">
+  <h2 id="produtoFormTitulo">Novo Produto</h2>
+
+  <input id="produtoNome" placeholder="Nome">
+  <input id="produtoDescricao" placeholder="Descricao">
+  <textarea id="produtoObservacao" placeholder="Observacao"></textarea>
+
+  <button onclick="ProdutosController.salvar()">Salvar</button>
+  <button onclick="ProdutosUI.fecharFormulario()">Cancelar</button>
+</div>

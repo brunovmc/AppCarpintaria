@@ -20,6 +20,11 @@
       aplicarBuscaCompras();
     }
 
+    if (nome === 'produtos' && window.ProdutosController) {
+      ProdutosController.init();
+      aplicarBuscaProdutos();
+    }
+
     if (nome === 'producao' && window.ProducaoController) {
       ProducaoController.init();
     }
@@ -28,9 +33,11 @@
   function setTopBars(nome) {
     const topEstoque = document.getElementById('topBarEstoque');
     const topCompras = document.getElementById('topBarCompras');
+    const topProdutos = document.getElementById('topBarProdutos');
 
     if (topEstoque) topEstoque.classList.toggle('hidden', nome !== 'estoque');
     if (topCompras) topCompras.classList.toggle('hidden', nome !== 'compras');
+    if (topProdutos) topProdutos.classList.toggle('hidden', nome !== 'produtos');
 
     if (nome !== 'estoque') fecharPainelFiltro();
     if (nome !== 'compras') fecharPainelFiltroCompras();
@@ -51,6 +58,12 @@
         ComprasUI.abrirFormularioNovo();
       } else if (window.ComprasUI?.abrirFormulario) {
         ComprasUI.abrirFormulario();
+      }
+    } else if (abaAtiva.id === 'aba-produtos') {
+      if (window.ProdutosUI?.abrirFormularioNovo) {
+        ProdutosUI.abrirFormularioNovo();
+      } else if (window.ProdutosUI?.abrirFormulario) {
+        ProdutosUI.abrirFormulario();
       }
     } else if (abaAtiva.id === 'aba-producao') {
       if (window.ProducaoUI?.abrirFormularioNovo) {
@@ -93,6 +106,10 @@
     unidade: ''
   };
 
+  const buscaStateProdutos = {
+    texto: ''
+  };
+
   function debounce(fn, delay = 250) {
     let t = null;
     return (...args) => {
@@ -109,6 +126,11 @@
   function comprasEstaAtivo() {
     const abaCompras = document.getElementById('aba-compras');
     return abaCompras && !abaCompras.classList.contains('hidden');
+  }
+
+  function produtosEstaAtivo() {
+    const abaProdutos = document.getElementById('aba-produtos');
+    return abaProdutos && !abaProdutos.classList.contains('hidden');
   }
 
   function lerFiltrosDoPainel() {
@@ -176,6 +198,23 @@
   }
 
   const aplicarBuscaComprasDebounced = debounce(aplicarBuscaCompras, 200);
+
+  function aplicarBuscaProdutos() {
+    if (!produtosEstaAtivo()) return;
+
+    if (!window.ProdutosStore || !window.ProdutosUI) return;
+    if (!ProdutosStore.isLoaded()) return;
+
+    const texto = (buscaStateProdutos.texto || '').trim();
+
+    const lista = ProdutosStore.filter({
+      texto: texto || undefined
+    });
+
+    ProdutosUI.renderLista(lista);
+  }
+
+  const aplicarBuscaProdutosDebounced = debounce(aplicarBuscaProdutos, 200);
 
   /* =========================
      PAINEL DE FILTRO (UI)
@@ -525,9 +564,28 @@
     iniciarPollFiltrosCompras();
   }
 
+  function initBuscaProdutos() {
+    const input = document.getElementById('buscaProdutos');
+    const btnFiltro = document.getElementById('btnFiltroProdutos');
+
+    if (input) {
+      input.addEventListener('input', () => {
+        buscaStateProdutos.texto = input.value || '';
+        aplicarBuscaProdutosDebounced();
+      });
+    }
+
+    if (btnFiltro) {
+      btnFiltro.addEventListener('click', () => {
+        mostrarToast('Filtro avancado em breve');
+      });
+    }
+  }
+
   document.addEventListener('DOMContentLoaded', () => {
     trocarAba('estoque');
     initBuscaEFiltroEstoque();
     initBuscaEFiltroCompras();
+    initBuscaProdutos();
   });
 </script>
