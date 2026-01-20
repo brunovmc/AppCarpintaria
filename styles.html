@@ -158,12 +158,13 @@ textarea {
   overflow: hidden;
   max-height: 0;
   opacity: 0;
-  transition: max-height 0.25s ease, opacity 0.2s ease;
+  transition: opacity 0.2s ease;
 }
 
 .card.aberto .card-detalhes {
-  max-height: 600px; /* suficiente para conteúdo */
+  max-height: 9999px; /* suficiente para conteúdo */
   opacity: 1;
+  overflow: visible;
   margin-top: 12px;
 }
 
@@ -354,6 +355,7 @@ textarea {
 
 .toast.show {
   opacity: 1;
+  overflow: visible;
   transform: translateX(-50%) translateY(-8px);
 }
 

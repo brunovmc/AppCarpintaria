@@ -340,7 +340,7 @@
           e.stopPropagation();
           abrirCard(card);
           if (card && window.ProducaoController) {
-            ProducaoController.carregarMateriaisPrevistos(card.dataset.id);
+            ProducaoController.carregarMateriaisPrevistos(card.dataset.id, true);
           }
           return;
         }

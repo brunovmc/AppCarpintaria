@@ -191,9 +191,9 @@
         .deletarProducao(id);
     }
 
-    function carregarMateriaisPrevistos(id) {
+    function carregarMateriaisPrevistos(id, forcar = false) {
       const item = ProducaoStore.getById(id);
-      if (item && item.materiaisPrevistos) {
+      if (item && item.materiaisPrevistos && !forcar) {
         return;
       }
 

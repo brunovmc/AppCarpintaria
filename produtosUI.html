@@ -258,12 +258,6 @@
                 <input id="${compUnId}" class="comp-unidade" placeholder="Un">
                 <button class="btn-comp-adicionar" data-produto-id="${i.produto_id}">Adicionar</button>
               </div>
-
-              <div class="acoes composicao-acoes">
-                <button class="btn-composicao-carregar" data-produto-id="${i.produto_id}">Editar composicao</button>
-                <button class="btn-composicao-salvar" data-produto-id="${i.produto_id}">Salvar composicao</button>
-                <button class="btn-composicao-recalcular" data-produto-id="${i.produto_id}">Recalcular custo</button>
-              </div>
             </div>
 
             <div class="acoes">
@@ -374,30 +368,6 @@
           const compId = e.target.dataset.compId;
           if (window.ProdutosController) {
             ProdutosController.removerComposicaoItem(produtoId, compId);
-          }
-          return;
-        }
-
-        if (e.target.classList.contains('btn-composicao-carregar')) {
-          const produtoId = e.target.dataset.produtoId;
-          if (window.ProdutosController) {
-            ProdutosController.carregarComposicao(produtoId, true);
-          }
-          return;
-        }
-
-        if (e.target.classList.contains('btn-composicao-salvar')) {
-          const produtoId = e.target.dataset.produtoId;
-          if (window.ProdutosController) {
-            ProdutosController.salvarComposicao(produtoId);
-          }
-          return;
-        }
-
-        if (e.target.classList.contains('btn-composicao-recalcular')) {
-          const produtoId = e.target.dataset.produtoId;
-          if (window.ProdutosController) {
-            ProdutosController.recalcularCusto(produtoId);
           }
           return;
         }
