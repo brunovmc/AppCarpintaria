@@ -177,6 +177,13 @@ function atualizarEtapasProducao(producaoId, etapas) {
   if (!Array.isArray(etapas)) return false;
 
   etapas.forEach(et => {
+    const dataFeito = et.data_feito
+      ? new Date(et.data_feito)
+      : '';
+    const dataFeitoValida = dataFeito instanceof Date && !isNaN(dataFeito)
+      ? dataFeito
+      : '';
+
     if (et.id) {
       updateById(
         ABA_PRODUCAO_ETAPAS,
@@ -186,7 +193,7 @@ function atualizarEtapasProducao(producaoId, etapas) {
           nome_etapa: et.nome_etapa,
           feito: et.feito,
           ordem: et.ordem,
-          data_feito: et.data_feito || ''
+          data_feito: dataFeitoValida
         },
         PRODUCAO_ETAPAS_SCHEMA
       );
@@ -199,13 +206,23 @@ function atualizarEtapasProducao(producaoId, etapas) {
       nome_etapa: et.nome_etapa || '',
       feito: !!et.feito,
       ordem: et.ordem || '',
-      data_feito: et.data_feito || '',
+      data_feito: dataFeitoValida,
       ativo: true
     };
     insert(ABA_PRODUCAO_ETAPAS, novo, PRODUCAO_ETAPAS_SCHEMA);
   });
 
   return true;
+}
+
+function deletarEtapaProducao(id) {
+  return updateById(
+    ABA_PRODUCAO_ETAPAS,
+    'id',
+    id,
+    { ativo: false },
+    PRODUCAO_ETAPAS_SCHEMA
+  );
 }
 
 function obterMateriaisPrevistosProducao(producaoId) {

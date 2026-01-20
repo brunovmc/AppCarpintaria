@@ -142,32 +142,69 @@
         return '<p>Nenhuma etapa cadastrada.</p>';
       }
 
-      return etapas.map(et => `
-        <label class="linha-etapa">
-          <input
-            type="checkbox"
-            class="check-etapa"
-            data-producao-id="${producaoId}"
-            data-etapa-id="${et.id}"
-            ${String(et.feito).toLowerCase() === 'true' ? 'checked' : ''}
-          >
-          <span>${et.nome_etapa || ''}</span>
-        </label>
-      `).join('');
+      return etapas.map(et => {
+        const checked = String(et.feito).toLowerCase() === 'true';
+        const editing = !!et._editing;
+
+        if (editing) {
+          return `
+            <div class="linha-etapa">
+              <input type="checkbox" disabled ${checked ? 'checked' : ''}>
+              <input
+                id="editEtapa_${producaoId}_${et.id}"
+                class="input-etapa-edit"
+                value="${et.nome_etapa || ''}"
+              >
+              <div class="etapa-acoes">
+                <button class="btn-etapa-salvar" data-producao-id="${producaoId}" data-etapa-id="${et.id}">Salvar</button>
+                <button class="btn-etapa-cancelar" data-producao-id="${producaoId}" data-etapa-id="${et.id}">Cancelar</button>
+              </div>
+            </div>
+          `;
+        }
+
+        return `
+          <div class="linha-etapa">
+            <input
+              type="checkbox"
+              class="check-etapa"
+              data-producao-id="${producaoId}"
+              data-etapa-id="${et.id}"
+              ${checked ? 'checked' : ''}
+            >
+            <span class="etapa-nome">${et.nome_etapa || ''}</span>
+            <div class="etapa-acoes">
+              <button class="btn-etapa-editar" data-producao-id="${producaoId}" data-etapa-id="${et.id}">Editar</button>
+              <button class="btn-etapa-deletar" data-producao-id="${producaoId}" data-etapa-id="${et.id}">Excluir</button>
+            </div>
+          </div>
+        `;
+      }).join('');
     }
 
     function renderLista(itens) {
       const { lista } = el();
       if (!lista) return;
 
+      let listaItens = Array.isArray(itens) ? itens : [];
+
+      if (listaItens.length === 0 && window.ProducaoStore && ProducaoStore.isLoaded && ProducaoStore.isLoaded()) {
+        const fallback = ProducaoStore.get();
+        if (Array.isArray(fallback) && fallback.length > 0) {
+          listaItens = fallback;
+        }
+      }
+
+      const abertoId = cardAberto ? cardAberto.dataset.id : null;
+      cardAberto = null;
       lista.innerHTML = '';
 
-      if (!Array.isArray(itens) || itens.length === 0) {
+      if (listaItens.length === 0) {
         lista.innerHTML = '<p>Nenhuma ordem de producao.</p>';
         return;
       }
 
-      itens.forEach(i => {
+      listaItens.forEach(i => {
         const div = document.createElement('div');
         div.className = 'card';
         div.dataset.id = i.producao_id;
@@ -192,6 +229,7 @@
             <p><b>Inicio:</b> ${i.data_inicio || '-'}</p>
             <p><b>Previsto:</b> ${i.data_prevista_termino || '-'}</p>
             <p><b>Custo previsto:</b> R$ ${custoPrevisto}</p>
+            <p><b>Observacao:</b> ${i.observacao || '-'}</p>
 
             <div class="bloco">
               <p><b>Materiais previstos</b></p>
@@ -219,6 +257,13 @@
       });
 
       initDelegation();
+
+      if (abertoId) {
+        const alvo = lista.querySelector(`.card[data-id="${abertoId}"]`);
+        if (alvo) {
+          abrirCard(alvo);
+        }
+      }
     }
 
     /* =========================
@@ -317,9 +362,44 @@
           return;
         }
 
-        if (cardAberto && !cardAberto.contains(e.target)) {
-          fecharCard();
+        if (e.target.classList.contains('btn-etapa-editar')) {
+          const producaoId = e.target.dataset.producaoId;
+          const etapaId = e.target.dataset.etapaId;
+          if (window.ProducaoController) {
+            ProducaoController.iniciarEdicaoEtapa(producaoId, etapaId);
+          }
+          return;
         }
+
+        if (e.target.classList.contains('btn-etapa-cancelar')) {
+          const producaoId = e.target.dataset.producaoId;
+          const etapaId = e.target.dataset.etapaId;
+          if (window.ProducaoController) {
+            ProducaoController.cancelarEdicaoEtapa(producaoId, etapaId);
+          }
+          return;
+        }
+
+        if (e.target.classList.contains('btn-etapa-salvar')) {
+          const producaoId = e.target.dataset.producaoId;
+          const etapaId = e.target.dataset.etapaId;
+          const input = document.getElementById(`editEtapa_${producaoId}_${etapaId}`);
+          const nome = input ? input.value.trim() : '';
+          if (window.ProducaoController) {
+            ProducaoController.salvarEdicaoEtapa(producaoId, etapaId, nome);
+          }
+          return;
+        }
+
+        if (e.target.classList.contains('btn-etapa-deletar')) {
+          const producaoId = e.target.dataset.producaoId;
+          const etapaId = e.target.dataset.etapaId;
+          if (window.ProducaoController) {
+            ProducaoController.deletarEtapa(producaoId, etapaId);
+          }
+          return;
+        }
+
       });
 
       document.addEventListener('change', e => {

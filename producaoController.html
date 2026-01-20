@@ -39,6 +39,30 @@
       ProducaoUI.renderLista(ProducaoStore.get());
     }
 
+    function toDateString(value) {
+      if (!value) return '';
+      if (value instanceof Date) {
+        return value.toISOString().slice(0, 10);
+      }
+      const s = String(value).trim();
+      if (s === '') return '';
+      if (s.includes('T')) return s.split('T')[0];
+      return s.length >= 10 ? s.slice(0, 10) : s;
+    }
+
+    function sanitizeEtapa(et, includeId = true) {
+      const payload = {
+        nome_etapa: String(et.nome_etapa || '').trim(),
+        feito: !!et.feito,
+        ordem: Number(et.ordem) || 0,
+        data_feito: toDateString(et.data_feito)
+      };
+      if (includeId && et.id) {
+        payload.id = String(et.id);
+      }
+      return payload;
+    }
+
     function carregarProdutos() {
       google.script.run
         .withSuccessHandler(lista => {
@@ -253,7 +277,6 @@
       });
 
       ProducaoStore.update(producaoId, { etapas });
-      renderListaAtual();
 
       google.script.run
         .withFailureHandler(() => {
@@ -265,11 +288,12 @@
           refreshEtapas(producaoId);
         })
         .atualizarEtapasProducao(producaoId, [
-          {
+          sanitizeEtapa({
             nome_etapa: nome,
             feito: false,
-            ordem
-          }
+            ordem,
+            data_feito: ''
+          }, false)
         ]);
     }
 
@@ -282,14 +306,27 @@
       if (idx === -1) return;
 
       const snapshot = { ...item };
+      const dataFeito = feito ? toDateString(new Date()) : '';
       etapas[idx] = {
         ...etapas[idx],
         feito: feito,
-        data_feito: feito ? new Date() : ''
+        data_feito: dataFeito
       };
 
       ProducaoStore.update(producaoId, { etapas });
-      renderListaAtual();
+
+      // payload esperado para atualizarEtapasProducao:
+      // { producaoId, etapas: [{ id, nome_etapa, feito, ordem, data_feito }] }
+      const payloadEtapa = sanitizeEtapa({
+        id: etapaId,
+        nome_etapa: etapas[idx].nome_etapa,
+        feito: feito,
+        ordem: etapas[idx].ordem,
+        data_feito: etapas[idx].data_feito
+      }, true);
+
+      console.log('payload etapas:', JSON.stringify({ producaoId, etapas: [payloadEtapa] }));
+      console.log('data_feito type:', typeof payloadEtapa.data_feito, payloadEtapa.data_feito);
 
       google.script.run
         .withFailureHandler(() => {
@@ -300,15 +337,102 @@
         .withSuccessHandler(() => {
           mostrarToast('Etapa atualizada');
         })
+        .atualizarEtapasProducao(producaoId, [payloadEtapa]);
+    }
+
+    function iniciarEdicaoEtapa(producaoId, etapaId) {
+      const item = ProducaoStore.getById(producaoId);
+      if (!item) return;
+
+      const etapas = Array.isArray(item.etapas) ? [...item.etapas] : [];
+      const idx = etapas.findIndex(e => e.id === etapaId);
+      if (idx === -1) return;
+
+      etapas[idx] = { ...etapas[idx], _editing: true };
+      ProducaoStore.update(producaoId, { etapas });
+      renderListaAtual();
+    }
+
+    function cancelarEdicaoEtapa(producaoId, etapaId) {
+      const item = ProducaoStore.getById(producaoId);
+      if (!item) return;
+
+      const etapas = Array.isArray(item.etapas) ? [...item.etapas] : [];
+      const idx = etapas.findIndex(e => e.id === etapaId);
+      if (idx === -1) return;
+
+      etapas[idx] = { ...etapas[idx], _editing: false };
+      ProducaoStore.update(producaoId, { etapas });
+      renderListaAtual();
+    }
+
+    function salvarEdicaoEtapa(producaoId, etapaId, novoNome) {
+      const item = ProducaoStore.getById(producaoId);
+      if (!item) return;
+
+      const nome = String(novoNome || '').trim();
+      if (!nome) {
+        mostrarToast('Nome da etapa vazio', 'erro');
+        return;
+      }
+
+      const snapshot = { ...item };
+      const etapas = Array.isArray(item.etapas) ? [...item.etapas] : [];
+      const idx = etapas.findIndex(e => e.id === etapaId);
+      if (idx === -1) return;
+
+      etapas[idx] = {
+        ...etapas[idx],
+        nome_etapa: nome,
+        _editing: false
+      };
+
+      ProducaoStore.update(producaoId, { etapas });
+      renderListaAtual();
+
+      google.script.run
+        .withFailureHandler(() => {
+          ProducaoStore.update(producaoId, snapshot);
+          renderListaAtual();
+          mostrarToast('Erro ao salvar etapa', 'erro');
+        })
+        .withSuccessHandler(() => {
+          mostrarToast('Etapa atualizada');
+        })
         .atualizarEtapasProducao(producaoId, [
-          {
+          sanitizeEtapa({
             id: etapaId,
-            nome_etapa: etapas[idx].nome_etapa,
-            feito: feito,
+            nome_etapa: nome,
+            feito: etapas[idx].feito,
             ordem: etapas[idx].ordem,
             data_feito: etapas[idx].data_feito
-          }
+          }, true)
         ]);
+    }
+
+    function deletarEtapa(producaoId, etapaId) {
+      if (!confirm('Deseja remover esta etapa?')) return;
+
+      const item = ProducaoStore.getById(producaoId);
+      if (!item) return;
+
+      const snapshot = { ...item };
+      const etapas = Array.isArray(item.etapas) ? [...item.etapas] : [];
+      const novasEtapas = etapas.filter(e => e.id !== etapaId);
+
+      ProducaoStore.update(producaoId, { etapas: novasEtapas });
+      renderListaAtual();
+
+      google.script.run
+        .withFailureHandler(() => {
+          ProducaoStore.update(producaoId, snapshot);
+          renderListaAtual();
+          mostrarToast('Erro ao remover etapa', 'erro');
+        })
+        .withSuccessHandler(() => {
+          mostrarToast('Etapa removida');
+        })
+        .deletarEtapaProducao(etapaId);
     }
 
     function refreshEtapas(producaoId) {
@@ -333,7 +457,11 @@
       adicionarEtapa,
       marcarEtapa,
       carregarMateriaisPrevistos,
-      limparEdicao
+      limparEdicao,
+      iniciarEdicaoEtapa,
+      cancelarEdicaoEtapa,
+      salvarEdicaoEtapa,
+      deletarEtapa
     };
 
   })();

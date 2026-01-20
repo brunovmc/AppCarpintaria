@@ -216,6 +216,34 @@ textarea {
   margin-bottom: 6px;
 }
 
+.linha-etapa input[type="checkbox"] {
+  width: 24px;
+  height: 24px;
+  margin: 0;
+}
+
+.etapa-nome {
+  flex: 1;
+}
+
+.input-etapa-edit {
+  flex: 1;
+  margin-bottom: 0;
+}
+
+.etapa-acoes {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.etapa-acoes button {
+  width: auto;
+  padding: 6px 8px;
+  margin: 0;
+  font-size: 12px;
+}
+
 .linha-etapa-add {
   display: flex;
   gap: 8px;
@@ -224,6 +252,16 @@ textarea {
 
 .linha-etapa-add input {
   flex: 1;
+  min-width: 0;
+  margin-bottom: 0;
+}
+
+.linha-etapa-add button {
+  width: auto;
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 8px 12px;
+  white-space: nowrap;
 }
 
 .modal {
