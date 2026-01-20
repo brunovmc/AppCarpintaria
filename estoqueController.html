@@ -40,9 +40,17 @@
       google.script.run
         .withSuccessHandler(lista => {
           EstoqueStore.set(lista);
-          EstoqueUI.renderLista(EstoqueStore.get());
+          if (typeof aplicarBuscaEstoque === 'function') {
+            aplicarBuscaEstoque();
+          } else {
+            EstoqueUI.renderLista(EstoqueStore.get());
+          }
         })
         .listarEstoque();
+    }
+
+    function syncFromBackend() {
+      carregarEstoque();
     }
 
     function salvar() {
@@ -174,7 +182,8 @@
       salvar,
       editar,
       excluir,
-      limparEdicao
+      limparEdicao,
+      syncFromBackend
     };
 
   })();

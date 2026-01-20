@@ -3,6 +3,7 @@
 
     let editandoId = null;
     let iniciado = false;
+    const adicionandoAoEstoque = new Set();
 
     let validacoes = null;
 
@@ -163,6 +164,7 @@
     }
 
     function adicionarAoEstoque(id) {
+      if (adicionandoAoEstoque.has(id)) return;
       if (!confirm('Adicionar esta compra ao estoque?')) return;
 
       const snapshot = ComprasStore.getById(id);
@@ -171,19 +173,32 @@
         return;
       }
 
+      adicionandoAoEstoque.add(id);
       ComprasStore.remove(id);
       renderListaAtual();
       mostrarToast('Adicionando ao estoque...');
 
       google.script.run
         .withFailureHandler(() => {
+          adicionandoAoEstoque.delete(id);
           ComprasStore.add(snapshot);
           renderListaAtual();
           mostrarToast('Erro ao adicionar ao estoque', 'erro');
         })
         .withSuccessHandler(resp => {
+          adicionandoAoEstoque.delete(id);
           if (resp?.itemEstoqueCriado && window.EstoqueStore) {
-            EstoqueStore.add(resp.itemEstoqueCriado);
+            // Se o estoque ainda nao foi carregado, add nao liga o flag isLoaded.
+            const atual = EstoqueStore.isLoaded() ? EstoqueStore.get() : [];
+            EstoqueStore.set([resp.itemEstoqueCriado, ...atual]);
+            if (typeof aplicarBuscaEstoque === 'function') {
+              aplicarBuscaEstoque();
+            } else if (window.EstoqueUI?.renderLista) {
+              EstoqueUI.renderLista(EstoqueStore.get());
+            }
+          }
+          if (window.EstoqueController?.syncFromBackend) {
+            EstoqueController.syncFromBackend();
           }
           mostrarToast('Adicionado ao estoque');
         })
