@@ -6,13 +6,40 @@
 
     let validacoes = null;
 
+    let destinosProdutos = [];
+    let destinosProducao = [];
+
     function init() {
       if (iniciado) return;
 
       carregarValidacoes();
       carregarEstoque();
+      carregarDestinosAdicao();
 
       iniciado = true;
+    }
+
+
+    function carregarDestinosAdicao() {
+      google.script.run
+        .withSuccessHandler(lista => {
+          destinosProdutos = Array.isArray(lista) ? lista : [];
+          EstoqueUI.setOpcoesAdicao?.({
+            produtos: destinosProdutos,
+            producao: destinosProducao
+          });
+        })
+        .listarProdutos();
+
+      google.script.run
+        .withSuccessHandler(lista => {
+          destinosProducao = Array.isArray(lista) ? lista : [];
+          EstoqueUI.setOpcoesAdicao?.({
+            produtos: destinosProdutos,
+            producao: destinosProducao
+          });
+        })
+        .listarProducao();
     }
 
     function carregarValidacoes() {
@@ -173,6 +200,78 @@
         .deletarItemEstoque(id);
     }
 
+
+    function adicionarMaterialDestino(estoqueId, tipo, destinoId, quantidade) {
+      const tipoUpper = String(tipo || '').trim().toUpperCase();
+      const qtd = Number(String(quantidade || '').replace(',', '.'));
+
+      if (!estoqueId || !tipoUpper || !destinoId) {
+        mostrarToast('Selecione o destino', 'erro');
+        return;
+      }
+
+      if (!qtd || isNaN(qtd) || qtd <= 0) {
+        mostrarToast('Quantidade invalida', 'erro');
+        return;
+      }
+
+      if (tipoUpper === 'PRODUTO') {
+        mostrarToast('Adicionando ao produto...');
+
+        google.script.run
+          .withFailureHandler(() => {
+            mostrarToast('Erro ao adicionar ao produto', 'erro');
+          })
+          .withSuccessHandler(resp => {
+            if (window.ProdutosStore && ProdutosStore.isLoaded()) {
+              const prod = ProdutosStore.getById(destinoId);
+              if (prod) {
+                const comp = Array.isArray(prod.composicao) ? [...prod.composicao] : [];
+                if (resp && resp.componente) {
+                  comp.push(resp.componente);
+                }
+                ProdutosStore.update(destinoId, {
+                  composicao: comp,
+                  composicaoCarregada: true,
+                  custo_previsto: Number(resp?.custoPrevisto) || 0,
+                  custo_erro: ''
+                });
+              }
+              if (typeof aplicarBuscaProdutos === 'function') {
+                aplicarBuscaProdutos();
+              } else if (window.ProdutosUI?.renderLista) {
+                ProdutosUI.renderLista(ProdutosStore.get());
+              }
+            }
+
+            EstoqueUI.resetarAdicaoDestino?.(estoqueId);
+            mostrarToast('Adicionado ao produto');
+          })
+          .adicionarMaterialProduto(destinoId, estoqueId, qtd);
+        return;
+      }
+
+      if (tipoUpper === 'PRODUCAO') {
+        mostrarToast('Adicionando a producao...');
+
+        google.script.run
+          .withFailureHandler(() => {
+            mostrarToast('Erro ao adicionar a producao', 'erro');
+          })
+          .withSuccessHandler(() => {
+            if (window.ProducaoController?.carregarMateriaisPrevistos) {
+              ProducaoController.carregarMateriaisPrevistos(destinoId, true);
+            }
+            EstoqueUI.resetarAdicaoDestino?.(estoqueId);
+            mostrarToast('Adicionado a producao');
+          })
+          .adicionarMaterialExtraProducao(destinoId, estoqueId, qtd);
+        return;
+      }
+
+      mostrarToast('Destino invalido', 'erro');
+    }
+
     function limparEdicao() {
       editandoId = null;
     }
@@ -182,6 +281,7 @@
       salvar,
       editar,
       excluir,
+      adicionarMaterialDestino,
       limparEdicao,
       syncFromBackend
     };

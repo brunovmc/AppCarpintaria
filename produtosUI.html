@@ -36,33 +36,6 @@
       return e ? (e.item || id) : id;
     }
 
-    function renderOpcoes(tipo, produtoId, selecionadoId) {
-      const lista = tipo === 'PRODUTO'
-        ? opcoesProdutos.filter(p => p.produto_id !== produtoId)
-        : opcoesEstoque;
-
-      const placeholder = '<option value="">Selecione</option>';
-      const opts = lista.map(i => {
-        const val = tipo === 'PRODUTO' ? i.produto_id : i.ID;
-        const label = tipo === 'PRODUTO' ? (i.nome_produto || val) : (i.item || val);
-        const selected = val === selecionadoId ? 'selected' : '';
-        return `<option value="${val}" ${selected}>${label}</option>`;
-      }).join('');
-
-      return placeholder + opts;
-    }
-
-    function atualizarItensPorTipo(selectTipo) {
-      if (!selectTipo) return;
-      const itemTarget = selectTipo.dataset.itemTarget || '';
-      const produtoId = selectTipo.dataset.produtoId || '';
-      const selectItem = document.getElementById(itemTarget);
-      if (!selectItem) return;
-
-      const tipo = selectTipo.value || 'ESTOQUE';
-      selectItem.innerHTML = renderOpcoes(tipo, produtoId, '');
-    }
-
     /* =========================
        FORMULARIO
     ========================== */
@@ -119,48 +92,12 @@
     /* =========================
        COMPOSICAO
     ========================== */
-    function renderLinhaComposicao(linha, produtoId) {
+    function renderLinhaComposicao(linha) {
       const nomeItem = getNomeItem(linha.tipo_item, linha.item_id);
       const qtd = linha.quantidade !== undefined && linha.quantidade !== null
         ? linha.quantidade
         : '';
       const unidade = linha.unidade || '';
-
-      if (linha._editing) {
-        const tipoId = `compTipoEdit_${produtoId}_${linha.id}`;
-        const itemId = `compItemEdit_${produtoId}_${linha.id}`;
-        const qtdId = `compQtdEdit_${produtoId}_${linha.id}`;
-        const unId = `compUnEdit_${produtoId}_${linha.id}`;
-
-        return `
-          <div class="linha-composicao-edit">
-            <select
-              id="${tipoId}"
-              class="comp-tipo-edit"
-              data-produto-id="${produtoId}"
-              data-item-target="${itemId}"
-              data-comp-id="${linha.id}"
-            >
-              <option value="ESTOQUE" ${linha.tipo_item === 'ESTOQUE' ? 'selected' : ''}>ESTOQUE</option>
-              <option value="PRODUTO" ${linha.tipo_item === 'PRODUTO' ? 'selected' : ''}>PRODUTO</option>
-            </select>
-            <select
-              id="${itemId}"
-              class="comp-item-edit"
-              data-produto-id="${produtoId}"
-              data-comp-id="${linha.id}"
-            >
-              ${renderOpcoes(linha.tipo_item, produtoId, linha.item_id)}
-            </select>
-            <input id="${qtdId}" class="comp-qtd-edit" placeholder="Qtd" value="${qtd}">
-            <input id="${unId}" class="comp-unidade-edit" placeholder="Un" value="${unidade}">
-            <div class="comp-acoes">
-              <button class="btn-comp-salvar" data-produto-id="${produtoId}" data-comp-id="${linha.id}">Salvar</button>
-              <button class="btn-comp-cancelar" data-produto-id="${produtoId}" data-comp-id="${linha.id}">Cancelar</button>
-            </div>
-          </div>
-        `;
-      }
 
       return `
         <div class="linha-composicao">
@@ -168,15 +105,11 @@
             <div><strong>${nomeItem || linha.item_id || '-'}</strong></div>
             <div class="comp-meta">${linha.tipo_item || '-'} - ${qtd} ${unidade}</div>
           </div>
-          <div class="comp-acoes">
-            <button class="btn-comp-editar" data-produto-id="${produtoId}" data-comp-id="${linha.id}">Editar</button>
-            <button class="btn-comp-remover" data-produto-id="${produtoId}" data-comp-id="${linha.id}">Excluir</button>
-          </div>
         </div>
       `;
     }
 
-    function renderComposicao(linhas, produtoId, carregada) {
+    function renderComposicao(linhas, carregada) {
       if (!carregada) {
         return '<p>Composicao nao carregada.</p>';
       }
@@ -185,7 +118,7 @@
         return '<p>Nenhum item na composicao.</p>';
       }
 
-      return linhas.map(l => renderLinhaComposicao(l, produtoId)).join('');
+      return linhas.map(l => renderLinhaComposicao(l)).join('');
     }
 
     /* =========================
@@ -217,10 +150,6 @@
 
         const comp = Array.isArray(i.composicao) ? i.composicao : [];
         const compCarregada = !!i.composicaoCarregada;
-        const compTipoId = `compTipo_${i.produto_id}`;
-        const compItemId = `compItem_${i.produto_id}`;
-        const compQtdId = `compQtd_${i.produto_id}`;
-        const compUnId = `compUn_${i.produto_id}`;
 
         div.innerHTML = `
           <div class="card-resumo">
@@ -239,25 +168,7 @@
 
             <div class="bloco">
               <p><b>Composicao</b></p>
-              ${renderComposicao(comp, i.produto_id, compCarregada)}
-
-              <div class="linha-composicao-add">
-                <select
-                  id="${compTipoId}"
-                  class="comp-tipo"
-                  data-produto-id="${i.produto_id}"
-                  data-item-target="${compItemId}"
-                >
-                  <option value="ESTOQUE">ESTOQUE</option>
-                  <option value="PRODUTO">PRODUTO</option>
-                </select>
-                <select id="${compItemId}" class="comp-item" data-produto-id="${i.produto_id}">
-                  ${renderOpcoes('ESTOQUE', i.produto_id, '')}
-                </select>
-                <input id="${compQtdId}" class="comp-qtd" placeholder="Qtd">
-                <input id="${compUnId}" class="comp-unidade" placeholder="Un">
-                <button class="btn-comp-adicionar" data-produto-id="${i.produto_id}">Adicionar</button>
-              </div>
+              ${renderComposicao(comp, compCarregada)}
             </div>
 
             <div class="acoes">
@@ -308,81 +219,8 @@
           return;
         }
 
-        if (e.target.classList.contains('btn-comp-adicionar')) {
-          const produtoId = e.target.dataset.produtoId;
-          const tipo = document.getElementById(`compTipo_${produtoId}`)?.value || '';
-          const itemId = document.getElementById(`compItem_${produtoId}`)?.value || '';
-          const quantidade = document.getElementById(`compQtd_${produtoId}`)?.value || '';
-          const unidade = document.getElementById(`compUn_${produtoId}`)?.value || '';
-
-          if (window.ProdutosController) {
-            ProdutosController.adicionarComposicaoItem(produtoId, {
-              tipo_item: tipo,
-              item_id: itemId,
-              quantidade,
-              unidade
-            });
-          }
-          return;
-        }
-
-        if (e.target.classList.contains('btn-comp-editar')) {
-          const produtoId = e.target.dataset.produtoId;
-          const compId = e.target.dataset.compId;
-          if (window.ProdutosController) {
-            ProdutosController.iniciarEdicaoComposicao(produtoId, compId);
-          }
-          return;
-        }
-
-        if (e.target.classList.contains('btn-comp-cancelar')) {
-          const produtoId = e.target.dataset.produtoId;
-          const compId = e.target.dataset.compId;
-          if (window.ProdutosController) {
-            ProdutosController.cancelarEdicaoComposicao(produtoId, compId);
-          }
-          return;
-        }
-
-        if (e.target.classList.contains('btn-comp-salvar')) {
-          const produtoId = e.target.dataset.produtoId;
-          const compId = e.target.dataset.compId;
-          const tipo = document.getElementById(`compTipoEdit_${produtoId}_${compId}`)?.value || '';
-          const itemId = document.getElementById(`compItemEdit_${produtoId}_${compId}`)?.value || '';
-          const quantidade = document.getElementById(`compQtdEdit_${produtoId}_${compId}`)?.value || '';
-          const unidade = document.getElementById(`compUnEdit_${produtoId}_${compId}`)?.value || '';
-
-          if (window.ProdutosController) {
-            ProdutosController.salvarEdicaoComposicao(produtoId, compId, {
-              tipo_item: tipo,
-              item_id: itemId,
-              quantidade,
-              unidade
-            });
-          }
-          return;
-        }
-
-        if (e.target.classList.contains('btn-comp-remover')) {
-          const produtoId = e.target.dataset.produtoId;
-          const compId = e.target.dataset.compId;
-          if (window.ProdutosController) {
-            ProdutosController.removerComposicaoItem(produtoId, compId);
-          }
-          return;
-        }
-
         if (cardAberto && !cardAberto.contains(e.target)) {
           fecharCard();
-        }
-      });
-
-      document.addEventListener('change', e => {
-        if (e.target.classList.contains('comp-tipo')) {
-          atualizarItensPorTipo(e.target);
-        }
-        if (e.target.classList.contains('comp-tipo-edit')) {
-          atualizarItensPorTipo(e.target);
         }
       });
     }

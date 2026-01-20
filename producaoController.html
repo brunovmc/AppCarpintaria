@@ -255,6 +255,7 @@
               EstoqueStore.update(i.ID, { quantidade: i.quantidade });
             });
           }
+          carregarMateriaisPrevistos(payload.producaoId, true);
           ProducaoUI.fecharModalConsumo();
           mostrarToast('Consumo registrado');
         })

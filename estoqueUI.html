@@ -3,6 +3,9 @@
     let cardAberto = null;
     let delegationInit = false;
 
+    let opcoesProdutos = [];
+    let opcoesProducao = [];
+
     /* =========================
        HELPERS
     ========================== */
@@ -41,8 +44,59 @@
         .filter(v => v !== '');
     }
 
+    function setOpcoesAdicao({ produtos, producao } = {}) {
+      opcoesProdutos = Array.isArray(produtos) ? produtos : [];
+      opcoesProducao = Array.isArray(producao) ? producao : [];
+
+      const selects = document.querySelectorAll('.add-destino-tipo');
+      selects.forEach(sel => {
+        if (sel.value) {
+          atualizarDestinoPorTipo(sel);
+        }
+      });
+    }
+
+    function renderOpcoesDestino(tipo, selecionadoId) {
+      const lista = tipo === 'PRODUCAO' ? opcoesProducao : opcoesProdutos;
+      const placeholder = '<option value="">Selecione</option>';
+      const opts = lista.map(i => {
+        const val = tipo === 'PRODUCAO' ? i.producao_id : i.produto_id;
+        const label = tipo === 'PRODUCAO'
+          ? (i.nome_ordem || i.nome_produto || i.producao_id)
+          : (i.nome_produto || i.produto_id);
+        const selected = val === selecionadoId ? 'selected' : '';
+        return `<option value="${val}" ${selected}>${label}</option>`;
+      }).join('');
+      return placeholder + opts;
+    }
+
+    function atualizarDestinoPorTipo(selectTipo) {
+      if (!selectTipo) return;
+      const targetId = selectTipo.dataset.targetId || '';
+      const selectRef = document.getElementById(targetId);
+      if (!selectRef) return;
+
+      const tipo = String(selectTipo.value || '').toUpperCase();
+      if (!tipo) {
+        selectRef.innerHTML = '<option value="">Selecione</option>';
+        return;
+      }
+
+      selectRef.innerHTML = renderOpcoesDestino(tipo, selectRef.value || '');
+    }
+
+    function resetarAdicaoDestino(estoqueId) {
+      const tipo = document.getElementById(`addTipo_${estoqueId}`);
+      const ref = document.getElementById(`addRef_${estoqueId}`);
+      const qtd = document.getElementById(`addQtd_${estoqueId}`);
+
+      if (tipo) tipo.value = '';
+      if (ref) ref.innerHTML = '<option value="">Selecione</option>';
+      if (qtd) qtd.value = '';
+    }
+
     /* =========================
-       FORMULÁRIO
+       FORMULARIO
     ========================== */
     function abrirFormularioNovo() {
       resetFormulario();
@@ -74,16 +128,13 @@
 
     function preencherFormulario(data) {
       const f = el();
-      console.log('DATA EDITAR:', data);
 
-      // selects JÁ carregados (controller chama render*)
       if (f.tipo) f.tipo.value = data.tipo || '';
       if (f.unidade) f.unidade.value = data.unidade || '';
 
       if (f.item) f.item.value = data.item || '';
       if (f.quantidade) f.quantidade.value = data.quantidade || '';
 
-      // categoria/fornecedor podem ser <select> ou <input> dependendo do seu HTML:
       if (f.categoria) f.categoria.value = data.categoria || '';
       if (f.fornecedor) f.fornecedor.value = data.fornecedor || '';
 
@@ -170,7 +221,6 @@
 
       const clean = limparVazios(lista);
 
-      // Se for <select>, preenche opções; se for <input>, não faz nada (só mantém value)
       if (categoria.tagName === 'SELECT') {
         categoria.innerHTML = '<option value="">Selecione</option>';
         clean.forEach(v => {
@@ -201,7 +251,6 @@
 
     /* =========================
        SELECTS DO PAINEL DE FILTRO
-       (NOVO — NÃO AFETA O FORM)
     ========================== */
     function renderFiltroTipos(lista) {
       const { filtroTipo } = el();
@@ -255,27 +304,55 @@
         div.innerHTML = `
           <div class="card-resumo">
             <strong>${i.item}</strong><br>
-            ${i.tipo} • ${i.categoria || '-'}<br>
+            ${i.tipo} - ${i.categoria || '-'}<br>
             ${i.quantidade || 0} ${i.unidade || ''}
           </div>
 
           <button class="ver-mais">Ver mais</button>
 
           <div class="card-detalhes">
-            <button class="fechar-card">✕</button>
+            <button class="fechar-card">X</button>
 
             <p><b>Fornecedor:</b> ${i.fornecedor || '-'}</p>
-            <p><b>Valor unitário:</b> R$ ${Number(i.valor_unit || 0).toFixed(2)}</p>
-            <p><b>Observação:</b> ${i.observacao || '-'}</p>
+            <p><b>Valor unitario:</b> R$ ${Number(i.valor_unit || 0).toFixed(2)}</p>
+            <p><b>Observacao:</b> ${i.observacao || '-'}</p>
 
             ${i.tipo === 'EQUIPAMENTO' ? `
-              <p><b>Potência:</b> ${i.potencia || '-'}</p>
+              <p><b>Potencia:</b> ${i.potencia || '-'}</p>
               <p><b>Voltagem:</b> ${i.voltagem || '-'}</p>
             ` : ''}
 
+            <div class="bloco">
+              <p><b>Adicionar a</b></p>
+              <div class="linha-add-destino">
+                <select
+                  id="addTipo_${i.ID}"
+                  class="add-destino-tipo"
+                  data-estoque-id="${i.ID}"
+                  data-target-id="addRef_${i.ID}"
+                >
+                  <option value="">Selecione</option>
+                  <option value="PRODUTO">Produto</option>
+                  <option value="PRODUCAO">Producao</option>
+                </select>
+                <select id="addRef_${i.ID}" class="add-destino-ref" data-estoque-id="${i.ID}">
+                  <option value="">Selecione</option>
+                </select>
+                <input
+                  id="addQtd_${i.ID}"
+                  class="add-destino-qtd"
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  placeholder="Qtd (${i.unidade || ''})"
+                >
+                <button class="btn-add-destino" data-estoque-id="${i.ID}">Adicionar</button>
+              </div>
+            </div>
+
             <div class="acoes">
-              <button onclick="EstoqueController.editar('${i.ID}')">✏️ Editar</button>
-              <button onclick="EstoqueController.excluir('${i.ID}')">🗑️ Excluir</button>
+              <button onclick="EstoqueController.editar('${i.ID}')">Editar</button>
+              <button onclick="EstoqueController.excluir('${i.ID}')">Excluir</button>
             </div>
           </div>
         `;
@@ -311,8 +388,26 @@
           return;
         }
 
+        if (e.target.classList.contains('btn-add-destino')) {
+          const estoqueId = e.target.dataset.estoqueId;
+          const tipo = document.getElementById(`addTipo_${estoqueId}`)?.value || '';
+          const destinoId = document.getElementById(`addRef_${estoqueId}`)?.value || '';
+          const quantidade = document.getElementById(`addQtd_${estoqueId}`)?.value || '';
+
+          if (window.EstoqueController) {
+            EstoqueController.adicionarMaterialDestino(estoqueId, tipo, destinoId, quantidade);
+          }
+          return;
+        }
+
         if (cardAberto && !cardAberto.contains(e.target)) {
           fecharCard();
+        }
+      });
+
+      document.addEventListener('change', e => {
+        if (e.target.classList.contains('add-destino-tipo')) {
+          atualizarDestinoPorTipo(e.target);
         }
       });
     }
@@ -334,7 +429,7 @@
     }
 
     /* =========================
-       API PÚBLICA
+       API PUBLICA
     ========================== */
     return {
       abrirFormularioNovo,
@@ -350,9 +445,11 @@
       renderCategorias,
       renderFornecedores,
 
-      // ✅ novos (painel)
       renderFiltroTipos,
-      renderFiltroCategorias
+      renderFiltroCategorias,
+
+      setOpcoesAdicao,
+      resetarAdicaoDestino
     };
 
   })();

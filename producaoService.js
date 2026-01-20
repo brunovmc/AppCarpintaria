@@ -1,6 +1,7 @@
 const ABA_PRODUCAO = 'PRODUCAO';
 const ABA_PRODUCAO_ETAPAS = 'PRODUCAO_ETAPAS';
 const ABA_PRODUCAO_CONSUMO = 'PRODUCAO_CONSUMO';
+const ABA_PRODUCAO_MATERIAIS = 'PRODUCAO_MATERIAIS';
 
 const PRODUCAO_SCHEMA = [
   'producao_id',
@@ -33,6 +34,16 @@ const PRODUCAO_CONSUMO_SCHEMA = [
   'quantidade_consumida',
   'valor_unit_snapshot',
   'total_snapshot',
+  'criado_em',
+  'ativo'
+];
+
+const PRODUCAO_MATERIAIS_SCHEMA = [
+  'id',
+  'producao_id',
+  'estoque_id',
+  'quantidade',
+  'unidade',
   'criado_em',
   'ativo'
 ];
@@ -191,6 +202,109 @@ function listarEtapasProducao(producaoId) {
     .sort((a, b) => parseNumeroBR(a.ordem) - parseNumeroBR(b.ordem));
 }
 
+function listarMateriaisExtrasProducao(producaoId) {
+  const sheet = SpreadsheetApp.getActive().getSheetByName(ABA_PRODUCAO_MATERIAIS);
+  if (!sheet) return [];
+
+  const rows = rowsToObjects(sheet);
+  return rows
+    .filter(i => String(i.ativo).toLowerCase() === 'true')
+    .filter(i => i.producao_id === producaoId)
+    .map(i => ({
+      estoque_id: i.estoque_id,
+      quantidade: parseNumeroBR(i.quantidade),
+      unidade: i.unidade || ''
+    }));
+}
+
+function adicionarMaterialExtraProducao(producaoId, estoqueId, quantidade) {
+  if (!producaoId || !estoqueId) {
+    throw new Error('Producao ou estoque invalido');
+  }
+
+  const qtd = parseNumeroBR(quantidade);
+  if (!qtd || qtd <= 0) {
+    throw new Error('Quantidade invalida');
+  }
+
+  const sheetEstoque = SpreadsheetApp.getActive().getSheetByName(ABA_ESTOQUE);
+  if (!sheetEstoque) {
+    throw new Error('Aba ESTOQUE nao encontrada');
+  }
+
+  const estoqueRows = rowsToObjects(sheetEstoque);
+  const estoqueItem = estoqueRows.find(i => i.ID === estoqueId) || {};
+  const unidade = estoqueItem.unidade || '';
+
+  const novo = {
+    id: gerarId('PM'),
+    producao_id: producaoId,
+    estoque_id: estoqueId,
+    quantidade: qtd,
+    unidade,
+    criado_em: new Date(),
+    ativo: true
+  };
+
+  insert(ABA_PRODUCAO_MATERIAIS, novo, PRODUCAO_MATERIAIS_SCHEMA);
+
+  return {
+    ...novo,
+    criado_em: formatDateSafe(novo.criado_em, 'yyyy-MM-dd HH:mm')
+  };
+}
+
+function aplicarBaixaMateriaisExtras(producaoId, itensValidos) {
+  const sheet = SpreadsheetApp.getActive().getSheetByName(ABA_PRODUCAO_MATERIAIS);
+  if (!sheet) return;
+
+  const rows = rowsToObjects(sheet)
+    .filter(i => String(i.ativo).toLowerCase() === 'true')
+    .filter(i => i.producao_id === producaoId);
+
+  const extrasPorEstoque = {};
+  rows.forEach(r => {
+    if (!extrasPorEstoque[r.estoque_id]) {
+      extrasPorEstoque[r.estoque_id] = [];
+    }
+    extrasPorEstoque[r.estoque_id].push(r);
+  });
+
+  (Array.isArray(itensValidos) ? itensValidos : []).forEach(item => {
+    let restante = parseNumeroBR(item.quantidade);
+    if (restante <= 0) return;
+
+    const lista = extrasPorEstoque[item.estoque_id] || [];
+    for (let i = 0; i < lista.length && restante > 0; i++) {
+      const extra = lista[i];
+      const qtdAtual = parseNumeroBR(extra.quantidade);
+      if (!extra.id || qtdAtual <= 0) continue;
+
+      if (qtdAtual <= restante) {
+        restante -= qtdAtual;
+        updateById(
+          ABA_PRODUCAO_MATERIAIS,
+          'id',
+          extra.id,
+          { quantidade: 0, ativo: false },
+          PRODUCAO_MATERIAIS_SCHEMA
+        );
+        continue;
+      }
+
+      const novoQtd = qtdAtual - restante;
+      restante = 0;
+      updateById(
+        ABA_PRODUCAO_MATERIAIS,
+        'id',
+        extra.id,
+        { quantidade: novoQtd },
+        PRODUCAO_MATERIAIS_SCHEMA
+      );
+    }
+  });
+}
+
 function atualizarEtapasProducao(producaoId, etapas) {
   if (!Array.isArray(etapas)) return false;
 
@@ -251,7 +365,52 @@ function obterMateriaisPrevistosProducao(producaoId) {
   const ordem = rows.find(i => i.producao_id === producaoId);
   if (!ordem) return { itens: [], custoPrevisto: 0 };
 
-  return explodirBOM(ordem.produto_id, ordem.qtd_planejada);
+  const base = explodirBOM(ordem.produto_id, ordem.qtd_planejada);
+  const extras = listarMateriaisExtrasProducao(producaoId);
+
+  if (!extras || extras.length === 0) {
+    return base;
+  }
+
+  const sheetEstoque = SpreadsheetApp.getActive().getSheetByName(ABA_ESTOQUE);
+  const estoqueRows = sheetEstoque ? rowsToObjects(sheetEstoque) : [];
+  const estoqueMap = {};
+  estoqueRows.forEach(i => {
+    estoqueMap[i.ID] = i;
+  });
+
+  const itensMap = {};
+  (base.itens || []).forEach(i => {
+    itensMap[i.estoque_id] = { ...i };
+  });
+
+  let custoPrevisto = parseNumeroBR(base.custoPrevisto);
+
+  extras.forEach(e => {
+    const estoqueItem = estoqueMap[e.estoque_id] || {};
+    const valorUnit = parseNumeroBR(estoqueItem.valor_unit);
+    const unidade = estoqueItem.unidade || e.unidade || '';
+    const nomeItem = estoqueItem.item || e.estoque_id || '';
+    const qtd = parseNumeroBR(e.quantidade);
+
+    if (!itensMap[e.estoque_id]) {
+      itensMap[e.estoque_id] = {
+        estoque_id: e.estoque_id,
+        item: nomeItem,
+        unidade,
+        quantidade: 0,
+        valor_unit: valorUnit
+      };
+    }
+
+    itensMap[e.estoque_id].quantidade += qtd;
+    custoPrevisto += qtd * valorUnit;
+  });
+
+  return {
+    itens: Object.values(itensMap),
+    custoPrevisto
+  };
 }
 
 function consumirEstoque(producaoId, itensParaBaixar) {
@@ -339,6 +498,8 @@ function consumirEstoque(producaoId, itensParaBaixar) {
       insert(ABA_PRODUCAO_CONSUMO, consumo, PRODUCAO_CONSUMO_SCHEMA);
       consumoRegistrado.push(consumo);
     });
+
+    aplicarBaixaMateriaisExtras(producaoId, itensValidos);
 
     return {
       estoqueAtualizados,

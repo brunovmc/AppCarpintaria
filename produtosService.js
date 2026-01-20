@@ -236,6 +236,52 @@ function salvarComposicaoProduto(produtoId, linhas) {
   return true;
 }
 
+function adicionarMaterialProduto(produtoId, estoqueId, quantidade) {
+  if (!produtoId || !estoqueId) {
+    throw new Error('Produto ou estoque invalido');
+  }
+
+  const qtd = parseNumeroBR(quantidade);
+  if (!qtd || qtd <= 0) {
+    throw new Error('Quantidade invalida');
+  }
+
+  const sheetEstoque = SpreadsheetApp.getActive().getSheetByName('ESTOQUE');
+  if (!sheetEstoque) {
+    throw new Error('Aba ESTOQUE nao encontrada');
+  }
+
+  const estoqueRows = rowsToObjects(sheetEstoque);
+  const estoqueItem = estoqueRows.find(i => i.ID === estoqueId) || {};
+  const unidade = estoqueItem.unidade || '';
+
+  const componente = {
+    id: gerarId('CMP'),
+    produto_id: produtoId,
+    tipo_componente: 'ESTOQUE',
+    ref_id: estoqueId,
+    quantidade: qtd,
+    unidade,
+    observacao: '',
+    ativo: true
+  };
+
+  insert(ABA_PRODUTOS_COMPONENTES, componente, PRODUTOS_COMPONENTES_SCHEMA);
+
+  return {
+    componente: {
+      id: componente.id,
+      produto_id: produtoId,
+      tipo_item: 'ESTOQUE',
+      item_id: estoqueId,
+      quantidade: qtd,
+      unidade,
+      observacao: ''
+    },
+    custoPrevisto: calcularCustoProduto(produtoId)
+  };
+}
+
 function listarEtapasProduto(produtoId) {
   const sheet = SpreadsheetApp.getActive().getSheetByName(ABA_PRODUTOS_ETAPAS);
   if (!sheet) return [];
