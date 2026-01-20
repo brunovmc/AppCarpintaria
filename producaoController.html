@@ -1,0 +1,340 @@
+<script>
+  window.ProducaoController = (() => {
+
+    let editandoId = null;
+    let iniciado = false;
+    let consumoInit = false;
+
+    let produtos = [];
+
+    function init() {
+      if (iniciado) return;
+
+      carregarProdutos();
+      carregarProducao();
+      initConsumoUI();
+
+      iniciado = true;
+    }
+
+    function initConsumoUI() {
+      if (consumoInit) return;
+      consumoInit = true;
+
+      const btnConfirmar = document.getElementById('btnConfirmarConsumo');
+      const btnCancelar = document.getElementById('btnCancelarConsumo');
+
+      if (btnConfirmar) {
+        btnConfirmar.addEventListener('click', () => confirmarConsumo());
+      }
+
+      if (btnCancelar) {
+        btnCancelar.addEventListener('click', () => {
+          ProducaoUI.fecharModalConsumo();
+        });
+      }
+    }
+
+    function renderListaAtual() {
+      ProducaoUI.renderLista(ProducaoStore.get());
+    }
+
+    function carregarProdutos() {
+      google.script.run
+        .withSuccessHandler(lista => {
+          produtos = Array.isArray(lista) ? lista : [];
+          ProducaoUI.renderProdutos(produtos);
+        })
+        .listarProdutos();
+    }
+
+    function carregarProducao() {
+      google.script.run
+        .withSuccessHandler(lista => {
+          ProducaoStore.set(lista);
+          renderListaAtual();
+        })
+        .listarProducao();
+    }
+
+    function salvar() {
+      const get = id => document.getElementById(id)?.value || '';
+
+      const dados = {
+        produto_id: get('producaoProduto'),
+        nome_ordem: get('producaoNome'),
+        qtd_planejada: Number(get('producaoQtd')) || 0,
+        status: get('producaoStatus'),
+        data_inicio: get('producaoDataInicio'),
+        data_prevista_termino: get('producaoDataPrevista'),
+        observacao: get('producaoObservacao')
+      };
+
+      if (editandoId) {
+        const idAtual = editandoId;
+        const snapshot = { ...ProducaoStore.getById(idAtual) };
+
+        ProducaoStore.update(idAtual, dados);
+        renderListaAtual();
+        finalizarUX();
+
+        google.script.run
+          .withFailureHandler(() => {
+            ProducaoStore.update(idAtual, snapshot);
+            renderListaAtual();
+            mostrarToast('Erro ao salvar edicao', 'erro');
+          })
+          .withSuccessHandler(() => {
+            mostrarToast('Salvo com sucesso');
+          })
+          .atualizarProducao(idAtual, dados);
+
+        editandoId = null;
+        return;
+      }
+
+      const tempId = `tmp_${Date.now()}`;
+      const produto = produtos.find(p => p.produto_id === dados.produto_id) || {};
+
+      const itemTemp = {
+        producao_id: tempId,
+        nome_produto: produto.nome_produto || '',
+        unidade_produto: produto.unidade_produto || '',
+        etapas: [],
+        ...dados
+      };
+
+      ProducaoStore.add(itemTemp);
+      renderListaAtual();
+      finalizarUX();
+      mostrarToast('Salvando...');
+
+      google.script.run
+        .withFailureHandler(() => {
+          ProducaoStore.remove(tempId);
+          renderListaAtual();
+          mostrarToast('Erro ao salvar producao', 'erro');
+        })
+        .withSuccessHandler(itemSalvo => {
+          ProducaoStore.remove(tempId);
+
+          if (!itemSalvo || !itemSalvo.producao_id) {
+            mostrarToast('Salvo. Atualizando lista...');
+            carregarProducao();
+            return;
+          }
+
+          ProducaoStore.add(itemSalvo);
+          renderListaAtual();
+          mostrarToast('Salvo com sucesso');
+        })
+        .criarProducao(dados);
+    }
+
+    function finalizarUX() {
+      ProducaoUI.fecharFormulario();
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    function editar(id) {
+      const item = ProducaoStore.getById(id);
+
+      if (!item) {
+        mostrarToast('Producao nao encontrada', 'erro');
+        return;
+      }
+
+      editandoId = id;
+      ProducaoUI.preencherFormulario(item);
+      ProducaoUI.mostrarFormulario();
+    }
+
+    function excluir(id) {
+      if (!confirm('Deseja remover esta producao?')) return;
+
+      const snapshot = ProducaoStore.getById(id);
+
+      ProducaoStore.remove(id);
+      renderListaAtual();
+      mostrarToast('Producao removida');
+
+      google.script.run
+        .withFailureHandler(() => {
+          ProducaoStore.add(snapshot);
+          renderListaAtual();
+          mostrarToast('Erro ao remover', 'erro');
+        })
+        .deletarProducao(id);
+    }
+
+    function carregarMateriaisPrevistos(id) {
+      const item = ProducaoStore.getById(id);
+      if (item && item.materiaisPrevistos) {
+        return;
+      }
+
+      google.script.run
+        .withSuccessHandler(resp => {
+          ProducaoStore.update(id, {
+            materiaisPrevistos: resp.itens || [],
+            custo_previsto: resp.custoPrevisto || 0
+          });
+          renderListaAtual();
+        })
+        .withFailureHandler(() => {
+          mostrarToast('Erro ao carregar materiais', 'erro');
+        })
+        .obterMateriaisPrevistosProducao(id);
+    }
+
+    function abrirConsumo(id) {
+      const item = ProducaoStore.getById(id);
+      if (!item) return;
+
+      if (!item.materiaisPrevistos) {
+        mostrarToast('Carregando materiais...');
+        google.script.run
+          .withSuccessHandler(resp => {
+            ProducaoStore.update(id, {
+              materiaisPrevistos: resp.itens || [],
+              custo_previsto: resp.custoPrevisto || 0
+            });
+            renderListaAtual();
+            ProducaoUI.abrirModalConsumo(id, item.nome_ordem || item.nome_produto || id, resp.itens || []);
+          })
+          .withFailureHandler(() => {
+            mostrarToast('Erro ao carregar materiais', 'erro');
+          })
+          .obterMateriaisPrevistosProducao(id);
+        return;
+      }
+
+      ProducaoUI.abrirModalConsumo(id, item.nome_ordem || item.nome_produto || id, item.materiaisPrevistos || []);
+    }
+
+    function confirmarConsumo() {
+      const payload = ProducaoUI.obterConsumoPayload();
+      if (!payload.producaoId || payload.itens.length === 0) {
+        mostrarToast('Informe quantidades para baixar');
+        return;
+      }
+
+      mostrarToast('Baixando do estoque...');
+
+      google.script.run
+        .withFailureHandler(() => {
+          mostrarToast('Erro ao baixar do estoque', 'erro');
+        })
+        .withSuccessHandler(resp => {
+          if (resp?.estoqueAtualizados && window.EstoqueStore) {
+            resp.estoqueAtualizados.forEach(i => {
+              EstoqueStore.update(i.ID, { quantidade: i.quantidade });
+            });
+          }
+          ProducaoUI.fecharModalConsumo();
+          mostrarToast('Consumo registrado');
+        })
+        .consumirEstoque(payload.producaoId, payload.itens);
+    }
+
+    function adicionarEtapa(producaoId, nome) {
+      const item = ProducaoStore.getById(producaoId);
+      if (!item) return;
+
+      const snapshot = { ...item };
+      const etapas = Array.isArray(item.etapas) ? [...item.etapas] : [];
+      const ordem = etapas.length + 1;
+
+      etapas.push({
+        id: `tmp_${Date.now()}`,
+        nome_etapa: nome,
+        feito: false,
+        ordem
+      });
+
+      ProducaoStore.update(producaoId, { etapas });
+      renderListaAtual();
+
+      google.script.run
+        .withFailureHandler(() => {
+          ProducaoStore.update(producaoId, snapshot);
+          renderListaAtual();
+          mostrarToast('Erro ao adicionar etapa', 'erro');
+        })
+        .withSuccessHandler(() => {
+          refreshEtapas(producaoId);
+        })
+        .atualizarEtapasProducao(producaoId, [
+          {
+            nome_etapa: nome,
+            feito: false,
+            ordem
+          }
+        ]);
+    }
+
+    function marcarEtapa(producaoId, etapaId, feito) {
+      const item = ProducaoStore.getById(producaoId);
+      if (!item) return;
+
+      const etapas = Array.isArray(item.etapas) ? [...item.etapas] : [];
+      const idx = etapas.findIndex(e => e.id === etapaId);
+      if (idx === -1) return;
+
+      const snapshot = { ...item };
+      etapas[idx] = {
+        ...etapas[idx],
+        feito: feito,
+        data_feito: feito ? new Date() : ''
+      };
+
+      ProducaoStore.update(producaoId, { etapas });
+      renderListaAtual();
+
+      google.script.run
+        .withFailureHandler(() => {
+          ProducaoStore.update(producaoId, snapshot);
+          renderListaAtual();
+          mostrarToast('Erro ao atualizar etapa', 'erro');
+        })
+        .withSuccessHandler(() => {
+          mostrarToast('Etapa atualizada');
+        })
+        .atualizarEtapasProducao(producaoId, [
+          {
+            id: etapaId,
+            nome_etapa: etapas[idx].nome_etapa,
+            feito: feito,
+            ordem: etapas[idx].ordem,
+            data_feito: etapas[idx].data_feito
+          }
+        ]);
+    }
+
+    function refreshEtapas(producaoId) {
+      google.script.run
+        .withSuccessHandler(etapas => {
+          ProducaoStore.update(producaoId, { etapas: etapas || [] });
+          renderListaAtual();
+        })
+        .listarEtapasProducao(producaoId);
+    }
+
+    function limparEdicao() {
+      editandoId = null;
+    }
+
+    return {
+      init,
+      salvar,
+      editar,
+      excluir,
+      abrirConsumo,
+      adicionarEtapa,
+      marcarEtapa,
+      carregarMateriaisPrevistos,
+      limparEdicao
+    };
+
+  })();
+</script>

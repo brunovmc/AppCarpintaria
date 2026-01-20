@@ -12,7 +12,13 @@ function getHeaderMap(sheet) {
 function ensureSchema(sheet, schema) {
   if (!sheet || !Array.isArray(schema)) return;
 
-  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  const lastCol = sheet.getLastColumn();
+  if (lastCol === 0) {
+    sheet.getRange(1, 1, 1, schema.length).setValues([schema]);
+    return;
+  }
+
+  const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
   const missing = schema.filter(h => !headers.includes(h));
   if (missing.length === 0) return;
 
@@ -32,7 +38,11 @@ function rowsToObjects(sheet) {
 }
 
 function insert(sheetName, payload, schema) {
-  const sheet = SpreadsheetApp.getActive().getSheetByName(sheetName);
+  const ss = SpreadsheetApp.getActive();
+  let sheet = ss.getSheetByName(sheetName);
+  if (!sheet) {
+    sheet = ss.insertSheet(sheetName);
+  }
   ensureSchema(sheet, schema);
   const headerMap = getHeaderMap(sheet);
   const row = Array(sheet.getLastColumn()).fill('');
@@ -49,7 +59,11 @@ function insert(sheetName, payload, schema) {
 
 
 function updateById(sheetName, idField, id, payload, schema) {
-  const sheet = SpreadsheetApp.getActive().getSheetByName(sheetName);
+  const ss = SpreadsheetApp.getActive();
+  let sheet = ss.getSheetByName(sheetName);
+  if (!sheet) {
+    sheet = ss.insertSheet(sheetName);
+  }
   ensureSchema(sheet, schema);
   const data = sheet.getDataRange().getValues();
   const headers = data[0];

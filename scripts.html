@@ -19,6 +19,10 @@
       ComprasController.init();
       aplicarBuscaCompras();
     }
+
+    if (nome === 'producao' && window.ProducaoController) {
+      ProducaoController.init();
+    }
   }
 
   function setTopBars(nome) {
@@ -47,6 +51,12 @@
         ComprasUI.abrirFormularioNovo();
       } else if (window.ComprasUI?.abrirFormulario) {
         ComprasUI.abrirFormulario();
+      }
+    } else if (abaAtiva.id === 'aba-producao') {
+      if (window.ProducaoUI?.abrirFormularioNovo) {
+        ProducaoUI.abrirFormularioNovo();
+      } else if (window.ProducaoUI?.abrirFormulario) {
+        ProducaoUI.abrirFormulario();
       }
     }
   }

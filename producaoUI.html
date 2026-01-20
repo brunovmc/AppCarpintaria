@@ -1,0 +1,370 @@
+<script>
+  window.ProducaoUI = (() => {
+    let cardAberto = null;
+    let delegationInit = false;
+
+    /* =========================
+       HELPERS
+    ========================== */
+    function el() {
+      return {
+        formulario: document.getElementById('formularioProducao'),
+        lista: document.getElementById('listaProducao'),
+
+        // Form
+        produto: document.getElementById('producaoProduto'),
+        nome: document.getElementById('producaoNome'),
+        qtd: document.getElementById('producaoQtd'),
+        status: document.getElementById('producaoStatus'),
+        dataInicio: document.getElementById('producaoDataInicio'),
+        dataPrevista: document.getElementById('producaoDataPrevista'),
+        observacao: document.getElementById('producaoObservacao'),
+        formTitulo: document.getElementById('producaoFormTitulo'),
+
+        // Modal consumo
+        modalConsumo: document.getElementById('modalConsumoProducao'),
+        consumoTitulo: document.getElementById('consumoTitulo'),
+        consumoLista: document.getElementById('consumoLista')
+      };
+    }
+
+    function limparVazios(lista) {
+      return (Array.isArray(lista) ? lista : [])
+        .map(v => (v ?? '').toString().trim())
+        .filter(v => v !== '');
+    }
+
+    function formatMoeda(valor) {
+      const n = Number(valor || 0);
+      return n.toFixed(2);
+    }
+
+    /* =========================
+       FORMULARIO
+    ========================== */
+    function abrirFormularioNovo() {
+      resetFormulario();
+      mostrarFormulario();
+    }
+
+    function mostrarFormulario() {
+      const { formulario } = el();
+      if (!formulario) return;
+
+      formulario.style.display = 'block';
+
+      requestAnimationFrame(() => {
+        formulario.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
+    }
+
+    function fecharFormulario() {
+      const { formulario } = el();
+      if (!formulario) return;
+
+      formulario.style.display = 'none';
+      resetFormulario();
+
+      if (window.ProducaoController) {
+        ProducaoController.limparEdicao();
+      }
+    }
+
+    function preencherFormulario(data) {
+      const f = el();
+
+      if (f.produto) f.produto.value = data.produto_id || '';
+      if (f.nome) f.nome.value = data.nome_ordem || '';
+      if (f.qtd) f.qtd.value = data.qtd_planejada || '';
+      if (f.status) f.status.value = data.status || 'Em planejamento';
+      if (f.dataInicio) f.dataInicio.value = data.data_inicio || '';
+      if (f.dataPrevista) f.dataPrevista.value = data.data_prevista_termino || '';
+      if (f.observacao) f.observacao.value = data.observacao || '';
+
+      if (f.formTitulo) f.formTitulo.innerText = 'Editar Producao';
+    }
+
+    function resetFormulario() {
+      const f = el();
+
+      [
+        f.produto,
+        f.nome,
+        f.qtd,
+        f.status,
+        f.dataInicio,
+        f.dataPrevista,
+        f.observacao
+      ].forEach(i => i && (i.value = ''));
+
+      if (f.formTitulo) f.formTitulo.innerText = 'Nova Producao';
+    }
+
+    /* =========================
+       SELECTS (RENDER ONLY)
+    ========================== */
+    function renderProdutos(lista) {
+      const { produto } = el();
+      if (!produto) return;
+
+      const clean = (Array.isArray(lista) ? lista : [])
+        .filter(v => v && v.produto_id);
+
+      produto.innerHTML = '<option value="">Selecione o produto</option>';
+      clean.forEach(p => {
+        const o = document.createElement('option');
+        o.value = p.produto_id;
+        o.textContent = p.nome_produto || p.produto_id;
+        produto.appendChild(o);
+      });
+    }
+
+    /* =========================
+       LISTA + CARDS
+    ========================== */
+    function renderMateriais(itens) {
+      if (!Array.isArray(itens) || itens.length === 0) {
+        return '<p>Nenhum material previsto.</p>';
+      }
+
+      const linhas = itens.map(i => `
+        <div class="linha-material">
+          <span>${i.item || i.estoque_id}</span>
+          <span>${Number(i.quantidade || 0).toFixed(2)} ${i.unidade || ''}</span>
+        </div>
+      `);
+
+      return linhas.join('');
+    }
+
+    function renderChecklist(etapas, producaoId) {
+      if (!Array.isArray(etapas) || etapas.length === 0) {
+        return '<p>Nenhuma etapa cadastrada.</p>';
+      }
+
+      return etapas.map(et => `
+        <label class="linha-etapa">
+          <input
+            type="checkbox"
+            class="check-etapa"
+            data-producao-id="${producaoId}"
+            data-etapa-id="${et.id}"
+            ${String(et.feito).toLowerCase() === 'true' ? 'checked' : ''}
+          >
+          <span>${et.nome_etapa || ''}</span>
+        </label>
+      `).join('');
+    }
+
+    function renderLista(itens) {
+      const { lista } = el();
+      if (!lista) return;
+
+      lista.innerHTML = '';
+
+      if (!Array.isArray(itens) || itens.length === 0) {
+        lista.innerHTML = '<p>Nenhuma ordem de producao.</p>';
+        return;
+      }
+
+      itens.forEach(i => {
+        const div = document.createElement('div');
+        div.className = 'card';
+        div.dataset.id = i.producao_id;
+
+        const nome = i.nome_ordem || i.nome_produto || i.producao_id;
+        const unidade = i.unidade_produto || '';
+        const custoPrevisto = formatMoeda(i.custo_previsto || 0);
+
+        div.innerHTML = `
+          <div class="card-resumo">
+            <strong>${nome}</strong><br>
+            ${i.status || ''}<br>
+            ${i.qtd_planejada || 0} ${unidade}
+          </div>
+
+          <button class="ver-mais">Ver mais</button>
+
+          <div class="card-detalhes">
+            <button class="fechar-card">X</button>
+
+            <p><b>Produto:</b> ${i.nome_produto || '-'}</p>
+            <p><b>Inicio:</b> ${i.data_inicio || '-'}</p>
+            <p><b>Previsto:</b> ${i.data_prevista_termino || '-'}</p>
+            <p><b>Custo previsto:</b> R$ ${custoPrevisto}</p>
+
+            <div class="bloco">
+              <p><b>Materiais previstos</b></p>
+              ${i.materiaisPrevistos ? renderMateriais(i.materiaisPrevistos) : '<p>Carregando materiais...</p>'}
+            </div>
+
+            <div class="bloco">
+              <p><b>Checklist</b></p>
+              ${renderChecklist(i.etapas || [], i.producao_id)}
+              <div class="linha-etapa-add">
+                <input id="novaEtapa_${i.producao_id}" placeholder="Nova etapa">
+                <button class="btn-add-etapa" data-producao-id="${i.producao_id}">Adicionar etapa</button>
+              </div>
+            </div>
+
+            <div class="acoes">
+              <button onclick="ProducaoController.abrirConsumo('${i.producao_id}')">Baixar do estoque</button>
+              <button onclick="ProducaoController.editar('${i.producao_id}')">Editar</button>
+              <button onclick="ProducaoController.excluir('${i.producao_id}')">Excluir</button>
+            </div>
+          </div>
+        `;
+
+        lista.appendChild(div);
+      });
+
+      initDelegation();
+    }
+
+    /* =========================
+       MODAL CONSUMO
+    ========================== */
+    function abrirModalConsumo(producaoId, nome, materiais) {
+      const { modalConsumo, consumoTitulo, consumoLista } = el();
+      if (!modalConsumo || !consumoLista) return;
+
+      modalConsumo.dataset.producaoId = producaoId;
+      if (consumoTitulo) consumoTitulo.textContent = `Baixar do estoque - ${nome}`;
+
+      consumoLista.innerHTML = '';
+
+      (materiais || []).forEach(item => {
+        const row = document.createElement('div');
+        row.className = 'linha-consumo';
+        row.innerHTML = `
+          <div>
+            <div><strong>${item.item || item.estoque_id}</strong></div>
+            <div>${Number(item.quantidade || 0).toFixed(2)} ${item.unidade || ''}</div>
+          </div>
+          <input
+            type="number"
+            step="0.01"
+            min="0"
+            data-estoque-id="${item.estoque_id}"
+            placeholder="Qtd a baixar"
+          >
+        `;
+        consumoLista.appendChild(row);
+      });
+
+      modalConsumo.classList.remove('hidden');
+    }
+
+    function fecharModalConsumo() {
+      const { modalConsumo, consumoLista } = el();
+      if (!modalConsumo || !consumoLista) return;
+
+      modalConsumo.classList.add('hidden');
+      consumoLista.innerHTML = '';
+      delete modalConsumo.dataset.producaoId;
+    }
+
+    function obterConsumoPayload() {
+      const { modalConsumo, consumoLista } = el();
+      if (!modalConsumo || !consumoLista) return { producaoId: '', itens: [] };
+
+      const producaoId = modalConsumo.dataset.producaoId || '';
+      const inputs = consumoLista.querySelectorAll('input[data-estoque-id]');
+      const itens = [...inputs].map(input => ({
+        estoque_id: input.dataset.estoqueId,
+        quantidade: Number(input.value || 0)
+      })).filter(i => i.estoque_id && i.quantidade > 0);
+
+      return { producaoId, itens };
+    }
+
+    /* =========================
+       EVENT DELEGATION
+    ========================== */
+    function initDelegation() {
+      if (delegationInit) return;
+      delegationInit = true;
+
+      document.addEventListener('click', e => {
+        const card = e.target.closest('.card');
+        const lista = document.getElementById('listaProducao');
+
+        if (card && lista && !lista.contains(card)) return;
+
+        if (e.target.classList.contains('ver-mais')) {
+          e.stopPropagation();
+          abrirCard(card);
+          if (card && window.ProducaoController) {
+            ProducaoController.carregarMateriaisPrevistos(card.dataset.id);
+          }
+          return;
+        }
+
+        if (e.target.classList.contains('fechar-card')) {
+          e.stopPropagation();
+          fecharCard();
+          return;
+        }
+
+        if (e.target.classList.contains('btn-add-etapa')) {
+          const producaoId = e.target.dataset.producaoId;
+          const input = document.getElementById(`novaEtapa_${producaoId}`);
+          const nome = input ? input.value.trim() : '';
+          if (nome && window.ProducaoController) {
+            ProducaoController.adicionarEtapa(producaoId, nome);
+            if (input) input.value = '';
+          }
+          return;
+        }
+
+        if (cardAberto && !cardAberto.contains(e.target)) {
+          fecharCard();
+        }
+      });
+
+      document.addEventListener('change', e => {
+        if (!e.target.classList.contains('check-etapa')) return;
+        const producaoId = e.target.dataset.producaoId;
+        const etapaId = e.target.dataset.etapaId;
+        const feito = e.target.checked;
+        if (window.ProducaoController) {
+          ProducaoController.marcarEtapa(producaoId, etapaId, feito);
+        }
+      });
+    }
+
+    function abrirCard(card) {
+      if (!card) return;
+
+      if (cardAberto && cardAberto !== card) {
+        fecharCard();
+      }
+      card.classList.add('aberto');
+      cardAberto = card;
+    }
+
+    function fecharCard() {
+      if (!cardAberto) return;
+      cardAberto.classList.remove('aberto');
+      cardAberto = null;
+    }
+
+    /* =========================
+       API PUBLICA
+    ========================== */
+    return {
+      abrirFormularioNovo,
+      mostrarFormulario,
+      fecharFormulario,
+      preencherFormulario,
+      resetFormulario,
+      renderLista,
+      renderProdutos,
+
+      abrirModalConsumo,
+      fecharModalConsumo,
+      obterConsumoPayload
+    };
+
+  })();
+</script>
