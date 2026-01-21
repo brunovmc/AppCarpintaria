@@ -82,16 +82,34 @@
 
     function salvar() {
       const get = id => document.getElementById(id)?.value || '';
+      const parseNumeroInput = valor => {
+        const s = String(valor ?? '').trim();
+        if (s === '') return '';
+        const n = Number(s.replace(',', '.'));
+        return isNaN(n) ? '' : n;
+      };
+
+      const tipo = get('tipo');
+      const comprimento_cm = tipo === 'MADEIRA' ? parseNumeroInput(get('comprimento_cm')) : '';
+      const largura_cm = tipo === 'MADEIRA' ? parseNumeroInput(get('largura_cm')) : '';
+      const espessura_cm = tipo === 'MADEIRA' ? parseNumeroInput(get('espessura_cm')) : '';
+      const qtdMadeira = (tipo === 'MADEIRA' && comprimento_cm && largura_cm && espessura_cm)
+        ? Number(((comprimento_cm * largura_cm * espessura_cm) / 1000000).toFixed(2))
+        : '';
 
       const dados = {
-        tipo: get('tipo'),
+        tipo,
         item: get('item'),
-        quantidade: Number(get('quantidade')) || 0,
-        unidade: get('unidade'),
+        quantidade: tipo === 'MADEIRA' && qtdMadeira !== '' ? qtdMadeira : Number(get('quantidade')) || 0,
+        unidade: tipo === 'MADEIRA' ? 'M3' : get('unidade'),
         categoria: get('categoria'),
         fornecedor: get('fornecedor'),
         valor_unit: Number(get('valor_unit')) || 0,
         observacao: get('observacao'),
+
+        comprimento_cm,
+        largura_cm,
+        espessura_cm,
 
         potencia: get('potencia'),
         voltagem: get('voltagem'),

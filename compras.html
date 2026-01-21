@@ -17,6 +17,13 @@
   <!-- Unidade -->
   <select id="compraUnidade"></select>
 
+  <!-- Campos especificos de madeira -->
+  <div id="compraMadeiraFields" class="hidden">
+    <input id="compraComprimentoCm" type="number" step="0.01" placeholder="Comprimento (cm)" oninput="ComprasUI.atualizarQuantidadeMadeira()">
+    <input id="compraLarguraCm" type="number" step="0.01" placeholder="Largura (cm)" oninput="ComprasUI.atualizarQuantidadeMadeira()">
+    <input id="compraEspessuraCm" type="number" step="0.01" placeholder="Espessura (cm)" oninput="ComprasUI.atualizarQuantidadeMadeira()">
+  </div>
+
   <!-- Categoria -->
   <input id="compraCategoria" placeholder="Categoria">
 

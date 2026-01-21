@@ -9,6 +9,9 @@ const ESTOQUE_SCHEMA = [
   'ativo',
   'criado_em',
   'quantidade',
+  'comprimento_cm',
+  'largura_cm',
+  'espessura_cm',
   'categoria',
   'fornecedor',
   'potencia',
@@ -91,6 +94,9 @@ function obterItemEstoque(id) {
     categoria: item.categoria || '',
     unidade: item.unidade || '',
     quantidade: item.quantidade || '',
+    comprimento_cm: item.comprimento_cm || '',
+    largura_cm: item.largura_cm || '',
+    espessura_cm: item.espessura_cm || '',
     valor_unit: item.valor_unit || '',
     fornecedor: item.fornecedor || '',
     observacao: item.observacao || '',
@@ -140,6 +146,4 @@ function deletarItemEstoque(id) {
     ESTOQUE_SCHEMA
   );
 }
-
-
 

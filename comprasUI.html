@@ -21,12 +21,17 @@
         valor_unit: document.getElementById('compraValorUnit'),
         observacao: document.getElementById('compraObservacao'),
 
+        comprimento_cm: document.getElementById('compraComprimentoCm'),
+        largura_cm: document.getElementById('compraLarguraCm'),
+        espessura_cm: document.getElementById('compraEspessuraCm'),
+
         potencia: document.getElementById('compraPotencia'),
         voltagem: document.getElementById('compraVoltagem'),
         comprado_em: document.getElementById('compraCompradoEm'),
         vida_util_mes: document.getElementById('compraVidaUtilMes'),
 
         equipamentoFields: document.getElementById('compraEquipamentoFields'),
+        madeiraFields: document.getElementById('compraMadeiraFields'),
         formTitulo: document.getElementById('compraFormTitulo')
       };
     }
@@ -35,6 +40,42 @@
       return (Array.isArray(lista) ? lista : [])
         .map(v => (v ?? '').toString().trim())
         .filter(v => v !== '');
+    }
+
+    function parseNumeroInput(valor) {
+      const s = String(valor ?? '').trim();
+      if (s === '') return 0;
+      const n = Number(s.replace(',', '.'));
+      return isNaN(n) ? 0 : n;
+    }
+
+    function garantirOpcao(select, valor) {
+      if (!select || !valor) return;
+      const existe = [...select.options].some(o => o.value === valor);
+      if (!existe) {
+        const opt = document.createElement('option');
+        opt.value = valor;
+        opt.textContent = valor;
+        select.appendChild(opt);
+      }
+    }
+
+    function atualizarQuantidadeMadeira() {
+      const f = el();
+      if (!f.tipo || f.tipo.value !== 'MADEIRA') return;
+      if (!f.quantidade) return;
+
+      const comp = parseNumeroInput(f.comprimento_cm?.value);
+      const larg = parseNumeroInput(f.largura_cm?.value);
+      const espes = parseNumeroInput(f.espessura_cm?.value);
+
+      if (!comp || !larg || !espes) {
+        f.quantidade.value = '';
+        return;
+      }
+
+      const m3 = (comp * larg * espes) / 1000000;
+      f.quantidade.value = m3.toFixed(2);
     }
 
     /* =========================
@@ -83,6 +124,10 @@
       if (f.valor_unit) f.valor_unit.value = data.valor_unit || '';
       if (f.observacao) f.observacao.value = data.observacao || '';
 
+      if (f.comprimento_cm) f.comprimento_cm.value = data.comprimento_cm || '';
+      if (f.largura_cm) f.largura_cm.value = data.largura_cm || '';
+      if (f.espessura_cm) f.espessura_cm.value = data.espessura_cm || '';
+
       if (f.potencia) f.potencia.value = data.potencia || '';
       if (f.voltagem) f.voltagem.value = data.voltagem || '';
       if (f.comprado_em) f.comprado_em.value = data.comprado_em || '';
@@ -104,6 +149,9 @@
         f.fornecedor,
         f.valor_unit,
         f.observacao,
+        f.comprimento_cm,
+        f.largura_cm,
+        f.espessura_cm,
         f.potencia,
         f.voltagem,
         f.comprado_em,
@@ -111,17 +159,40 @@
       ].forEach(i => i && (i.value = ''));
 
       if (f.equipamentoFields) f.equipamentoFields.classList.add('hidden');
+      if (f.madeiraFields) f.madeiraFields.classList.add('hidden');
+      if (f.quantidade) f.quantidade.readOnly = false;
       if (f.formTitulo) f.formTitulo.innerText = 'Nova Compra';
     }
 
     function handleTipoChange() {
-      const { tipo, equipamentoFields } = el();
-      if (!tipo || !equipamentoFields) return;
+      const { tipo, equipamentoFields, madeiraFields, quantidade, unidade } = el();
+      if (!tipo) return;
 
-      equipamentoFields.classList.toggle(
-        'hidden',
-        tipo.value !== 'EQUIPAMENTO'
-      );
+      const isEquip = tipo.value === 'EQUIPAMENTO';
+      const isMadeira = tipo.value === 'MADEIRA';
+
+      if (equipamentoFields) {
+        equipamentoFields.classList.toggle('hidden', !isEquip);
+      }
+
+      if (madeiraFields) {
+        madeiraFields.classList.toggle('hidden', !isMadeira);
+      }
+
+      if (quantidade) {
+        quantidade.readOnly = isMadeira;
+      }
+
+      if (isMadeira && unidade) {
+        garantirOpcao(unidade, 'M3');
+        unidade.value = 'M3';
+        atualizarQuantidadeMadeira();
+      }
+
+      if (!isMadeira && madeiraFields) {
+        const inputs = madeiraFields.querySelectorAll('input');
+        inputs.forEach(i => (i.value = ''));
+      }
     }
 
     /* =========================
@@ -209,6 +280,7 @@
         const div = document.createElement('div');
         div.className = 'card';
         div.dataset.id = i.ID;
+        const isMadeira = String(i.tipo || '').toUpperCase() === 'MADEIRA';
 
         div.innerHTML = `
           <div class="card-resumo">
@@ -225,6 +297,10 @@
             <p><b>Fornecedor:</b> ${i.fornecedor || '-'}</p>
             <p><b>Valor unitario:</b> R$ ${Number(i.valor_unit || 0).toFixed(2)}</p>
             <p><b>Observacao:</b> ${i.observacao || '-'}</p>
+
+            ${isMadeira ? `
+              <p><b>Medidas (cm):</b> ${i.comprimento_cm || '-'} x ${i.largura_cm || '-'} x ${i.espessura_cm || '-'}</p>
+            ` : ''}
 
             ${i.tipo === 'EQUIPAMENTO' ? `
               <p><b>Potencia:</b> ${i.potencia || '-'}</p>
@@ -307,7 +383,8 @@
       renderTipos,
       renderUnidades,
       renderCategorias,
-      renderFornecedores
+      renderFornecedores,
+      atualizarQuantidadeMadeira
     };
 
   })();

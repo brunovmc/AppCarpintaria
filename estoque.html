@@ -17,6 +17,13 @@
   <!-- Unidade -->
   <select id="unidade"></select>
 
+  <!-- Campos especificos de madeira -->
+  <div id="madeiraFields" class="hidden">
+    <input id="comprimento_cm" type="number" step="0.01" placeholder="Comprimento (cm)" oninput="EstoqueUI.atualizarQuantidadeMadeira()">
+    <input id="largura_cm" type="number" step="0.01" placeholder="Largura (cm)" oninput="EstoqueUI.atualizarQuantidadeMadeira()">
+    <input id="espessura_cm" type="number" step="0.01" placeholder="Espessura (cm)" oninput="EstoqueUI.atualizarQuantidadeMadeira()">
+  </div>
+
   <!-- Categoria -->
   <input id="categoria" placeholder="Categoria">
 
