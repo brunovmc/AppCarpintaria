@@ -21,6 +21,7 @@ function testeValidacao() {
 
 function listarTipos() {
   const sheet = getSheet('VALIDACAO');
+  if (!sheet) return [];
   const lastRow = sheet.getLastRow();
   if (lastRow < 2) return [];
 
@@ -33,6 +34,7 @@ function listarTipos() {
 
 function listarUnidades() {
   const sheet = getSheet('VALIDACAO');
+  if (!sheet) return [];
   const lastRow = sheet.getLastRow();
   if (lastRow < 2) return [];
 
@@ -49,6 +51,7 @@ function listarUnidadesPorTipo(tipo) {
   if (!tipo) return [];
 
   const sheet = getSheet('VALIDACAO');
+  if (!sheet) return [];
   const lastRow = sheet.getLastRow();
   if (lastRow < 2) return [];
 
@@ -70,6 +73,15 @@ function listarUnidadesPorTipo(tipo) {
  */
 function obterValidacoes() {
   const sheet = getSheet('VALIDACAO');
+  if (!sheet) {
+    return {
+      tipos: [],
+      unidades: [],
+      categorias: [],
+      fornecedores: [],
+      valorKwhPorFornecedor: {}
+    };
+  }
   const lastRow = sheet.getLastRow();
   if (lastRow < 2) {
     return {

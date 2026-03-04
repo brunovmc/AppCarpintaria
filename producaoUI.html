@@ -13,6 +13,7 @@
 
         // Form
         produto: document.getElementById('producaoProduto'),
+        receita: document.getElementById('producaoReceita'),
         nome: document.getElementById('producaoNome'),
         qtd: document.getElementById('producaoQtd'),
         status: document.getElementById('producaoStatus'),
@@ -37,6 +38,13 @@
     function formatMoeda(valor) {
       const n = Number(valor || 0);
       return n.toFixed(2);
+    }
+
+    function parseNumeroInput(valor) {
+      const s = String(valor ?? '').trim();
+      if (s === '') return 0;
+      const n = Number(s.replace(',', '.'));
+      return isNaN(n) ? 0 : n;
     }
 
     /* =========================
@@ -74,6 +82,7 @@
       const f = el();
 
       if (f.produto) f.produto.value = data.produto_id || '';
+      if (f.receita) f.receita.value = data.receita_id || '';
       if (f.nome) f.nome.value = data.nome_ordem || '';
       if (f.qtd) f.qtd.value = data.qtd_planejada || '';
       if (f.status) f.status.value = data.status || 'Em planejamento';
@@ -89,6 +98,7 @@
 
       [
         f.produto,
+        f.receita,
         f.nome,
         f.qtd,
         f.status,
@@ -98,6 +108,7 @@
       ].forEach(i => i && (i.value = ''));
 
       if (f.formTitulo) f.formTitulo.innerText = 'Nova Producao';
+      renderReceitas([]);
     }
 
     /* =========================
@@ -117,6 +128,26 @@
         o.textContent = p.nome_produto || p.produto_id;
         produto.appendChild(o);
       });
+    }
+
+    function renderReceitas(lista, selecionadoId = '') {
+      const { receita } = el();
+      if (!receita) return;
+
+      const clean = (Array.isArray(lista) ? lista : [])
+        .filter(v => v && v.receita_id);
+
+      receita.innerHTML = '<option value="">Selecione a receita</option>';
+      clean.forEach(r => {
+        const o = document.createElement('option');
+        o.value = r.receita_id;
+        o.textContent = r.nome_receita || r.receita_id;
+        receita.appendChild(o);
+      });
+
+      if (selecionadoId) {
+        receita.value = selecionadoId;
+      }
     }
 
     /* =========================
@@ -212,6 +243,11 @@
         const nome = i.nome_ordem || i.nome_produto || i.producao_id;
         const unidade = i.unidade_produto || '';
         const custoPrevisto = formatMoeda(i.custo_previsto || 0);
+        const status = String(i.status || '');
+        const concluido = status === 'Concluido' || status === 'Concluida';
+        const estoqueAtualizado = !!i.estoque_atualizado;
+        const podeAtualizarEstoque = concluido && !estoqueAtualizado;
+        const labelEstoque = estoqueAtualizado ? 'Estoque atualizado' : 'Atualizar estoque';
 
         div.innerHTML = `
           <div class="card-resumo">
@@ -226,10 +262,12 @@
             <button class="fechar-card">X</button>
 
             <p><b>Produto:</b> ${i.nome_produto || '-'}</p>
+            <p><b>Receita:</b> ${i.receita_nome || '-'}</p>
             <p><b>Inicio:</b> ${i.data_inicio || '-'}</p>
             <p><b>Previsto:</b> ${i.data_prevista_termino || '-'}</p>
             <p><b>Custo previsto:</b> R$ ${custoPrevisto}</p>
             <p><b>Observacao:</b> ${i.observacao || '-'}</p>
+            ${estoqueAtualizado ? `<p><b>Estoque atualizado:</b> ${i.data_estoque_atualizado || '-'}</p>` : ''}
 
             <div class="bloco">
               <p><b>Materiais previstos</b></p>
@@ -246,7 +284,10 @@
             </div>
 
             <div class="acoes">
-              <button onclick="ProducaoController.abrirConsumo('${i.producao_id}')">Baixar do estoque</button>
+              <button
+                ${podeAtualizarEstoque ? '' : 'disabled'}
+                onclick="ProducaoController.abrirAtualizarEstoque('${i.producao_id}')"
+              >${labelEstoque}</button>
               <button onclick="ProducaoController.editar('${i.producao_id}')">Editar</button>
               <button onclick="ProducaoController.excluir('${i.producao_id}')">Excluir</button>
             </div>
@@ -274,7 +315,7 @@
       if (!modalConsumo || !consumoLista) return;
 
       modalConsumo.dataset.producaoId = producaoId;
-      if (consumoTitulo) consumoTitulo.textContent = `Baixar do estoque - ${nome}`;
+      if (consumoTitulo) consumoTitulo.textContent = `Atualizar estoque - ${nome}`;
 
       consumoLista.innerHTML = '';
 
@@ -292,6 +333,7 @@
             min="0"
             data-estoque-id="${item.estoque_id}"
             placeholder="Qtd a baixar"
+            value="${Number(item.quantidade || 0).toFixed(2)}"
           >
         `;
         consumoLista.appendChild(row);
@@ -317,7 +359,7 @@
       const inputs = consumoLista.querySelectorAll('input[data-estoque-id]');
       const itens = [...inputs].map(input => ({
         estoque_id: input.dataset.estoqueId,
-        quantidade: Number(input.value || 0)
+        quantidade: parseNumeroInput(input.value || 0)
       })).filter(i => i.estoque_id && i.quantidade > 0);
 
       return { producaoId, itens };
@@ -440,6 +482,7 @@
       resetFormulario,
       renderLista,
       renderProdutos,
+      renderReceitas,
 
       abrirModalConsumo,
       fecharModalConsumo,

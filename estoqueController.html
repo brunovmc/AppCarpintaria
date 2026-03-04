@@ -6,7 +6,6 @@
 
     let validacoes = null;
 
-    let destinosProdutos = [];
     let destinosProducao = [];
 
     function init() {
@@ -23,19 +22,8 @@
     function carregarDestinosAdicao() {
       google.script.run
         .withSuccessHandler(lista => {
-          destinosProdutos = Array.isArray(lista) ? lista : [];
-          EstoqueUI.setOpcoesAdicao?.({
-            produtos: destinosProdutos,
-            producao: destinosProducao
-          });
-        })
-        .listarProdutos();
-
-      google.script.run
-        .withSuccessHandler(lista => {
           destinosProducao = Array.isArray(lista) ? lista : [];
           EstoqueUI.setOpcoesAdicao?.({
-            produtos: destinosProdutos,
             producao: destinosProducao
           });
         })
@@ -100,11 +88,11 @@
       const dados = {
         tipo,
         item: get('item'),
-        quantidade: tipo === 'MADEIRA' && qtdMadeira !== '' ? qtdMadeira : Number(get('quantidade')) || 0,
+        quantidade: tipo === 'MADEIRA' && qtdMadeira !== '' ? qtdMadeira : parseNumeroInput(get('quantidade')) || 0,
         unidade: tipo === 'MADEIRA' ? 'M3' : get('unidade'),
         categoria: get('categoria'),
         fornecedor: get('fornecedor'),
-        valor_unit: Number(get('valor_unit')) || 0,
+        valor_unit: parseNumeroInput(get('valor_unit')) || 0,
         observacao: get('observacao'),
 
         comprimento_cm,
@@ -114,7 +102,7 @@
         potencia: get('potencia'),
         voltagem: get('voltagem'),
         comprado_em: get('comprado_em'),
-        vida_util_mes: Number(get('vida_util_mes')) || ''
+        vida_util_mes: parseNumeroInput(get('vida_util_mes')) || ''
       };
 
       /* =========
@@ -219,12 +207,11 @@
     }
 
 
-    function adicionarMaterialDestino(estoqueId, tipo, destinoId, quantidade) {
-      const tipoUpper = String(tipo || '').trim().toUpperCase();
+    function adicionarMaterialDestino(estoqueId, destinoId, quantidade) {
       const qtd = Number(String(quantidade || '').replace(',', '.'));
 
-      if (!estoqueId || !tipoUpper || !destinoId) {
-        mostrarToast('Selecione o destino', 'erro');
+      if (!estoqueId || !destinoId) {
+        mostrarToast('Selecione a producao', 'erro');
         return;
       }
 
@@ -233,61 +220,20 @@
         return;
       }
 
-      if (tipoUpper === 'PRODUTO') {
-        mostrarToast('Adicionando ao produto...');
+      mostrarToast('Adicionando a producao...');
 
-        google.script.run
-          .withFailureHandler(() => {
-            mostrarToast('Erro ao adicionar ao produto', 'erro');
-          })
-          .withSuccessHandler(resp => {
-            if (window.ProdutosStore && ProdutosStore.isLoaded()) {
-              const prod = ProdutosStore.getById(destinoId);
-              if (prod) {
-                const comp = Array.isArray(prod.composicao) ? [...prod.composicao] : [];
-                if (resp && resp.componente) {
-                  comp.push(resp.componente);
-                }
-                ProdutosStore.update(destinoId, {
-                  composicao: comp,
-                  composicaoCarregada: true,
-                  custo_previsto: Number(resp?.custoPrevisto) || 0,
-                  custo_erro: ''
-                });
-              }
-              if (typeof aplicarBuscaProdutos === 'function') {
-                aplicarBuscaProdutos();
-              } else if (window.ProdutosUI?.renderLista) {
-                ProdutosUI.renderLista(ProdutosStore.get());
-              }
-            }
-
-            EstoqueUI.resetarAdicaoDestino?.(estoqueId);
-            mostrarToast('Adicionado ao produto');
-          })
-          .adicionarMaterialProduto(destinoId, estoqueId, qtd);
-        return;
-      }
-
-      if (tipoUpper === 'PRODUCAO') {
-        mostrarToast('Adicionando a producao...');
-
-        google.script.run
-          .withFailureHandler(() => {
-            mostrarToast('Erro ao adicionar a producao', 'erro');
-          })
-          .withSuccessHandler(() => {
-            if (window.ProducaoController?.carregarMateriaisPrevistos) {
-              ProducaoController.carregarMateriaisPrevistos(destinoId, true);
-            }
-            EstoqueUI.resetarAdicaoDestino?.(estoqueId);
-            mostrarToast('Adicionado a producao');
-          })
-          .adicionarMaterialExtraProducao(destinoId, estoqueId, qtd);
-        return;
-      }
-
-      mostrarToast('Destino invalido', 'erro');
+      google.script.run
+        .withFailureHandler(() => {
+          mostrarToast('Erro ao adicionar a producao', 'erro');
+        })
+        .withSuccessHandler(() => {
+          if (window.ProducaoController?.carregarMateriaisPrevistos) {
+            ProducaoController.carregarMateriaisPrevistos(destinoId, true);
+          }
+          EstoqueUI.resetarAdicaoDestino?.(estoqueId);
+          mostrarToast('Adicionado a producao');
+        })
+        .adicionarMaterialExtraProducao(destinoId, estoqueId, qtd);
     }
 
     function limparEdicao() {

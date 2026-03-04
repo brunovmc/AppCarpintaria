@@ -71,11 +71,11 @@
       const dados = {
         tipo,
         item: get('compraItem'),
-        quantidade: tipo === 'MADEIRA' && qtdMadeira !== '' ? qtdMadeira : Number(get('compraQuantidade')) || 0,
+        quantidade: tipo === 'MADEIRA' && qtdMadeira !== '' ? qtdMadeira : parseNumeroInput(get('compraQuantidade')) || 0,
         unidade: tipo === 'MADEIRA' ? 'M3' : get('compraUnidade'),
         categoria: get('compraCategoria'),
         fornecedor: get('compraFornecedor'),
-        valor_unit: Number(get('compraValorUnit')) || 0,
+        valor_unit: parseNumeroInput(get('compraValorUnit')) || 0,
         observacao: get('compraObservacao'),
 
         comprimento_cm,
@@ -85,7 +85,7 @@
         potencia: get('compraPotencia'),
         voltagem: get('compraVoltagem'),
         comprado_em: get('compraCompradoEm'),
-        vida_util_mes: Number(get('compraVidaUtilMes')) || ''
+        vida_util_mes: parseNumeroInput(get('compraVidaUtilMes')) || ''
       };
 
       if (editandoId) {

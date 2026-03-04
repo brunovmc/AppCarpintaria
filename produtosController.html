@@ -5,6 +5,28 @@
     let iniciado = false;
 
     let estoqueOpcoes = [];
+    let receitasCache = {};
+
+    function parseNumeroInput(valor) {
+      const s = String(valor ?? '').trim();
+      if (s === '') return '';
+      const n = Number(s.replace(',', '.'));
+      return isNaN(n) ? '' : n;
+    }
+
+    function getTiposEstoque() {
+      const tipos = new Set();
+      (estoqueOpcoes || []).forEach(item => {
+        if (item && item.tipo) {
+          tipos.add(String(item.tipo || '').toUpperCase());
+        }
+      });
+      return tipos;
+    }
+
+    function isTipoEstoque(tipo) {
+      return getTiposEstoque().has(String(tipo || '').toUpperCase());
+    }
 
     function init() {
       if (iniciado) return;
@@ -15,10 +37,10 @@
       iniciado = true;
     }
 
-    function atualizarOpcoesComposicao() {
+    function atualizarOpcoesReceitas() {
       if (!window.ProdutosUI || !window.ProdutosStore) return;
       const produtos = ProdutosStore.get();
-      ProdutosUI.setOpcoesComposicao({
+      ProdutosUI.setOpcoesReceitas({
         estoque: estoqueOpcoes,
         produtos
       });
@@ -36,7 +58,7 @@
       google.script.run
         .withSuccessHandler(lista => {
           estoqueOpcoes = Array.isArray(lista) ? lista : [];
-          atualizarOpcoesComposicao();
+          atualizarOpcoesReceitas();
         })
         .listarEstoque();
     }
@@ -44,11 +66,256 @@
     function carregarProdutos() {
       google.script.run
         .withSuccessHandler(lista => {
-          ProdutosStore.set(lista);
-          atualizarOpcoesComposicao();
+          const atual = ProdutosStore.get();
+          const map = {};
+          atual.forEach(p => {
+            if (p && p.produto_id) {
+              map[p.produto_id] = p;
+            }
+          });
+
+          const normalizada = (Array.isArray(lista) ? lista : []).map(p => {
+            const existente = map[p.produto_id] || {};
+            return {
+              ...p,
+              receitas: Array.isArray(existente.receitas) ? existente.receitas : [],
+              receitasCarregadas: !!existente.receitasCarregadas
+            };
+          });
+
+          ProdutosStore.set(normalizada);
+          atualizarOpcoesReceitas();
           renderListaAtual();
         })
         .listarProdutos();
+    }
+
+    function carregarReceitas(produtoId, forcar = false) {
+      const item = ProdutosStore.getById(produtoId);
+      if (!item) return;
+
+      if (item.receitasCarregadas && !forcar) return;
+
+      google.script.run
+        .withSuccessHandler(receitas => {
+          receitasCache[produtoId] = Array.isArray(receitas) ? receitas : [];
+          ProdutosStore.update(produtoId, {
+            receitas: Array.isArray(receitas) ? receitas : [],
+            receitasCarregadas: true
+          });
+          renderListaAtual();
+        })
+        .withFailureHandler(() => {
+          mostrarToast('Erro ao carregar receitas', 'erro');
+        })
+        .listarReceitasProduto(produtoId);
+    }
+
+    function carregarReceitasProdutoEntrada(produtoId, forcar = false) {
+      if (!produtoId || !window.ProdutosUI) return;
+
+      if (receitasCache[produtoId] && !forcar) {
+        ProdutosUI.setReceitasProduto(produtoId, receitasCache[produtoId]);
+        return;
+      }
+
+      google.script.run
+        .withSuccessHandler(receitas => {
+          const lista = Array.isArray(receitas) ? receitas : [];
+          receitasCache[produtoId] = lista;
+          ProdutosUI.setReceitasProduto(produtoId, lista);
+        })
+        .withFailureHandler(() => {
+          mostrarToast('Erro ao carregar receitas do produto', 'erro');
+        })
+        .listarReceitasProduto(produtoId);
+    }
+
+    function criarReceita(produtoId) {
+      const item = ProdutosStore.getById(produtoId);
+      if (!item) return;
+
+      mostrarToast('Criando receita...');
+
+      google.script.run
+        .withSuccessHandler(receita => {
+          const receitas = Array.isArray(item.receitas) ? [...item.receitas] : [];
+          receitas.unshift({
+            ...receita,
+            entradas: [],
+            saidas: [],
+            _editing: true
+          });
+
+          ProdutosStore.update(produtoId, {
+            receitas,
+            receitasCarregadas: true
+          });
+          renderListaAtual();
+        })
+        .withFailureHandler(() => {
+          mostrarToast('Erro ao criar receita', 'erro');
+        })
+        .criarReceitaProduto(produtoId, {
+          nome_receita: 'Nova receita'
+        });
+    }
+
+    function iniciarEdicaoReceita(produtoId, receitaId) {
+      const item = ProdutosStore.getById(produtoId);
+      if (!item) return;
+
+      if (!item.receitasCarregadas) {
+        carregarReceitas(produtoId, true);
+        return;
+      }
+
+      const receitas = (item.receitas || []).map(r => {
+        if (r.receita_id !== receitaId) return r;
+        return { ...r, _editing: true };
+      });
+
+      ProdutosStore.update(produtoId, { receitas });
+      renderListaAtual();
+    }
+
+    function cancelarEdicaoReceita(produtoId, receitaId) {
+      const item = ProdutosStore.getById(produtoId);
+      if (!item) return;
+
+      if (!item.receitasCarregadas) return;
+
+      carregarReceitas(produtoId, true);
+    }
+
+    function validarReceita(dados, entradas, saidas) {
+      const nome = String(dados?.nome_receita || '').trim();
+      if (!nome) return 'Informe o nome da receita';
+
+      if (!Array.isArray(entradas) || entradas.length === 0) {
+        return 'Adicione ao menos uma entrada';
+      }
+
+      for (const e of entradas) {
+        const tipo = String(e.tipo_item || '').trim().toUpperCase();
+        const nomeItem = String(e.nome_item || '').trim();
+        const qtd = parseNumeroInput(e.qtd_pecas);
+        const comp = parseNumeroInput(e.comprimento_cm);
+        const larg = parseNumeroInput(e.largura_cm);
+        const esp = parseNumeroInput(e.espessura_cm);
+
+        if (!tipo) return 'Informe o tipo da entrada';
+        if (!nomeItem) return 'Informe o nome da entrada';
+        if (tipo !== 'LIVRE' && tipo !== 'PRODUTO' && !isTipoEstoque(tipo)) {
+          return 'Tipo de entrada invalido';
+        }
+        if (tipo === 'PRODUTO') {
+          const prodId = String(e.produto_ref_id || '').trim();
+          const recId = String(e.receita_ref_id || '').trim();
+          if (!prodId) return 'Selecione o produto da entrada';
+          if (!recId) return 'Selecione a receita da entrada';
+        }
+        if (isTipoEstoque(tipo) && !String(e.estoque_ref_id || '').trim()) {
+          return 'Selecione o item do estoque';
+        }
+        if (!qtd || qtd <= 0) return 'Qtd de pecas invalida';
+        if (tipo === 'MADEIRA' && (!comp || !larg || !esp)) {
+          return 'Dimensoes invalidas';
+        }
+      }
+
+      if (!Array.isArray(saidas) || saidas.length === 0) {
+        return 'Adicione ao menos uma saida';
+      }
+
+      for (const s of saidas) {
+        const nomeSaida = String(s.nome_saida || '').trim();
+        const qtd = parseNumeroInput(s.quantidade);
+        if (!nomeSaida) return 'Informe o nome da saida';
+        if (!qtd || qtd <= 0) return 'Quantidade de saida invalida';
+      }
+
+      return '';
+    }
+
+    function salvarReceita(produtoId, receitaId, dados, entradas, saidas) {
+      const item = ProdutosStore.getById(produtoId);
+      if (!item) return;
+
+      const erro = validarReceita(dados, entradas, saidas);
+      if (erro) {
+        mostrarToast(erro, 'erro');
+        return;
+      }
+
+      const snapshot = JSON.parse(JSON.stringify(item));
+      const receitas = (item.receitas || []).map(r => {
+        if (r.receita_id !== receitaId) return r;
+        return {
+          ...r,
+          ...dados,
+          entradas: entradas || [],
+          saidas: saidas || [],
+          _editing: false
+        };
+      });
+
+      ProdutosStore.update(produtoId, { receitas });
+      renderListaAtual();
+      mostrarToast('Salvando receita...');
+
+      google.script.run
+        .withFailureHandler(() => {
+          ProdutosStore.update(produtoId, snapshot);
+          renderListaAtual();
+          mostrarToast('Erro ao salvar receita', 'erro');
+        })
+        .withSuccessHandler(() => {
+          carregarReceitas(produtoId, true);
+          mostrarToast('Receita salva');
+        })
+        .salvarReceitaCompleta(receitaId, dados || {}, entradas || [], saidas || []);
+    }
+
+    function duplicarReceita(produtoId, receitaId) {
+      const item = ProdutosStore.getById(produtoId);
+      if (!item) return;
+
+      mostrarToast('Duplicando receita...');
+
+      google.script.run
+        .withFailureHandler(() => {
+          mostrarToast('Erro ao duplicar receita', 'erro');
+        })
+        .withSuccessHandler(() => {
+          carregarReceitas(produtoId, true);
+          mostrarToast('Receita duplicada');
+        })
+        .duplicarReceitaProduto(receitaId);
+    }
+
+    function excluirReceita(produtoId, receitaId) {
+      if (!confirm('Deseja remover esta receita?')) return;
+
+      const item = ProdutosStore.getById(produtoId);
+      if (!item) return;
+
+      const snapshot = JSON.parse(JSON.stringify(item));
+      const receitas = (item.receitas || []).filter(r => r.receita_id !== receitaId);
+
+      ProdutosStore.update(produtoId, { receitas });
+      renderListaAtual();
+
+      google.script.run
+        .withFailureHandler(() => {
+          ProdutosStore.update(produtoId, snapshot);
+          renderListaAtual();
+          mostrarToast('Erro ao remover receita', 'erro');
+        })
+        .withSuccessHandler(() => {
+          mostrarToast('Receita removida');
+        })
+        .deletarReceitaProduto(receitaId);
     }
 
     function salvar() {
@@ -56,6 +323,9 @@
 
       const dados = {
         nome_produto: get('produtoNome'),
+        unidade_produto: 'UN',
+        estoque_id: get('produtoEstoque'),
+        categoria: get('produtoCategoria'),
         descricao: get('produtoDescricao'),
         observacao: get('produtoObservacao')
       };
@@ -75,7 +345,7 @@
             mostrarToast('Erro ao salvar edicao', 'erro');
           })
           .withSuccessHandler(() => {
-            atualizarOpcoesComposicao();
+            atualizarOpcoesReceitas();
             mostrarToast('Salvo com sucesso');
           })
           .atualizarProduto(idAtual, dados);
@@ -116,7 +386,7 @@
             ...itemSalvo,
             custo_previsto: itemSalvo.custo_previsto || 0
           });
-          atualizarOpcoesComposicao();
+          atualizarOpcoesReceitas();
           renderListaAtual();
           mostrarToast('Salvo com sucesso');
         })
@@ -157,212 +427,9 @@
           mostrarToast('Erro ao remover', 'erro');
         })
         .withSuccessHandler(() => {
-          atualizarOpcoesComposicao();
+          atualizarOpcoesReceitas();
         })
         .deletarProduto(id);
-    }
-
-    function carregarComposicao(produtoId, forcar = false) {
-      const item = ProdutosStore.getById(produtoId);
-      if (!item) return;
-
-      if (item.composicaoCarregada && !forcar) return;
-
-      google.script.run
-        .withSuccessHandler(linhas => {
-          ProdutosStore.update(produtoId, {
-            composicao: Array.isArray(linhas) ? linhas : [],
-            composicaoCarregada: true
-          });
-          renderListaAtual();
-        })
-        .withFailureHandler(() => {
-          mostrarToast('Erro ao carregar composicao', 'erro');
-        })
-        .listarComposicaoProduto(produtoId);
-    }
-
-    function validarLinhaComposicao(produtoId, linha) {
-      const tipo = String(linha.tipo_item || '').trim().toUpperCase();
-      const itemId = String(linha.item_id || '').trim();
-      const quantidadeRaw = String(linha.quantidade || '').trim();
-
-      if (!tipo || !itemId) return 'Informe tipo e item';
-      if (tipo !== 'ESTOQUE' && tipo !== 'PRODUTO') return 'Tipo invalido';
-      if (tipo === 'PRODUTO' && itemId === produtoId) return 'Produto nao pode referenciar ele mesmo';
-
-      const qtd = Number(quantidadeRaw.replace(',', '.'));
-      if (!quantidadeRaw || isNaN(qtd) || qtd <= 0) return 'Quantidade invalida';
-
-      return '';
-    }
-
-    function garantirComposicaoCarregada(produtoId) {
-      const item = ProdutosStore.getById(produtoId);
-      if (!item) return false;
-
-      if (!item.composicaoCarregada) {
-        mostrarToast('Carregue a composicao antes de editar', 'erro');
-        carregarComposicao(produtoId, true);
-        return false;
-      }
-
-      return true;
-    }
-
-    function adicionarComposicaoItem(produtoId, linha) {
-      const item = ProdutosStore.getById(produtoId);
-      if (!item) return;
-
-      if (!garantirComposicaoCarregada(produtoId)) return;
-
-      const erro = validarLinhaComposicao(produtoId, linha);
-      if (erro) {
-        mostrarToast(erro, 'erro');
-        return;
-      }
-
-      const snapshot = { ...item };
-      const composicao = Array.isArray(item.composicao) ? [...item.composicao] : [];
-
-      composicao.push({
-        id: `tmp_${Date.now()}`,
-        tipo_item: String(linha.tipo_item || '').trim().toUpperCase(),
-        item_id: linha.item_id,
-        quantidade: linha.quantidade,
-        unidade: linha.unidade || '',
-        observacao: linha.observacao || ''
-      });
-
-      ProdutosStore.update(produtoId, { composicao, composicaoCarregada: true });
-      renderListaAtual();
-      salvarComposicao(produtoId, snapshot);
-    }
-
-    function iniciarEdicaoComposicao(produtoId, compId) {
-      const item = ProdutosStore.getById(produtoId);
-      if (!item) return;
-
-      if (!garantirComposicaoCarregada(produtoId)) return;
-
-      const composicao = Array.isArray(item.composicao) ? [...item.composicao] : [];
-      const idx = composicao.findIndex(c => c.id === compId);
-      if (idx === -1) return;
-
-      composicao[idx] = { ...composicao[idx], _editing: true };
-      ProdutosStore.update(produtoId, { composicao });
-      renderListaAtual();
-    }
-
-    function cancelarEdicaoComposicao(produtoId, compId) {
-      const item = ProdutosStore.getById(produtoId);
-      if (!item) return;
-
-      if (!garantirComposicaoCarregada(produtoId)) return;
-
-      const composicao = Array.isArray(item.composicao) ? [...item.composicao] : [];
-      const idx = composicao.findIndex(c => c.id === compId);
-      if (idx === -1) return;
-
-      composicao[idx] = { ...composicao[idx], _editing: false };
-      ProdutosStore.update(produtoId, { composicao });
-      renderListaAtual();
-    }
-
-    function salvarEdicaoComposicao(produtoId, compId, linha) {
-      const item = ProdutosStore.getById(produtoId);
-      if (!item) return;
-
-      if (!garantirComposicaoCarregada(produtoId)) return;
-
-      const erro = validarLinhaComposicao(produtoId, linha);
-      if (erro) {
-        mostrarToast(erro, 'erro');
-        return;
-      }
-
-      const snapshot = { ...item };
-      const composicao = Array.isArray(item.composicao) ? [...item.composicao] : [];
-      const idx = composicao.findIndex(c => c.id === compId);
-      if (idx === -1) return;
-
-      composicao[idx] = {
-        ...composicao[idx],
-        tipo_item: String(linha.tipo_item || '').trim().toUpperCase(),
-        item_id: linha.item_id,
-        quantidade: linha.quantidade,
-        unidade: linha.unidade || '',
-        observacao: linha.observacao || '',
-        _editing: false
-      };
-
-      ProdutosStore.update(produtoId, { composicao });
-      renderListaAtual();
-      salvarComposicao(produtoId, snapshot);
-    }
-
-    function removerComposicaoItem(produtoId, compId) {
-      if (!confirm('Deseja remover este item da composicao?')) return;
-
-      const item = ProdutosStore.getById(produtoId);
-      if (!item) return;
-
-      if (!garantirComposicaoCarregada(produtoId)) return;
-
-      const snapshot = { ...item };
-      const composicao = Array.isArray(item.composicao) ? [...item.composicao] : [];
-      const novaComposicao = composicao.filter(c => c.id !== compId);
-
-      ProdutosStore.update(produtoId, { composicao: novaComposicao });
-      renderListaAtual();
-      salvarComposicao(produtoId, snapshot);
-    }
-
-    function salvarComposicao(produtoId, snapshot) {
-      const item = ProdutosStore.getById(produtoId);
-      if (!item) return;
-
-      if (!garantirComposicaoCarregada(produtoId)) return;
-
-      const linhas = (Array.isArray(item.composicao) ? item.composicao : [])
-        .map(l => ({
-          tipo_item: String(l.tipo_item || '').trim().toUpperCase(),
-          item_id: l.item_id,
-          quantidade: l.quantidade,
-          unidade: l.unidade || '',
-          observacao: l.observacao || ''
-        }))
-        .filter(l => l.tipo_item && l.item_id);
-
-      google.script.run
-        .withFailureHandler(() => {
-          if (snapshot) {
-            ProdutosStore.update(produtoId, snapshot);
-            renderListaAtual();
-          }
-          mostrarToast('Erro ao salvar composicao', 'erro');
-        })
-        .withSuccessHandler(() => {
-          carregarComposicao(produtoId, true);
-          recalcularCusto(produtoId);
-          mostrarToast('Composicao salva');
-        })
-        .salvarComposicaoProduto(produtoId, linhas);
-    }
-
-    function recalcularCusto(produtoId) {
-      google.script.run
-        .withFailureHandler(() => {
-          mostrarToast('Erro ao recalcular custo', 'erro');
-        })
-        .withSuccessHandler(custo => {
-          ProdutosStore.update(produtoId, {
-            custo_previsto: Number(custo) || 0,
-            custo_erro: ''
-          });
-          renderListaAtual();
-        })
-        .calcularCustoProduto(produtoId);
     }
 
     function limparEdicao() {
@@ -374,15 +441,14 @@
       salvar,
       editar,
       excluir,
-
-      carregarComposicao,
-      adicionarComposicaoItem,
-      iniciarEdicaoComposicao,
-      cancelarEdicaoComposicao,
-      salvarEdicaoComposicao,
-      removerComposicaoItem,
-      salvarComposicao,
-      recalcularCusto,
+      carregarReceitas,
+      carregarReceitasProdutoEntrada,
+      criarReceita,
+      iniciarEdicaoReceita,
+      cancelarEdicaoReceita,
+      salvarReceita,
+      duplicarReceita,
+      excluirReceita,
 
       limparEdicao
     };

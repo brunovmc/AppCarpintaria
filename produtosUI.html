@@ -5,6 +5,7 @@
 
     let opcoesEstoque = [];
     let opcoesProdutos = [];
+    let receitasPorProduto = {};
 
     /* =========================
        HELPERS
@@ -15,25 +16,366 @@
         lista: document.getElementById('listaProdutos'),
 
         nome: document.getElementById('produtoNome'),
+        categoria: document.getElementById('produtoCategoria'),
+        estoque: document.getElementById('produtoEstoque'),
         descricao: document.getElementById('produtoDescricao'),
         observacao: document.getElementById('produtoObservacao'),
         formTitulo: document.getElementById('produtoFormTitulo')
       };
     }
 
-    function setOpcoesComposicao({ estoque, produtos } = {}) {
+    function setOpcoesReceitas({ estoque, produtos } = {}) {
       opcoesEstoque = Array.isArray(estoque) ? estoque : [];
       opcoesProdutos = Array.isArray(produtos) ? produtos : [];
+      renderEstoqueProdutoOptions();
     }
 
-    function getNomeItem(tipo, id) {
-      if (!tipo || !id) return '';
-      if (tipo === 'PRODUTO') {
-        const p = opcoesProdutos.find(i => i.produto_id === id);
-        return p ? (p.nome_produto || id) : id;
+    function parseNumero(valor) {
+      const s = String(valor ?? '').trim();
+      if (s === '') return 0;
+      const n = Number(s.replace(',', '.'));
+      return isNaN(n) ? 0 : n;
+    }
+
+    function formatNumero(valor, casas = 2) {
+      const n = Number(valor || 0);
+      if (isNaN(n)) return '-';
+      return n.toFixed(casas);
+    }
+
+    function getTiposEstoque() {
+      const tipos = new Set();
+      (opcoesEstoque || []).forEach(item => {
+        if (item && item.tipo) {
+          tipos.add(String(item.tipo || '').toUpperCase());
+        }
+      });
+      return [...tipos];
+    }
+
+    function getTiposEntrada() {
+      const tiposEstoque = getTiposEstoque().sort();
+      return [...tiposEstoque, 'PRODUTO', 'LIVRE'];
+    }
+
+    function isTipoEstoque(tipo) {
+      const t = String(tipo || '').toUpperCase();
+      return getTiposEstoque().includes(t);
+    }
+
+    function getEstoquePorId(id) {
+      if (!id) return null;
+      return opcoesEstoque.find(i => i.ID === id) || null;
+    }
+
+    function getEstoquePorNome(tipo, nome) {
+      const n = String(nome || '').trim();
+      if (!n) return null;
+      const byId = opcoesEstoque.find(i => i.ID === n);
+      if (byId) return byId;
+      return opcoesEstoque.find(i =>
+        String(i.tipo || '').toUpperCase() === String(tipo || '').toUpperCase() &&
+        (i.item || '') === n
+      ) || null;
+    }
+
+    function getEstoqueNome(id) {
+      const item = getEstoquePorId(id);
+      return item ? (item.item || id) : id;
+    }
+
+    function getEstoqueUnidade(id) {
+      const item = getEstoquePorId(id);
+      return item ? (item.unidade || '') : '';
+    }
+
+    function getEstoqueCategoria(id) {
+      const item = getEstoquePorId(id);
+      return item ? (item.categoria || '') : '';
+    }
+
+    function getProdutoCategoria(id) {
+      const item = opcoesProdutos.find(i => i.produto_id === id);
+      return item ? (item.categoria || '') : '';
+    }
+
+    function getProdutoUnidade(id) {
+      const item = opcoesProdutos.find(i => i.produto_id === id);
+      return item ? (item.unidade_produto || 'UN') : 'UN';
+    }
+
+    function renderEstoqueProdutoOptions() {
+      const { estoque } = el();
+      if (!estoque) return;
+
+      const valorAtual = estoque.value || '';
+      const lista = (opcoesEstoque || [])
+        .filter(i => String(i.tipo || '').toUpperCase() === 'PRODUTO');
+
+      estoque.innerHTML = '<option value="">Selecione o estoque do produto</option>';
+      lista.forEach(i => {
+        const o = document.createElement('option');
+        o.value = i.ID;
+        o.textContent = i.item || i.ID;
+        estoque.appendChild(o);
+      });
+
+      if (valorAtual) {
+        estoque.value = valorAtual;
       }
-      const e = opcoesEstoque.find(i => i.ID === id);
-      return e ? (e.item || id) : id;
+    }
+
+    function contarCompativeis(entrada) {
+      if (String(entrada.tipo_item || '').toUpperCase() !== 'MADEIRA') return 0;
+
+      const comp = parseNumero(entrada.comprimento_cm);
+      const larg = parseNumero(entrada.largura_cm);
+      const esp = parseNumero(entrada.espessura_cm);
+
+      if (!comp || !larg || !esp) return 0;
+
+      return (opcoesEstoque || [])
+        .filter(i => String(i.tipo || '').toUpperCase() === 'MADEIRA')
+        .filter(i => {
+          const c = parseNumero(i.comprimento_cm);
+          const l = parseNumero(i.largura_cm);
+          const e = parseNumero(i.espessura_cm);
+          return c >= comp && l >= larg && e >= esp;
+        }).length;
+    }
+
+    function getProdutoPorNome(nome) {
+      const n = String(nome || '').trim();
+      if (!n) return null;
+      const byId = opcoesProdutos.find(p => p.produto_id === n);
+      if (byId) return byId;
+      return opcoesProdutos.find(p => (p.nome_produto || '') === n) || null;
+    }
+
+    function getProdutoNome(produtoId) {
+      if (!produtoId) return '';
+      const p = opcoesProdutos.find(i => i.produto_id === produtoId);
+      return p ? (p.nome_produto || produtoId) : produtoId;
+    }
+
+    function getReceitasProduto(produtoId) {
+      return Array.isArray(receitasPorProduto[produtoId]) ? receitasPorProduto[produtoId] : [];
+    }
+
+    function getReceitaPorNome(produtoId, nome) {
+      const n = String(nome || '').trim();
+      if (!n) return null;
+      const lista = getReceitasProduto(produtoId);
+      const byId = lista.find(r => r.receita_id === n);
+      if (byId) return byId;
+      return lista.find(r => (r.nome_receita || '') === n) || null;
+    }
+
+    function getReceitaNome(produtoId, receitaId) {
+      if (!produtoId || !receitaId) return '';
+      const r = getReceitasProduto(produtoId).find(i => i.receita_id === receitaId);
+      return r ? (r.nome_receita || receitaId) : receitaId;
+    }
+
+    function ensureReceitasDatalist(produtoId) {
+      const id = `receitasAutocomplete_${produtoId}`;
+      let list = document.getElementById(id);
+      if (!list) {
+        list = document.createElement('datalist');
+        list.id = id;
+        document.body.appendChild(list);
+      }
+      return list;
+    }
+
+    function atualizarReceitasDatalist(produtoId) {
+      if (!produtoId) return;
+      const list = ensureReceitasDatalist(produtoId);
+      const opts = getReceitasProduto(produtoId)
+        .map(r => {
+          const label = r.nome_receita || r.receita_id;
+          return `<option value="${label}"></option>`;
+        }).join('');
+      list.innerHTML = opts;
+    }
+
+    function atualizarInputsReceita(produtoId) {
+      const inputs = document.querySelectorAll(`.entrada-receita[data-produto-id="${produtoId}"]`);
+      inputs.forEach(input => {
+        const receitaId = input.dataset.receitaId || '';
+        const nome = getReceitaNome(produtoId, receitaId);
+        if (nome && input.value !== nome) {
+          input.value = nome;
+        }
+      });
+    }
+
+    function atualizarEntradaProduto(input) {
+      const row = input.closest('.linha-receita-entrada');
+      if (!row) return;
+      const produto = getProdutoPorNome(input.value || '');
+      const produtoId = produto ? produto.produto_id : '';
+
+      const prodIdInput = row.querySelector('.entrada-produto-id');
+      const receitaInput = row.querySelector('.entrada-receita');
+      const recIdInput = row.querySelector('.entrada-receita-id');
+      const unidadeInput = row.querySelector('.entrada-unidade');
+      const categoriaInput = row.querySelector('.entrada-categoria');
+
+      if (prodIdInput) prodIdInput.value = produtoId;
+      input.dataset.produtoId = produtoId;
+
+      if (receitaInput) {
+        receitaInput.value = '';
+        receitaInput.dataset.receitaId = '';
+        receitaInput.dataset.produtoId = produtoId;
+        if (produtoId) {
+          receitaInput.setAttribute('list', `receitasAutocomplete_${produtoId}`);
+          if (window.ProdutosController?.carregarReceitasProdutoEntrada) {
+            ProdutosController.carregarReceitasProdutoEntrada(produtoId);
+          }
+        } else {
+          receitaInput.removeAttribute('list');
+        }
+      }
+
+      if (recIdInput) recIdInput.value = '';
+
+      if (unidadeInput) unidadeInput.value = produtoId ? getProdutoUnidade(produtoId) : '';
+      if (categoriaInput) categoriaInput.value = produtoId ? getProdutoCategoria(produtoId) : '';
+    }
+
+    function atualizarEntradaReceita(input) {
+      const row = input.closest('.linha-receita-entrada');
+      if (!row) return;
+      const produtoId = row.querySelector('.entrada-produto-id')?.value || '';
+      if (!produtoId) return;
+      const receita = getReceitaPorNome(produtoId, input.value || '');
+      const receitaId = receita ? receita.receita_id : '';
+      const recIdInput = row.querySelector('.entrada-receita-id');
+      if (recIdInput) recIdInput.value = receitaId;
+      input.dataset.receitaId = receitaId;
+    }
+
+    function atualizarEntradaEstoque(input) {
+      const row = input.closest('.linha-receita-entrada');
+      if (!row) return;
+      const tipo = row.querySelector('.entrada-tipo')?.value || '';
+      const item = getEstoquePorNome(tipo, input.value || '');
+      const estoqueId = item ? item.ID : '';
+
+      const estoqueIdInput = row.querySelector('.entrada-estoque-id');
+      const unidadeInput = row.querySelector('.entrada-unidade');
+      const categoriaInput = row.querySelector('.entrada-categoria');
+
+      if (estoqueIdInput) estoqueIdInput.value = estoqueId;
+      input.dataset.estoqueId = estoqueId;
+
+      if (unidadeInput) unidadeInput.value = estoqueId ? (item.unidade || '') : '';
+      if (categoriaInput) categoriaInput.value = estoqueId ? (item.categoria || '') : '';
+    }
+
+    function calcularCustoReceita(receita) {
+      const entradas = Array.isArray(receita?.entradas) ? receita.entradas : [];
+      const saidas = Array.isArray(receita?.saidas) ? receita.saidas : [];
+
+      const totalEntradas = entradas.reduce((acc, e) => {
+        const qtd = parseNumero(e.qtd_pecas);
+        const custo = parseNumero(e.custo_manual);
+        return acc + (qtd * custo);
+      }, 0);
+
+      const totalSaidas = saidas.reduce((acc, s) => {
+        return acc + parseNumero(s.quantidade);
+      }, 0);
+
+      const custoUnit = totalSaidas > 0 ? (totalEntradas / totalSaidas) : 0;
+      return { totalEntradas, totalSaidas, custoUnit };
+    }
+
+    function renderOpcoesTipoEntrada(selecionado) {
+      const tipos = getTiposEntrada();
+      const opts = tipos.map(t => {
+        const sel = t === selecionado ? 'selected' : '';
+        return `<option value="${t}" ${sel}>${t}</option>`;
+      }).join('');
+      return '<option value="">Tipo</option>' + opts;
+    }
+
+    function renderEntradaEditRow(entrada = {}, produtoId = '') {
+      const tipo = String(entrada.tipo_item || '').toUpperCase();
+      const isProduto = tipo === 'PRODUTO';
+      const isLivre = tipo === 'LIVRE';
+      const isEstoque = isTipoEstoque(tipo);
+      const isMadeira = tipo === 'MADEIRA';
+
+      const produtoRefId = entrada.produto_ref_id || '';
+      const receitaRefId = entrada.receita_ref_id || '';
+      const estoqueRefId = entrada.estoque_ref_id || '';
+
+      const produtoNome = isProduto
+        ? (getProdutoNome(produtoRefId) || entrada.nome_item || '')
+        : '';
+      const receitaNome = isProduto
+        ? (getReceitaNome(produtoRefId, receitaRefId) || '')
+        : '';
+      const estoqueNome = isEstoque
+        ? (getEstoqueNome(estoqueRefId) || entrada.nome_item || '')
+        : '';
+      const nomeLivre = isLivre ? (entrada.nome_item || '') : '';
+
+      const listaProdutos = produtoId ? `list="produtosAutocomplete_${produtoId}"` : '';
+      const listaReceitas = produtoRefId ? `list="receitasAutocomplete_${produtoRefId}"` : '';
+      const tipoKey = String(tipo || '').replace(/[^a-zA-Z0-9]/g, '');
+      const listaEstoque = isEstoque && produtoId
+        ? `list="estoqueAutocomplete_${produtoId}_${tipoKey}"`
+        : '';
+
+      const categoriaValor = entrada.categoria || (isEstoque
+        ? getEstoqueCategoria(estoqueRefId)
+        : (isProduto ? getProdutoCategoria(produtoRefId) : ''));
+      const unidadeValor = entrada.unidade || (isEstoque
+        ? getEstoqueUnidade(estoqueRefId)
+        : (isProduto ? getProdutoUnidade(produtoRefId) : ''));
+
+      const dimsHidden = isMadeira ? '' : 'hidden';
+      const estoqueHidden = isEstoque ? '' : 'hidden';
+      const produtoHidden = isProduto ? '' : 'hidden';
+      const livreHidden = isLivre ? '' : 'hidden';
+
+      return `
+        <div class="linha-receita-entrada">
+          <select class="entrada-tipo">
+            ${renderOpcoesTipoEntrada(tipo)}
+          </select>
+          <input class="entrada-estoque ${estoqueHidden}" placeholder="Item do estoque" value="${estoqueNome}" ${listaEstoque} data-estoque-id="${estoqueRefId}">
+          <input class="entrada-produto ${produtoHidden}" placeholder="Produto" value="${produtoNome}" ${listaProdutos} data-produto-id="${produtoRefId}">
+          <input class="entrada-receita ${produtoHidden}" placeholder="Receita" value="${receitaNome}" ${listaReceitas} data-produto-id="${produtoRefId}" data-receita-id="${receitaRefId}">
+          <input class="entrada-nome ${livreHidden}" placeholder="Nome livre" value="${nomeLivre}">
+          <input class="entrada-categoria" placeholder="Categoria" value="${categoriaValor}" readonly>
+          <input class="entrada-unidade" placeholder="Unidade" value="${unidadeValor}" readonly>
+          <input class="entrada-qtd" type="number" step="0.01" min="0" placeholder="Quantidade" value="${entrada.qtd_pecas ?? ''}">
+          <input class="entrada-comp ${dimsHidden}" type="number" step="0.01" min="0" placeholder="Comp (cm)" value="${entrada.comprimento_cm ?? ''}">
+          <input class="entrada-larg ${dimsHidden}" type="number" step="0.01" min="0" placeholder="Larg (cm)" value="${entrada.largura_cm ?? ''}">
+          <input class="entrada-esp ${dimsHidden}" type="number" step="0.01" min="0" placeholder="Esp (cm)" value="${entrada.espessura_cm ?? ''}">
+          <input class="entrada-custo" type="number" step="0.01" min="0" placeholder="Custo/peca" value="${entrada.custo_manual ?? ''}">
+          <input type="hidden" class="entrada-estoque-id" value="${estoqueRefId}">
+          <input type="hidden" class="entrada-produto-id" value="${produtoRefId}">
+          <input type="hidden" class="entrada-receita-id" value="${receitaRefId}">
+          <button class="btn-receita-remover-entrada">Remover</button>
+        </div>
+      `;
+    }
+
+    function renderSaidaEditRow(saida = {}) {
+      return `
+        <div class="linha-receita-saida">
+          <input class="saida-nome" placeholder="Nome" value="${saida.nome_saida || ''}">
+          <input class="saida-unidade" placeholder="Unidade" value="${saida.unidade || ''}">
+          <input class="saida-qtd" type="number" step="0.01" min="0" placeholder="Quantidade" value="${saida.quantidade ?? ''}">
+          <button class="btn-receita-remover-saida">Remover</button>
+        </div>
+      `;
     }
 
     /* =========================
@@ -71,6 +413,8 @@
       const f = el();
 
       if (f.nome) f.nome.value = data.nome_produto || '';
+      if (f.categoria) f.categoria.value = data.categoria || '';
+      if (f.estoque) f.estoque.value = data.estoque_id || '';
       if (f.descricao) f.descricao.value = data.descricao || '';
       if (f.observacao) f.observacao.value = data.observacao || '';
 
@@ -82,6 +426,8 @@
 
       [
         f.nome,
+        f.categoria,
+        f.estoque,
         f.descricao,
         f.observacao
       ].forEach(i => i && (i.value = ''));
@@ -90,35 +436,235 @@
     }
 
     /* =========================
-       COMPOSICAO
+       RECEITAS
     ========================== */
-    function renderLinhaComposicao(linha) {
-      const nomeItem = getNomeItem(linha.tipo_item, linha.item_id);
-      const qtd = linha.quantidade !== undefined && linha.quantidade !== null
-        ? linha.quantidade
-        : '';
-      const unidade = linha.unidade || '';
+    function renderEntradasResumo(entradas) {
+      if (!Array.isArray(entradas) || entradas.length === 0) {
+        return '<p>Nenhuma entrada.</p>';
+      }
+
+      return entradas.map(e => {
+        const dims = `${e.comprimento_cm || '-'} x ${e.largura_cm || '-'} x ${e.espessura_cm || '-'} cm`;
+        const qtd = e.qtd_pecas ?? '-';
+        const tipo = String(e.tipo_item || '').toUpperCase() || '-';
+        const custo = parseNumero(e.custo_manual) > 0
+          ? `Custo/peca: R$ ${formatNumero(e.custo_manual)}`
+          : 'Custo/peca: -';
+        const compat = contarCompativeis(e);
+        const compatTexto = tipo === 'MADEIRA' ? compat : '-';
+
+        let titulo = e.nome_item || '-';
+        if (tipo === 'PRODUTO') {
+          titulo = getProdutoNome(e.produto_ref_id) || e.nome_item || e.produto_ref_id || '-';
+        } else if (isTipoEstoque(tipo)) {
+          titulo = getEstoqueNome(e.estoque_ref_id) || e.nome_item || e.estoque_ref_id || '-';
+        }
+
+        const receitaNome = tipo === 'PRODUTO'
+          ? (getReceitaNome(e.produto_ref_id, e.receita_ref_id) || e.receita_ref_id || '-')
+          : '';
+
+        return `
+          <div class="linha-receita">
+            <div><strong>${titulo}</strong></div>
+            <div class="comp-meta">Tipo: ${tipo} | Quantidade: ${qtd}</div>
+            ${tipo === 'PRODUTO' ? `<div class="comp-meta">Receita: ${receitaNome}</div>` : ''}
+            <div class="comp-meta">Categoria: ${e.categoria || '-'}</div>
+            <div class="comp-meta">Unidade: ${e.unidade || '-'}</div>
+            ${tipo === 'MADEIRA' ? `<div class="comp-meta">Dimensoes: ${dims}</div>` : ''}
+            <div class="comp-meta">Compativeis no estoque: ${compatTexto}</div>
+            <div class="comp-meta">${custo}</div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function renderSaidasResumo(saidas, custoUnit) {
+      if (!Array.isArray(saidas) || saidas.length === 0) {
+        return '<p>Nenhuma saida.</p>';
+      }
+
+      const custoTexto = custoUnit > 0 ? `R$ ${formatNumero(custoUnit)}` : '-';
+
+      return saidas.map(s => `
+        <div class="linha-receita">
+          <div><strong>${s.nome_saida || '-'}</strong></div>
+          <div class="comp-meta">${s.quantidade || '-'} ${s.unidade || ''}</div>
+          <div class="comp-meta">Custo unit: ${custoTexto}</div>
+        </div>
+      `).join('');
+    }
+
+    function renderReceita(receita, produtoId) {
+      const entradas = Array.isArray(receita.entradas) ? receita.entradas : [];
+      const saidas = Array.isArray(receita.saidas) ? receita.saidas : [];
+      const isVariante = !!(receita.parent_receita_id);
+
+      if (receita._editing) {
+        return `
+          <div class="receita-card editing" data-produto-id="${produtoId}" data-receita-id="${receita.receita_id}">
+            <div class="receita-header">
+              <input class="receita-nome" placeholder="Nome da receita" value="${receita.nome_receita || ''}">
+            </div>
+            <textarea class="receita-desc" placeholder="Descricao">${receita.descricao || ''}</textarea>
+
+            <div class="bloco">
+              <p><b>Entradas</b></p>
+              <div class="receita-entradas">
+                ${entradas.map(e => renderEntradaEditRow(e, produtoId)).join('')}
+              </div>
+              <button class="btn-receita-add-entrada" data-produto-id="${produtoId}" data-receita-id="${receita.receita_id}">Adicionar entrada</button>
+            </div>
+
+            <div class="bloco">
+              <p><b>Saidas</b></p>
+              <div class="receita-saidas">
+                ${saidas.map(renderSaidaEditRow).join('')}
+              </div>
+              <button class="btn-receita-add-saida" data-produto-id="${produtoId}" data-receita-id="${receita.receita_id}">Adicionar saida</button>
+            </div>
+
+            <div class="comp-acoes">
+              <button class="btn-receita-salvar" data-produto-id="${produtoId}" data-receita-id="${receita.receita_id}">Salvar</button>
+              <button class="btn-receita-cancelar" data-produto-id="${produtoId}" data-receita-id="${receita.receita_id}">Cancelar</button>
+            </div>
+          </div>
+        `;
+      }
+
+      const custos = calcularCustoReceita(receita);
+      const custoTotal = custos.totalEntradas > 0 ? `R$ ${formatNumero(custos.totalEntradas)}` : '-';
+      const custoUnit = custos.custoUnit;
 
       return `
-        <div class="linha-composicao">
-          <div class="comp-info">
-            <div><strong>${nomeItem || linha.item_id || '-'}</strong></div>
-            <div class="comp-meta">${linha.tipo_item || '-'} - ${qtd} ${unidade}</div>
+        <div class="receita-card" data-produto-id="${produtoId}" data-receita-id="${receita.receita_id}">
+          <div class="receita-header">
+            <strong>${receita.nome_receita || 'Receita'}</strong>
+            <span class="receita-tag">${isVariante ? 'Variante' : 'Base'}</span>
+          </div>
+          ${receita.descricao ? `<div class="comp-meta">${receita.descricao}</div>` : ''}
+          <div class="comp-meta">Custo total: ${custoTotal}</div>
+
+          <div class="bloco">
+            <p><b>Entradas</b></p>
+            ${renderEntradasResumo(entradas)}
+          </div>
+
+          <div class="bloco">
+            <p><b>Saidas</b></p>
+            ${renderSaidasResumo(saidas, custoUnit)}
+          </div>
+
+          <div class="comp-acoes">
+            <button class="btn-receita-editar" data-produto-id="${produtoId}" data-receita-id="${receita.receita_id}">Editar</button>
+            <button class="btn-receita-duplicar" data-produto-id="${produtoId}" data-receita-id="${receita.receita_id}">Duplicar</button>
+            <button class="btn-receita-excluir" data-produto-id="${produtoId}" data-receita-id="${receita.receita_id}">Excluir</button>
           </div>
         </div>
       `;
     }
 
-    function renderComposicao(linhas, carregada) {
+    function renderReceitas(receitas, carregada, produtoId) {
       if (!carregada) {
-        return '<p>Composicao nao carregada.</p>';
+        return `
+          <p>Receitas nao carregadas.</p>
+          <button class="btn-receita-carregar" data-produto-id="${produtoId}">Carregar receitas</button>
+        `;
       }
 
-      if (!Array.isArray(linhas) || linhas.length === 0) {
-        return '<p>Nenhum item na composicao.</p>';
-      }
+      const lista = Array.isArray(receitas) ? receitas : [];
+      const conteudo = lista.length === 0
+        ? '<p>Nenhuma receita cadastrada.</p>'
+        : lista.map(r => renderReceita(r, produtoId)).join('');
 
-      return linhas.map(l => renderLinhaComposicao(l)).join('');
+      return conteudo + `
+        <button class="btn-receita-nova" data-produto-id="${produtoId}">Nova receita</button>
+      `;
+    }
+
+    function renderProdutosDatalist(produtoId) {
+      if (!produtoId) return '';
+      const opts = (opcoesProdutos || [])
+        .filter(p => p && p.produto_id)
+        .map(p => {
+          const label = p.nome_produto || p.produto_id;
+          return `<option value="${label}"></option>`;
+        }).join('');
+      return `<datalist id="produtosAutocomplete_${produtoId}">${opts}</datalist>`;
+    }
+
+    function renderEstoqueDatalists(produtoId) {
+      if (!produtoId) return '';
+      const tipos = getTiposEstoque();
+      return tipos.map(tipo => {
+        const tipoKey = String(tipo || '').replace(/[^a-zA-Z0-9]/g, '');
+        const opts = (opcoesEstoque || [])
+          .filter(i => String(i.tipo || '').toUpperCase() === String(tipo || '').toUpperCase())
+          .map(i => {
+            const label = i.item || i.ID;
+            return `<option value="${label}"></option>`;
+          }).join('');
+        return `<datalist id="estoqueAutocomplete_${produtoId}_${tipoKey}">${opts}</datalist>`;
+      }).join('');
+    }
+
+    function setReceitasProduto(produtoId, receitas) {
+      if (!produtoId) return;
+      receitasPorProduto[produtoId] = Array.isArray(receitas) ? receitas : [];
+      atualizarReceitasDatalist(produtoId);
+      atualizarInputsReceita(produtoId);
+    }
+
+    function coletarDadosReceita(card) {
+      const nome = card.querySelector('.receita-nome')?.value || '';
+      const descricao = card.querySelector('.receita-desc')?.value || '';
+
+      const entradas = [...card.querySelectorAll('.linha-receita-entrada')].map(row => {
+        const tipo = String(row.querySelector('.entrada-tipo')?.value || '').toUpperCase();
+        const nomeLivre = row.querySelector('.entrada-nome')?.value || '';
+        const nomeProduto = row.querySelector('.entrada-produto')?.value || '';
+        const nomeEstoque = row.querySelector('.entrada-estoque')?.value || '';
+
+        let nomeItem = '';
+        if (tipo === 'PRODUTO') {
+          nomeItem = nomeProduto;
+        } else if (isTipoEstoque(tipo)) {
+          nomeItem = nomeEstoque;
+        } else {
+          nomeItem = nomeLivre;
+        }
+
+        return {
+          tipo_item: tipo,
+          nome_item: nomeItem,
+          estoque_ref_id: row.querySelector('.entrada-estoque-id')?.value || '',
+          produto_ref_id: row.querySelector('.entrada-produto-id')?.value || '',
+          receita_ref_id: row.querySelector('.entrada-receita-id')?.value || '',
+          categoria: row.querySelector('.entrada-categoria')?.value || '',
+          unidade: row.querySelector('.entrada-unidade')?.value || '',
+          qtd_pecas: row.querySelector('.entrada-qtd')?.value || '',
+          comprimento_cm: row.querySelector('.entrada-comp')?.value || '',
+          largura_cm: row.querySelector('.entrada-larg')?.value || '',
+          espessura_cm: row.querySelector('.entrada-esp')?.value || '',
+          custo_manual: row.querySelector('.entrada-custo')?.value || '',
+          observacao: ''
+        };
+      });
+
+      const saidas = [...card.querySelectorAll('.linha-receita-saida')].map(row => ({
+        nome_saida: row.querySelector('.saida-nome')?.value || '',
+        unidade: row.querySelector('.saida-unidade')?.value || '',
+        quantidade: row.querySelector('.saida-qtd')?.value || ''
+      }));
+
+      return {
+        dados: {
+          nome_receita: nome,
+          descricao
+        },
+        entradas,
+        saidas
+      };
     }
 
     /* =========================
@@ -128,6 +674,7 @@
       const { lista } = el();
       if (!lista) return;
 
+      const precisaReceitas = new Set();
       const abertoId = cardAberto ? cardAberto.dataset.id : null;
       cardAberto = null;
       lista.innerHTML = '';
@@ -142,19 +689,24 @@
         div.className = 'card';
         div.dataset.id = i.produto_id;
 
-        const custo = Number(i.custo_previsto || 0);
-        const custoTexto = isNaN(custo) ? '-' : custo.toFixed(2);
-        const custoLinha = i.custo_erro
-          ? 'Custo: erro'
-          : `Custo: R$ ${custoTexto}`;
+        const receitas = Array.isArray(i.receitas) ? i.receitas : [];
+        const receitasCarregadas = !!i.receitasCarregadas;
+        const receitasTexto = receitasCarregadas ? `Receitas: ${receitas.length}` : 'Receitas: -';
 
-        const comp = Array.isArray(i.composicao) ? i.composicao : [];
-        const compCarregada = !!i.composicaoCarregada;
+        receitas.forEach(r => {
+          (r.entradas || []).forEach(e => {
+            if (String(e.tipo_item || '').toUpperCase() === 'PRODUTO' && e.produto_ref_id) {
+              if (!receitasPorProduto[e.produto_ref_id]) {
+                precisaReceitas.add(e.produto_ref_id);
+              }
+            }
+          });
+        });
 
         div.innerHTML = `
           <div class="card-resumo">
             <strong>${i.nome_produto || i.produto_id}</strong><br>
-            ${custoLinha}<br>
+            ${receitasTexto}<br>
             ${i.descricao || '-'}
           </div>
 
@@ -163,13 +715,15 @@
           <div class="card-detalhes">
             <button class="fechar-card">X</button>
 
-            <p><b>Descricao:</b> ${i.descricao || '-'}</p>
-            <p><b>Observacao:</b> ${i.observacao || '-'}</p>
-
             <div class="bloco">
-              <p><b>Composicao</b></p>
-              ${renderComposicao(comp, compCarregada)}
+              <p><b>Receitas</b></p>
+              ${renderReceitas(receitas, receitasCarregadas, i.produto_id)}
             </div>
+            ${renderProdutosDatalist(i.produto_id)}
+            ${renderEstoqueDatalists(i.produto_id)}
+
+            <p><b>Estoque vinculado:</b> ${i.estoque_id ? (getEstoqueNome(i.estoque_id) || i.estoque_id) : '-'}</p>
+            <p><b>Observacao:</b> ${i.observacao || '-'}</p>
 
             <div class="acoes">
               <button onclick="ProdutosController.editar('${i.produto_id}')">Editar</button>
@@ -180,6 +734,10 @@
 
         lista.appendChild(div);
       });
+
+      if (precisaReceitas.size > 0 && window.ProdutosController?.carregarReceitasProdutoEntrada) {
+        precisaReceitas.forEach(id => ProdutosController.carregarReceitasProdutoEntrada(id));
+      }
 
       initDelegation();
 
@@ -208,7 +766,7 @@
           e.stopPropagation();
           abrirCard(card);
           if (card && window.ProdutosController) {
-            ProdutosController.carregarComposicao(card.dataset.id);
+            ProdutosController.carregarReceitas(card.dataset.id);
           }
           return;
         }
@@ -219,10 +777,238 @@
           return;
         }
 
+        if (e.target.classList.contains('btn-receita-carregar')) {
+          const produtoId = e.target.dataset.produtoId;
+          if (window.ProdutosController) {
+            ProdutosController.carregarReceitas(produtoId, true);
+          }
+          return;
+        }
+
+        if (e.target.classList.contains('btn-receita-nova')) {
+          const produtoId = e.target.dataset.produtoId;
+          if (window.ProdutosController) {
+            ProdutosController.criarReceita(produtoId);
+          }
+          return;
+        }
+
+        if (e.target.classList.contains('btn-receita-editar')) {
+          const produtoId = e.target.dataset.produtoId;
+          const receitaId = e.target.dataset.receitaId;
+          if (window.ProdutosController) {
+            ProdutosController.iniciarEdicaoReceita(produtoId, receitaId);
+          }
+          return;
+        }
+
+        if (e.target.classList.contains('btn-receita-cancelar')) {
+          const produtoId = e.target.dataset.produtoId;
+          const receitaId = e.target.dataset.receitaId;
+          if (window.ProdutosController) {
+            ProdutosController.cancelarEdicaoReceita(produtoId, receitaId);
+          }
+          return;
+        }
+
+        if (e.target.classList.contains('btn-receita-salvar')) {
+          const produtoId = e.target.dataset.produtoId;
+          const receitaId = e.target.dataset.receitaId;
+          const cardReceita = e.target.closest('.receita-card');
+          if (cardReceita && window.ProdutosController) {
+            const payload = coletarDadosReceita(cardReceita);
+            ProdutosController.salvarReceita(produtoId, receitaId, payload.dados, payload.entradas, payload.saidas);
+          }
+          return;
+        }
+
+        if (e.target.classList.contains('btn-receita-duplicar')) {
+          const produtoId = e.target.dataset.produtoId;
+          const receitaId = e.target.dataset.receitaId;
+          if (window.ProdutosController) {
+            ProdutosController.duplicarReceita(produtoId, receitaId);
+          }
+          return;
+        }
+
+        if (e.target.classList.contains('btn-receita-excluir')) {
+          const produtoId = e.target.dataset.produtoId;
+          const receitaId = e.target.dataset.receitaId;
+          if (window.ProdutosController) {
+            ProdutosController.excluirReceita(produtoId, receitaId);
+          }
+          return;
+        }
+
+        if (e.target.classList.contains('btn-receita-add-entrada')) {
+          const cardReceita = e.target.closest('.receita-card');
+          const container = cardReceita?.querySelector('.receita-entradas');
+          if (container) {
+            const produtoId = cardReceita?.dataset.produtoId || '';
+            container.insertAdjacentHTML('beforeend', renderEntradaEditRow({}, produtoId));
+          }
+          return;
+        }
+
+        if (e.target.classList.contains('btn-receita-add-saida')) {
+          const cardReceita = e.target.closest('.receita-card');
+          const container = cardReceita?.querySelector('.receita-saidas');
+          if (container) {
+            container.insertAdjacentHTML('beforeend', renderSaidaEditRow());
+          }
+          return;
+        }
+
+        if (e.target.classList.contains('btn-receita-remover-entrada')) {
+          const linha = e.target.closest('.linha-receita-entrada');
+          if (linha) linha.remove();
+          return;
+        }
+
+        if (e.target.classList.contains('btn-receita-remover-saida')) {
+          const linha = e.target.closest('.linha-receita-saida');
+          if (linha) linha.remove();
+          return;
+        }
+
         if (cardAberto && !cardAberto.contains(e.target)) {
           fecharCard();
         }
       });
+
+      document.addEventListener('change', e => {
+        if (e.target.classList.contains('entrada-tipo')) {
+          const row = e.target.closest('.linha-receita-entrada');
+          if (!row) return;
+          const cardReceita = e.target.closest('.receita-card');
+          const produtoId = cardReceita?.dataset.produtoId || '';
+          const tipo = String(e.target.value || '').toUpperCase();
+          const isProduto = tipo === 'PRODUTO';
+          const isLivre = tipo === 'LIVRE';
+          const isEstoqueTipo = isTipoEstoque(tipo);
+          const isMadeira = tipo === 'MADEIRA';
+
+          const estoqueInput = row.querySelector('.entrada-estoque');
+          const produtoInput = row.querySelector('.entrada-produto');
+          const receitaInput = row.querySelector('.entrada-receita');
+          const nomeInput = row.querySelector('.entrada-nome');
+          const unidadeInput = row.querySelector('.entrada-unidade');
+          const categoriaInput = row.querySelector('.entrada-categoria');
+          const compInput = row.querySelector('.entrada-comp');
+          const largInput = row.querySelector('.entrada-larg');
+          const espInput = row.querySelector('.entrada-esp');
+
+          if (estoqueInput) estoqueInput.classList.toggle('hidden', !isEstoqueTipo);
+          if (produtoInput) produtoInput.classList.toggle('hidden', !isProduto);
+          if (receitaInput) receitaInput.classList.toggle('hidden', !isProduto);
+          if (nomeInput) nomeInput.classList.toggle('hidden', !isLivre);
+
+          if (compInput) compInput.classList.toggle('hidden', !isMadeira);
+          if (largInput) largInput.classList.toggle('hidden', !isMadeira);
+          if (espInput) espInput.classList.toggle('hidden', !isMadeira);
+
+          if (!isMadeira) {
+            if (compInput) compInput.value = '';
+            if (largInput) largInput.value = '';
+            if (espInput) espInput.value = '';
+          }
+
+          const estoqueIdInput = row.querySelector('.entrada-estoque-id');
+          const prodIdInput = row.querySelector('.entrada-produto-id');
+          const recIdInput = row.querySelector('.entrada-receita-id');
+
+          if (!isEstoqueTipo) {
+            if (estoqueInput) {
+              estoqueInput.value = '';
+              estoqueInput.dataset.estoqueId = '';
+              estoqueInput.removeAttribute('list');
+            }
+            if (estoqueIdInput) estoqueIdInput.value = '';
+          } else if (estoqueInput && produtoId) {
+            const tipoKey = String(tipo || '').replace(/[^a-zA-Z0-9]/g, '');
+            estoqueInput.setAttribute('list', `estoqueAutocomplete_${produtoId}_${tipoKey}`);
+          }
+
+          if (!isProduto) {
+            if (produtoInput) {
+              produtoInput.value = '';
+              produtoInput.dataset.produtoId = '';
+            }
+            if (receitaInput) {
+              receitaInput.value = '';
+              receitaInput.dataset.receitaId = '';
+              receitaInput.dataset.produtoId = '';
+              receitaInput.removeAttribute('list');
+            }
+            if (prodIdInput) prodIdInput.value = '';
+            if (recIdInput) recIdInput.value = '';
+          }
+
+          if (!isLivre && nomeInput) {
+            nomeInput.value = '';
+          }
+
+          if (unidadeInput) unidadeInput.value = '';
+          if (categoriaInput) categoriaInput.value = '';
+
+          return;
+        }
+
+        if (e.target.classList.contains('entrada-produto')) {
+          atualizarEntradaProduto(e.target);
+          return;
+        }
+
+        if (e.target.classList.contains('entrada-receita')) {
+          atualizarEntradaReceita(e.target);
+          return;
+        }
+
+        if (e.target.classList.contains('entrada-estoque')) {
+          atualizarEntradaEstoque(e.target);
+          return;
+        }
+      });
+
+      document.addEventListener('input', e => {
+        if (e.target.classList.contains('entrada-produto')) {
+          atualizarEntradaProduto(e.target);
+          return;
+        }
+        if (e.target.classList.contains('entrada-receita')) {
+          atualizarEntradaReceita(e.target);
+          return;
+        }
+        if (e.target.classList.contains('entrada-estoque')) {
+          atualizarEntradaEstoque(e.target);
+          return;
+        }
+      });
+
+      document.addEventListener('focusin', e => {
+        if (!e.target.classList.contains('entrada-receita')) return;
+        const row = e.target.closest('.linha-receita-entrada');
+        const produtoId = row?.querySelector('.entrada-produto-id')?.value || '';
+        if (!produtoId) return;
+        e.target.setAttribute('list', `receitasAutocomplete_${produtoId}`);
+        if (!receitasPorProduto[produtoId] && window.ProdutosController?.carregarReceitasProdutoEntrada) {
+          ProdutosController.carregarReceitasProdutoEntrada(produtoId);
+        } else {
+          atualizarReceitasDatalist(produtoId);
+        }
+      });
+
+      document.addEventListener('focusin', e => {
+        if (!e.target.classList.contains('entrada-estoque')) return;
+        const row = e.target.closest('.linha-receita-entrada');
+        const cardReceita = e.target.closest('.receita-card');
+        const produtoId = cardReceita?.dataset.produtoId || '';
+        const tipo = row?.querySelector('.entrada-tipo')?.value || '';
+        if (!produtoId || !tipo) return;
+        const tipoKey = String(tipo || '').replace(/[^a-zA-Z0-9]/g, '');
+        e.target.setAttribute('list', `estoqueAutocomplete_${produtoId}_${tipoKey}`);
+      });
+
     }
 
     function abrirCard(card) {
@@ -251,7 +1037,8 @@
       preencherFormulario,
       resetFormulario,
       renderLista,
-      setOpcoesComposicao
+      setOpcoesReceitas,
+      setReceitasProduto
     };
 
   })();

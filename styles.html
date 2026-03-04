@@ -310,6 +310,68 @@ textarea {
   white-space: nowrap;
 }
 
+.receita-card {
+  border: 1px solid #eee;
+  border-radius: 6px;
+  padding: 10px;
+  background: #fafafa;
+  margin-top: 8px;
+}
+
+.receita-card.editing {
+  background: #fffdf5;
+  border-color: #f0e2b6;
+}
+
+.receita-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.receita-tag {
+  font-size: 11px;
+  background: #eee;
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+
+.linha-receita {
+  padding: 6px 0;
+  border-bottom: 1px solid #eee;
+}
+
+.linha-receita:last-child {
+  border-bottom: none;
+}
+
+.linha-receita-entrada,
+.linha-receita-saida {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+.linha-receita-entrada select,
+.linha-receita-entrada input,
+.linha-receita-saida input {
+  flex: 1 1 120px;
+  min-width: 0;
+  margin-bottom: 0;
+}
+
+.linha-receita-entrada button,
+.linha-receita-saida button {
+  width: auto;
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 8px 12px;
+  white-space: nowrap;
+}
+
 .linha-add-destino {
   display: flex;
   align-items: center;

@@ -6,6 +6,7 @@
     let consumoInit = false;
 
     let produtos = [];
+    let receitasCache = {};
 
     function init() {
       if (iniciado) return;
@@ -13,6 +14,7 @@
       carregarProdutos();
       carregarProducao();
       initConsumoUI();
+      initFormEventos();
 
       iniciado = true;
     }
@@ -25,7 +27,7 @@
       const btnCancelar = document.getElementById('btnCancelarConsumo');
 
       if (btnConfirmar) {
-        btnConfirmar.addEventListener('click', () => confirmarConsumo());
+        btnConfirmar.addEventListener('click', () => confirmarAtualizacaoEstoque());
       }
 
       if (btnCancelar) {
@@ -39,10 +41,20 @@
       ProducaoUI.renderLista(ProducaoStore.get());
     }
 
+    function parseNumeroInput(valor) {
+      const s = String(valor ?? '').trim();
+      if (s === '') return 0;
+      const n = Number(s.replace(',', '.'));
+      return isNaN(n) ? 0 : n;
+    }
+
     function toDateString(value) {
       if (!value) return '';
       if (value instanceof Date) {
-        return value.toISOString().slice(0, 10);
+        const yyyy = value.getFullYear();
+        const mm = String(value.getMonth() + 1).padStart(2, '0');
+        const dd = String(value.getDate()).padStart(2, '0');
+        return `${yyyy}-${mm}-${dd}`;
       }
       const s = String(value).trim();
       if (s === '') return '';
@@ -72,6 +84,45 @@
         .listarProdutos();
     }
 
+    function initFormEventos() {
+      const selectProduto = document.getElementById('producaoProduto');
+      if (!selectProduto || selectProduto.dataset.bound) return;
+      selectProduto.dataset.bound = '1';
+
+      selectProduto.addEventListener('change', () => {
+        const produtoId = selectProduto.value || '';
+        carregarReceitasProduto(produtoId, '', true);
+      });
+    }
+
+    function carregarReceitasProduto(produtoId, receitaSelecionada = '', forcar = false) {
+      if (!produtoId) {
+        ProducaoUI.renderReceitas([]);
+        return;
+      }
+
+      if (receitasCache[produtoId] && !forcar) {
+        ProducaoUI.renderReceitas(receitasCache[produtoId], receitaSelecionada);
+        return;
+      }
+
+      google.script.run
+        .withSuccessHandler(lista => {
+          const variantes = (Array.isArray(lista) ? lista : [])
+            .filter(r => r && r.receita_id)
+            .filter(r => r.parent_receita_id);
+
+          receitasCache[produtoId] = variantes;
+          ProducaoUI.renderReceitas(variantes, receitaSelecionada);
+        })
+        .withFailureHandler(err => {
+          const msg = err?.message || 'Erro ao carregar receitas';
+          mostrarToast(msg, 'erro');
+          ProducaoUI.renderReceitas([]);
+        })
+        .listarReceitasProduto(produtoId);
+    }
+
     function carregarProducao() {
       google.script.run
         .withSuccessHandler(lista => {
@@ -86,13 +137,30 @@
 
       const dados = {
         produto_id: get('producaoProduto'),
+        receita_id: get('producaoReceita'),
         nome_ordem: get('producaoNome'),
-        qtd_planejada: Number(get('producaoQtd')) || 0,
+        qtd_planejada: parseNumeroInput(get('producaoQtd')) || 0,
         status: get('producaoStatus'),
         data_inicio: get('producaoDataInicio'),
         data_prevista_termino: get('producaoDataPrevista'),
         observacao: get('producaoObservacao')
       };
+
+      if (!dados.produto_id) {
+        mostrarToast('Selecione o produto', 'erro');
+        return;
+      }
+
+      if (!dados.receita_id) {
+        mostrarToast('Selecione a receita', 'erro');
+        return;
+      }
+
+      const receitasProduto = receitasCache[dados.produto_id] || [];
+      const receita = receitasProduto.find(r => r.receita_id === dados.receita_id);
+      if (receita) {
+        dados.receita_nome = receita.nome_receita || '';
+      }
 
       if (editandoId) {
         const idAtual = editandoId;
@@ -103,15 +171,16 @@
         finalizarUX();
 
         google.script.run
-          .withFailureHandler(() => {
-            ProducaoStore.update(idAtual, snapshot);
-            renderListaAtual();
-            mostrarToast('Erro ao salvar edicao', 'erro');
-          })
-          .withSuccessHandler(() => {
-            mostrarToast('Salvo com sucesso');
-          })
-          .atualizarProducao(idAtual, dados);
+        .withFailureHandler(err => {
+          ProducaoStore.update(idAtual, snapshot);
+          renderListaAtual();
+          const msg = err?.message || 'Erro ao salvar edicao';
+          mostrarToast(msg, 'erro');
+        })
+        .withSuccessHandler(() => {
+          mostrarToast('Salvo com sucesso');
+        })
+        .atualizarProducao(idAtual, dados);
 
         editandoId = null;
         return;
@@ -124,6 +193,7 @@
         producao_id: tempId,
         nome_produto: produto.nome_produto || '',
         unidade_produto: produto.unidade_produto || '',
+        receita_nome: dados.receita_nome || '',
         etapas: [],
         ...dados
       };
@@ -134,10 +204,11 @@
       mostrarToast('Salvando...');
 
       google.script.run
-        .withFailureHandler(() => {
+        .withFailureHandler(err => {
           ProducaoStore.remove(tempId);
           renderListaAtual();
-          mostrarToast('Erro ao salvar producao', 'erro');
+          const msg = err?.message || 'Erro ao salvar producao';
+          mostrarToast(msg, 'erro');
         })
         .withSuccessHandler(itemSalvo => {
           ProducaoStore.remove(tempId);
@@ -170,6 +241,7 @@
 
       editandoId = id;
       ProducaoUI.preencherFormulario(item);
+      carregarReceitasProduto(item.produto_id, item.receita_id || '', true);
       ProducaoUI.mostrarFormulario();
     }
 
@@ -205,15 +277,32 @@
           });
           renderListaAtual();
         })
-        .withFailureHandler(() => {
-          mostrarToast('Erro ao carregar materiais', 'erro');
+        .withFailureHandler(err => {
+          const msg = err?.message || 'Erro ao carregar materiais';
+          mostrarToast(msg, 'erro');
         })
         .obterMateriaisPrevistosProducao(id);
     }
 
-    function abrirConsumo(id) {
+    function abrirAtualizarEstoque(id) {
       const item = ProducaoStore.getById(id);
       if (!item) return;
+
+      const status = String(item.status || '');
+      const concluido = status === 'Concluido' || status === 'Concluida';
+      if (!concluido) {
+        mostrarToast('Atualizacao de estoque liberada apenas quando status for Concluido', 'erro');
+        return;
+      }
+
+      if (item.estoque_atualizado) {
+        mostrarToast('Estoque ja atualizado para esta producao', 'erro');
+        return;
+      }
+      if (!item.receita_id) {
+        mostrarToast('Receita nao informada', 'erro');
+        return;
+      }
 
       if (!item.materiaisPrevistos) {
         mostrarToast('Carregando materiais...');
@@ -226,8 +315,9 @@
             renderListaAtual();
             ProducaoUI.abrirModalConsumo(id, item.nome_ordem || item.nome_produto || id, resp.itens || []);
           })
-          .withFailureHandler(() => {
-            mostrarToast('Erro ao carregar materiais', 'erro');
+          .withFailureHandler(err => {
+            const msg = err?.message || 'Erro ao carregar materiais';
+            mostrarToast(msg, 'erro');
           })
           .obterMateriaisPrevistosProducao(id);
         return;
@@ -236,18 +326,19 @@
       ProducaoUI.abrirModalConsumo(id, item.nome_ordem || item.nome_produto || id, item.materiaisPrevistos || []);
     }
 
-    function confirmarConsumo() {
+    function confirmarAtualizacaoEstoque() {
       const payload = ProducaoUI.obterConsumoPayload();
       if (!payload.producaoId || payload.itens.length === 0) {
         mostrarToast('Informe quantidades para baixar');
         return;
       }
 
-      mostrarToast('Baixando do estoque...');
+      mostrarToast('Atualizando estoque...');
 
       google.script.run
-        .withFailureHandler(() => {
-          mostrarToast('Erro ao baixar do estoque', 'erro');
+        .withFailureHandler(err => {
+          const msg = err?.message || 'Erro ao atualizar estoque';
+          mostrarToast(msg, 'erro');
         })
         .withSuccessHandler(resp => {
           if (resp?.estoqueAtualizados && window.EstoqueStore) {
@@ -255,9 +346,12 @@
               EstoqueStore.update(i.ID, { quantidade: i.quantidade });
             });
           }
+          if (resp?.producaoAtualizada) {
+            ProducaoStore.update(payload.producaoId, resp.producaoAtualizada);
+          }
           carregarMateriaisPrevistos(payload.producaoId, true);
           ProducaoUI.fecharModalConsumo();
-          mostrarToast('Consumo registrado');
+          mostrarToast('Estoque atualizado');
         })
         .consumirEstoque(payload.producaoId, payload.itens);
     }
@@ -454,7 +548,7 @@
       salvar,
       editar,
       excluir,
-      abrirConsumo,
+      abrirAtualizarEstoque,
       adicionarEtapa,
       marcarEtapa,
       carregarMateriaisPrevistos,

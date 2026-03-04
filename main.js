@@ -1,8 +1,8 @@
 function doGet() {
-  return HtmlService.createTemplateFromFile('index')
+  return HtmlService.createTemplateFromFile("index")
     .evaluate()
-    .setTitle('CarpintariaZizu')
-    .addMetaTag('viewport', 'width=device-width, initial-scale=1');
+    .setTitle("CarpintariaZizu")
+    .addMetaTag("viewport", "width=device-width, initial-scale=1");
 }
 
 function include(nome) {
