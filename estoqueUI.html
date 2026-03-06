@@ -4,6 +4,8 @@
     let delegationInit = false;
 
     let opcoesProducao = [];
+    let categoriasBaseValidacao = [];
+    let categoriasPorTipoValidacao = {};
 
     /* =========================
        HELPERS
@@ -53,6 +55,60 @@
       if (s === '') return 0;
       const n = Number(s.replace(',', '.'));
       return isNaN(n) ? 0 : n;
+    }
+
+    function normalizarMapaCategoriasPorTipo(mapa) {
+      const out = {};
+      if (!mapa || typeof mapa !== 'object') return out;
+
+      Object.keys(mapa).forEach(tipo => {
+        const chave = String(tipo || '').trim().toUpperCase();
+        if (!chave) return;
+        const lista = Array.isArray(mapa[tipo]) ? mapa[tipo] : [];
+        const unicos = [];
+        lista.forEach(cat => {
+          const label = String(cat || '').trim();
+          if (!label) return;
+          if (!unicos.some(v => v.toUpperCase() === label.toUpperCase())) {
+            unicos.push(label);
+          }
+        });
+        out[chave] = unicos;
+      });
+
+      return out;
+    }
+
+    function getCategoriasParaTipo(tipo) {
+      const t = String(tipo || '').trim().toUpperCase();
+      const categoriasTipo = Array.isArray(categoriasPorTipoValidacao[t])
+        ? categoriasPorTipoValidacao[t]
+        : [];
+      return categoriasTipo.length > 0 ? categoriasTipo : categoriasBaseValidacao;
+    }
+
+    function preencherSelectCategoria(categorias, selecionado = '') {
+      const { categoria } = el();
+      if (!categoria || categoria.tagName !== 'SELECT') return;
+
+      const alvo = String(selecionado || '').trim().toUpperCase();
+      categoria.innerHTML = '<option value="">Selecione</option>';
+
+      (Array.isArray(categorias) ? categorias : []).forEach(v => {
+        const label = String(v || '').trim();
+        if (!label) return;
+        const o = document.createElement('option');
+        o.value = label;
+        o.textContent = label;
+        categoria.appendChild(o);
+      });
+
+      const match = [...categoria.options].find(o => String(o.value || '').trim().toUpperCase() === alvo);
+      categoria.value = match ? match.value : '';
+    }
+
+    function renderCategoriasDoTipo(tipo, categoriaSelecionada = '') {
+      preencherSelectCategoria(getCategoriasParaTipo(tipo), categoriaSelecionada);
     }
 
     function atualizarQuantidadeMadeira() {
@@ -185,11 +241,12 @@
       if (f.equipamentoFields) f.equipamentoFields.classList.add('hidden');
       if (f.madeiraFields) f.madeiraFields.classList.add('hidden');
       if (f.quantidade) f.quantidade.readOnly = false;
+      renderCategoriasDoTipo('', '');
       if (f.formTitulo) f.formTitulo.innerText = 'Novo Item';
     }
 
     function handleTipoChange() {
-      const { tipo, equipamentoFields, madeiraFields, quantidade, unidade } = el();
+      const { tipo, categoria, equipamentoFields, madeiraFields, quantidade, unidade } = el();
       if (!tipo) return;
 
       const isEquip = tipo.value === 'EQUIPAMENTO';
@@ -206,6 +263,8 @@
       if (quantidade) {
         quantidade.readOnly = isMadeira;
       }
+
+      renderCategoriasDoTipo(tipo.value, categoria ? categoria.value : '');
 
       if (isMadeira && unidade) {
         const optM3 = [...unidade.options].find(o =>
@@ -257,21 +316,15 @@
       });
     }
 
-    function renderCategorias(lista) {
+    function renderCategorias(lista, mapaPorTipo = {}) {
       const { categoria } = el();
       if (!categoria) return;
 
-      const clean = limparVazios(lista);
-
-      if (categoria.tagName === 'SELECT') {
-        categoria.innerHTML = '<option value="">Selecione</option>';
-        clean.forEach(v => {
-          const o = document.createElement('option');
-          o.value = v;
-          o.textContent = v;
-          categoria.appendChild(o);
-        });
-      }
+      categoriasBaseValidacao = limparVazios(lista);
+      categoriasPorTipoValidacao = normalizarMapaCategoriasPorTipo(mapaPorTipo);
+      const tipoAtual = el().tipo?.value || '';
+      const categoriaAtual = categoria.value || '';
+      renderCategoriasDoTipo(tipoAtual, categoriaAtual);
     }
 
     function renderFornecedores(lista) {

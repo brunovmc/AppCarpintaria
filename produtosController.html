@@ -9,6 +9,7 @@
     let tiposValidacao = [];
     let unidadesValidacao = [];
     let categoriasValidacao = [];
+    let categoriasPorTipoValidacao = {};
 
     function parseNumeroInput(valor) {
       const s = String(valor ?? '').trim();
@@ -50,6 +51,22 @@
       return isValorValidacao(categoriasValidacao, categoria);
     }
 
+    function getCategoriasPorTipo(tipo) {
+      const t = String(tipo || '').trim().toUpperCase();
+      if (!t) return [];
+      return Array.isArray(categoriasPorTipoValidacao[t])
+        ? categoriasPorTipoValidacao[t]
+        : [];
+    }
+
+    function isCategoriaValidaParaTipo(tipo, categoria) {
+      const categoriasTipo = getCategoriasPorTipo(tipo);
+      if (categoriasTipo.length > 0) {
+        return isValorValidacao(categoriasTipo, categoria);
+      }
+      return isCategoriaValidacao(categoria);
+    }
+
     function init() {
       if (iniciado) return;
 
@@ -68,7 +85,8 @@
         produtos,
         tipos: tiposValidacao,
         unidades: unidadesValidacao,
-        categorias: categoriasValidacao
+        categorias: categoriasValidacao,
+        categoriasPorTipo: categoriasPorTipoValidacao
       });
     }
 
@@ -79,12 +97,16 @@
           tiposValidacao = Array.isArray(validacoes.tipos) ? validacoes.tipos : [];
           unidadesValidacao = Array.isArray(validacoes.unidades) ? validacoes.unidades : [];
           categoriasValidacao = Array.isArray(validacoes.categorias) ? validacoes.categorias : [];
+          categoriasPorTipoValidacao = validacoes.categoriasPorTipo && typeof validacoes.categoriasPorTipo === 'object'
+            ? validacoes.categoriasPorTipo
+            : {};
           if (typeof window !== 'undefined') {
             window.AppValidacoesCache = {
               ...(window.AppValidacoesCache || {}),
               tipos: tiposValidacao,
               unidades: unidadesValidacao,
-              categorias: categoriasValidacao
+              categorias: categoriasValidacao,
+              categoriasPorTipo: categoriasPorTipoValidacao
             };
           }
           atualizarOpcoesReceitas();
@@ -93,6 +115,7 @@
           tiposValidacao = [];
           unidadesValidacao = [];
           categoriasValidacao = [];
+          categoriasPorTipoValidacao = {};
           atualizarOpcoesReceitas();
         })
         .obterValidacoes();
@@ -299,7 +322,7 @@
         if (!isTipoValidacao(tipo)) {
           return 'Tipo de entrada invalido';
         }
-        if (!categoria || !isCategoriaValidacao(categoria)) {
+        if (!categoria || !isCategoriaValidaParaTipo(tipo, categoria)) {
           return 'Categoria da entrada invalida';
         }
         if (!unidade || !isUnidadeValidacao(unidade)) {

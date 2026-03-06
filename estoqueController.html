@@ -38,18 +38,21 @@
           validacoes.tipos ||= [];
           validacoes.unidades ||= [];
           validacoes.categorias ||= [];
+          validacoes.categoriasPorTipo ||= {};
           validacoes.fornecedores ||= [];
 
           if (typeof window !== 'undefined') {
             window.AppValidacoesCache = {
               ...(window.AppValidacoesCache || {}),
-              tipos: validacoes.tipos
+              tipos: validacoes.tipos,
+              categorias: validacoes.categorias,
+              categoriasPorTipo: validacoes.categoriasPorTipo
             };
           }
 
           EstoqueUI.renderTipos?.(validacoes.tipos);
           EstoqueUI.renderUnidades?.(validacoes.unidades);
-          EstoqueUI.renderCategorias?.(validacoes.categorias);
+          EstoqueUI.renderCategorias?.(validacoes.categorias, validacoes.categoriasPorTipo);
           EstoqueUI.renderFornecedores?.(validacoes.fornecedores);
 
           EstoqueUI.renderFiltroTipos?.(validacoes.tipos);
@@ -59,6 +62,21 @@
           }
         })
         .obterValidacoes();
+    }
+
+    function categoriaValidaParaTipo(tipo, categoria) {
+      const t = String(tipo || '').trim().toUpperCase();
+      const c = String(categoria || '').trim().toUpperCase();
+      if (!t || !c) return false;
+
+      const mapa = validacoes?.categoriasPorTipo || {};
+      const categoriasTipo = Array.isArray(mapa[t]) ? mapa[t] : [];
+      if (categoriasTipo.length > 0) {
+        return categoriasTipo.some(v => String(v || '').trim().toUpperCase() === c);
+      }
+
+      return (Array.isArray(validacoes?.categorias) ? validacoes.categorias : [])
+        .some(v => String(v || '').trim().toUpperCase() === c);
     }
 
     function carregarEstoque() {
@@ -88,6 +106,12 @@
       };
 
       const tipo = get('tipo');
+      const categoria = get('categoria');
+      if (!categoriaValidaParaTipo(tipo, categoria)) {
+        mostrarToast('Categoria invalida para o tipo selecionado', 'erro');
+        return;
+      }
+
       const comprimentoInput = tipo === 'MADEIRA' ? parseNumeroInput(get('comprimento_cm')) : '';
       const larguraInput = tipo === 'MADEIRA' ? parseNumeroInput(get('largura_cm')) : '';
       const espessuraInput = tipo === 'MADEIRA' ? parseNumeroInput(get('espessura_cm')) : '';
@@ -110,7 +134,7 @@
         item: get('item'),
         quantidade: tipo === 'MADEIRA' ? qtdMadeira : parseNumeroInput(get('quantidade')) || 0,
         unidade: tipo === 'MADEIRA' ? 'M3' : get('unidade'),
-        categoria: get('categoria'),
+        categoria,
         fornecedor: get('fornecedor'),
         valor_unit: parseNumeroInput(get('valor_unit')) || 0,
         observacao: get('observacao'),

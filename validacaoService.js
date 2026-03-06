@@ -85,15 +85,53 @@ function indiceColunaValidacao(headers, nomeEsperado, fallback) {
   return idx >= 0 ? idx : fallback;
 }
 
+function obterCategoriasPorTipoValidacao() {
+  const sheet = getSheet('VALIDACAO_TIPO_CATEGORIA');
+  if (!sheet) return {};
+
+  const data = sheet.getDataRange().getValues();
+  if (!Array.isArray(data) || data.length < 2) return {};
+
+  const headers = Array.isArray(data[0]) ? data[0] : [];
+  const rows = data.slice(1);
+  const idxTipo = indiceColunaValidacao(headers, 'TIPO', 0);
+  const idxCategoria = indiceColunaValidacao(headers, 'CATEGORIA', 1);
+
+  const mapa = {};
+  rows.forEach(row => {
+    const tipo = String(row[idxTipo] || '').trim().toUpperCase();
+    const categoria = String(row[idxCategoria] || '').trim();
+    if (!tipo || !categoria) return;
+
+    if (!mapa[tipo]) {
+      mapa[tipo] = [];
+    }
+    const existe = mapa[tipo].some(c => String(c || '').trim().toUpperCase() === categoria.toUpperCase());
+    if (!existe) {
+      mapa[tipo].push(categoria);
+    }
+  });
+
+  if (!Array.isArray(mapa.OUTROS) || mapa.OUTROS.length === 0) {
+    mapa.OUTROS = ['OUTROS'];
+  } else if (!mapa.OUTROS.some(c => String(c || '').trim().toUpperCase() === 'OUTROS')) {
+    mapa.OUTROS.push('OUTROS');
+  }
+
+  return mapa;
+}
+
 function obterValidacoes() {
   const sheet = getSheet('VALIDACAO');
+  const categoriasPorTipo = obterCategoriasPorTipoValidacao();
   if (!sheet) {
     return {
       tipos: [],
       unidades: [],
       categorias: [],
       fornecedores: [],
-      valorKwhPorFornecedor: {}
+      valorKwhPorFornecedor: {},
+      categoriasPorTipo
     };
   }
   const data = sheet.getDataRange().getValues();
@@ -103,7 +141,8 @@ function obterValidacoes() {
       unidades: [],
       categorias: [],
       fornecedores: [],
-      valorKwhPorFornecedor: {}
+      valorKwhPorFornecedor: {},
+      categoriasPorTipo
     };
   }
 
@@ -154,11 +193,20 @@ function obterValidacoes() {
     }
   });
 
+  Object.keys(categoriasPorTipo).forEach(tipo => {
+    (categoriasPorTipo[tipo] || []).forEach(cat => {
+      if (cat && String(cat).trim() !== '') {
+        categorias.add(cat);
+      }
+    });
+  });
+
   return {
     tipos: [...tipos],
     unidades: [...unidades],
     categorias: [...categorias],
     fornecedores: [...fornecedores],
-    valorKwhPorFornecedor
+    valorKwhPorFornecedor,
+    categoriasPorTipo
   };
 }

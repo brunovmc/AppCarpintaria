@@ -9,6 +9,7 @@
     let tiposEntradaValidacao = [];
     let unidadesValidacao = [];
     let categoriasValidacao = [];
+    let categoriasPorTipoValidacao = {};
 
     /* =========================
        HELPERS
@@ -43,14 +44,37 @@
       return [...map.values()];
     }
 
-    function setOpcoesReceitas({ estoque, produtos, tipos, unidades, categorias } = {}) {
+    function normalizarMapaCategoriasPorTipo(mapa) {
+      const out = {};
+      if (!mapa || typeof mapa !== 'object') return out;
+
+      Object.keys(mapa).forEach(tipo => {
+        const chave = String(tipo || '').trim().toUpperCase();
+        if (!chave) return;
+        out[chave] = normalizarListaValidacao(mapa[tipo] || []);
+      });
+
+      return out;
+    }
+
+    function setOpcoesReceitas({ estoque, produtos, tipos, unidades, categorias, categoriasPorTipo } = {}) {
       opcoesEstoque = Array.isArray(estoque) ? estoque : [];
       opcoesProdutos = Array.isArray(produtos) ? produtos : [];
       tiposEntradaValidacao = normalizarListaValidacao(tipos)
         .map(t => t.toUpperCase());
       unidadesValidacao = normalizarListaValidacao(unidades);
       categoriasValidacao = normalizarListaValidacao(categorias);
+      categoriasPorTipoValidacao = normalizarMapaCategoriasPorTipo(categoriasPorTipo);
       renderDatalistsFormulario();
+
+      document.querySelectorAll('.linha-receita-entrada').forEach(row => {
+        const tipo = String(row.querySelector('.entrada-tipo')?.value || '').toUpperCase();
+        const categoriaSel = row.querySelector('.entrada-categoria');
+        const categoriaAtual = categoriaSel ? categoriaSel.value : '';
+        if (categoriaSel) {
+          categoriaSel.innerHTML = renderOpcoesCategoria(categoriaAtual, tipo);
+        }
+      });
     }
 
     function parseNumero(valor) {
@@ -86,6 +110,14 @@
 
     function getCategoriasValidacao() {
       return [...categoriasValidacao].sort((a, b) => a.localeCompare(b));
+    }
+
+    function getCategoriasParaTipo(tipo) {
+      const t = String(tipo || '').trim().toUpperCase();
+      const categoriasTipo = Array.isArray(categoriasPorTipoValidacao[t])
+        ? categoriasPorTipoValidacao[t]
+        : [];
+      return categoriasTipo.length > 0 ? categoriasTipo : getCategoriasValidacao();
     }
 
     function setSelectByValidation(select, valor) {
@@ -341,8 +373,8 @@
       return `<option value="">${placeholder}</option>` + opts;
     }
 
-    function renderOpcoesCategoria(selecionado) {
-      return renderOpcoesSelect(getCategoriasValidacao(), selecionado, 'Categoria');
+    function renderOpcoesCategoria(selecionado, tipo = '') {
+      return renderOpcoesSelect(getCategoriasParaTipo(tipo), selecionado, 'Categoria');
     }
 
     function renderOpcoesUnidade(selecionado) {
@@ -396,7 +428,7 @@
           <input class="entrada-produto ${produtoHidden}" placeholder="Produto" value="${produtoNome}" ${listaProdutos} data-produto-id="${produtoRefId}">
           <input class="entrada-receita ${produtoHidden}" placeholder="Receita" value="${receitaNome}" ${listaReceitas} data-produto-id="${produtoRefId}" data-receita-id="${receitaRefId}">
           <select class="entrada-categoria">
-            ${renderOpcoesCategoria(categoriaValor)}
+            ${renderOpcoesCategoria(categoriaValor, tipo)}
           </select>
           <select class="entrada-unidade">
             ${renderOpcoesUnidade(unidadeValor)}
@@ -1073,6 +1105,9 @@
             if (recIdInput) recIdInput.value = '';
           }
 
+          if (categoriaInput) {
+            categoriaInput.innerHTML = renderOpcoesCategoria('', tipo);
+          }
           if (unidadeInput) unidadeInput.value = '';
           if (categoriaInput) categoriaInput.value = '';
 

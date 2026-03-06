@@ -23,9 +23,31 @@ const COMPRAS_SCHEMA = [
   'estoque_id'
 ];
 
+function categoriaValidaParaTipoCompra(tipo, categoria) {
+  const t = String(tipo || '').trim().toUpperCase();
+  const c = String(categoria || '').trim().toUpperCase();
+  if (!t || !c) return false;
+
+  const validacoes = obterValidacoes();
+  const mapa = validacoes?.categoriasPorTipo || {};
+  const categoriasTipo = Array.isArray(mapa[t]) ? mapa[t] : [];
+
+  if (categoriasTipo.length > 0) {
+    return categoriasTipo.some(v => String(v || '').trim().toUpperCase() === c);
+  }
+
+  const categoriasGerais = Array.isArray(validacoes?.categorias) ? validacoes.categorias : [];
+  return categoriasGerais.some(v => String(v || '').trim().toUpperCase() === c);
+}
+
 function normalizarPayloadMadeiraCompra(payload) {
   const dados = { ...(payload || {}) };
   const tipo = String(dados.tipo || '').trim().toUpperCase();
+
+  if (!categoriaValidaParaTipoCompra(tipo, dados.categoria)) {
+    throw new Error('Categoria invalida para o tipo selecionado.');
+  }
+
   if (tipo !== 'MADEIRA') return dados;
 
   const comprimento = parseNumeroBR(dados.comprimento_cm);
