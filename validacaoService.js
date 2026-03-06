@@ -19,6 +19,63 @@ function testeValidacao() {
   Logger.log(obterValidacoes());
 }
 
+const VALIDACOES_CACHE_TTL_SEC = 21600; // 6 horas (maximo do CacheService)
+const VALIDACOES_CACHE_VERSION = 'v1';
+
+function getValidacoesCacheKey() {
+  const id = String(typeof DATA_SPREADSHEET_ID === 'string' ? DATA_SPREADSHEET_ID : '').trim();
+  return `VALIDACOES_CACHE:${id || 'SEM_ID'}:${VALIDACOES_CACHE_VERSION}`;
+}
+
+function lerValidacoesDoCache() {
+  try {
+    const cache = CacheService.getScriptCache();
+    const raw = cache.get(getValidacoesCacheKey());
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : null;
+  } catch (error) {
+    return null;
+  }
+}
+
+function salvarValidacoesNoCache(payload) {
+  try {
+    const cache = CacheService.getScriptCache();
+    cache.put(
+      getValidacoesCacheKey(),
+      JSON.stringify(payload || {}),
+      VALIDACOES_CACHE_TTL_SEC
+    );
+  } catch (error) {
+    // Sem falha fatal: se cache falhar, segue sem cache.
+  }
+}
+
+function limparCacheValidacoes() {
+  const key = getValidacoesCacheKey();
+  try {
+    CacheService.getScriptCache().remove(key);
+    return { ok: true, key };
+  } catch (error) {
+    return { ok: false, key, erro: error.message };
+  }
+}
+
+function recarregarCacheValidacoes() {
+  limparCacheValidacoes();
+  const dados = obterValidacoes(true);
+  return {
+    ok: true,
+    key: getValidacoesCacheKey(),
+    ttl_segundos: VALIDACOES_CACHE_TTL_SEC,
+    tipos: Array.isArray(dados?.tipos) ? dados.tipos.length : 0,
+    unidades: Array.isArray(dados?.unidades) ? dados.unidades.length : 0,
+    categorias: Array.isArray(dados?.categorias) ? dados.categorias.length : 0,
+    fornecedores: Array.isArray(dados?.fornecedores) ? dados.fornecedores.length : 0
+  };
+}
+
 function listarTipos() {
   const sheet = getSheet('VALIDACAO');
   if (!sheet) return [];
@@ -121,11 +178,19 @@ function obterCategoriasPorTipoValidacao() {
   return mapa;
 }
 
-function obterValidacoes() {
+function obterValidacoes(forcarRecarregar) {
+  if (!forcarRecarregar) {
+    const cached = lerValidacoesDoCache();
+    if (cached) {
+      return cached;
+    }
+  }
+
   const sheet = getSheet('VALIDACAO');
   const categoriasPorTipo = obterCategoriasPorTipoValidacao();
+  let resultado;
   if (!sheet) {
-    return {
+    resultado = {
       tipos: [],
       unidades: [],
       categorias: [],
@@ -133,10 +198,12 @@ function obterValidacoes() {
       valorKwhPorFornecedor: {},
       categoriasPorTipo
     };
+    salvarValidacoesNoCache(resultado);
+    return resultado;
   }
   const data = sheet.getDataRange().getValues();
   if (!Array.isArray(data) || data.length < 2) {
-    return {
+    resultado = {
       tipos: [],
       unidades: [],
       categorias: [],
@@ -144,6 +211,8 @@ function obterValidacoes() {
       valorKwhPorFornecedor: {},
       categoriasPorTipo
     };
+    salvarValidacoesNoCache(resultado);
+    return resultado;
   }
 
   const headers = Array.isArray(data[0]) ? data[0] : [];
@@ -201,7 +270,7 @@ function obterValidacoes() {
     });
   });
 
-  return {
+  resultado = {
     tipos: [...tipos],
     unidades: [...unidades],
     categorias: [...categorias],
@@ -209,4 +278,6 @@ function obterValidacoes() {
     valorKwhPorFornecedor,
     categoriasPorTipo
   };
+  salvarValidacoesNoCache(resultado);
+  return resultado;
 }
