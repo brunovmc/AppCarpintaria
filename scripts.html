@@ -2,12 +2,27 @@
   /* =========================
      NAV / ABAS
   ========================== */
+  function atualizarEstadoNavbar(abaAtiva) {
+    const botoes = document.querySelectorAll('.navbar button[data-aba]');
+    const alvo = String(abaAtiva || '').trim();
+    botoes.forEach(btn => {
+      const ehAtivo = String(btn.dataset.aba || '').trim() === alvo;
+      btn.classList.toggle('active', ehAtivo);
+      if (ehAtivo) {
+        btn.setAttribute('aria-current', 'page');
+      } else {
+        btn.removeAttribute('aria-current');
+      }
+    });
+  }
+
   function trocarAba(nome) {
     document.querySelectorAll('.aba')
       .forEach(a => a.classList.add('hidden'));
 
     const aba = document.getElementById('aba-' + nome);
     if (aba) aba.classList.remove('hidden');
+    atualizarEstadoNavbar(nome);
     setTopBars(nome);
 
     if (nome === 'estoque' && window.EstoqueController) {
@@ -117,6 +132,40 @@
     texto: ''
   };
 
+  function setFiltroTipoRapidoEstoque(tipo) {
+    buscaState.tipo = String(tipo || '').trim();
+
+    const selTipo = document.getElementById('filtroTipo');
+    if (selTipo) {
+      const existe = [...selTipo.options].some(o => (o.value || '') === buscaState.tipo);
+      selTipo.value = existe ? buscaState.tipo : '';
+      if (!existe) buscaState.tipo = '';
+    }
+
+    if (window.EstoqueUI?.marcarTipoRapidoAtivo) {
+      EstoqueUI.marcarTipoRapidoAtivo(buscaState.tipo);
+    }
+
+    aplicarBuscaEstoque();
+  }
+
+  function setFiltroTipoRapidoCompras(tipo) {
+    buscaStateCompras.tipo = String(tipo || '').trim();
+
+    const selTipo = document.getElementById('filtroTipoCompras');
+    if (selTipo) {
+      const existe = [...selTipo.options].some(o => (o.value || '') === buscaStateCompras.tipo);
+      selTipo.value = existe ? buscaStateCompras.tipo : '';
+      if (!existe) buscaStateCompras.tipo = '';
+    }
+
+    if (window.ComprasUI?.marcarTipoRapidoAtivo) {
+      ComprasUI.marcarTipoRapidoAtivo(buscaStateCompras.tipo);
+    }
+
+    aplicarBuscaCompras();
+  }
+
   function debounce(fn, delay = 250) {
     let t = null;
     return (...args) => {
@@ -153,6 +202,10 @@
     buscaState.tipo = tipo ? (tipo.value || '') : buscaState.tipo;
     buscaState.categoria = categoria ? (categoria.value || '') : buscaState.categoria;
     buscaState.unidade = unidade ? (unidade.value || '') : buscaState.unidade;
+
+    if (window.EstoqueUI?.marcarTipoRapidoAtivo) {
+      EstoqueUI.marcarTipoRapidoAtivo(buscaState.tipo);
+    }
   }
 
   function lerFiltrosDoPainelCompras() {
@@ -163,6 +216,10 @@
     buscaStateCompras.tipo = tipo ? (tipo.value || '') : buscaStateCompras.tipo;
     buscaStateCompras.categoria = categoria ? (categoria.value || '') : buscaStateCompras.categoria;
     buscaStateCompras.unidade = unidade ? (unidade.value || '') : buscaStateCompras.unidade;
+
+    if (window.ComprasUI?.marcarTipoRapidoAtivo) {
+      ComprasUI.marcarTipoRapidoAtivo(buscaStateCompras.tipo);
+    }
   }
 
   function aplicarBuscaEstoque() {
@@ -360,6 +417,10 @@
     if (categoria) categoria.value = '';
     if (unidade) unidade.value = '';
 
+    if (window.EstoqueUI?.marcarTipoRapidoAtivo) {
+      EstoqueUI.marcarTipoRapidoAtivo('');
+    }
+
     aplicarBuscaEstoque();
   }
 
@@ -375,6 +436,10 @@
     if (tipo) tipo.value = '';
     if (categoria) categoria.value = '';
     if (unidade) unidade.value = '';
+
+    if (window.ComprasUI?.marcarTipoRapidoAtivo) {
+      ComprasUI.marcarTipoRapidoAtivo('');
+    }
 
     aplicarBuscaCompras();
   }
@@ -442,6 +507,10 @@
     if (selTipo && tipos.includes(tipoAtual)) selTipo.value = tipoAtual;
     if (selCategoria && categorias.includes(catAtual)) selCategoria.value = catAtual;
     if (selUnidade && unidades.includes(unidadeAtual)) selUnidade.value = unidadeAtual;
+
+    if (window.EstoqueUI?.marcarTipoRapidoAtivo) {
+      EstoqueUI.marcarTipoRapidoAtivo(selTipo ? selTipo.value : '');
+    }
   }
 
   // espera o EstoqueStore carregar (sem travar nada)
@@ -489,6 +558,10 @@
     if (selTipo && tipos.includes(tipoAtual)) selTipo.value = tipoAtual;
     if (selCategoria && categorias.includes(catAtual)) selCategoria.value = catAtual;
     if (selUnidade && unidades.includes(unidadeAtual)) selUnidade.value = unidadeAtual;
+
+    if (window.ComprasUI?.marcarTipoRapidoAtivo) {
+      ComprasUI.marcarTipoRapidoAtivo(selTipo ? selTipo.value : '');
+    }
   }
 
   let filtroPollCompras = null;

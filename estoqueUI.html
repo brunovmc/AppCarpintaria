@@ -40,7 +40,8 @@
 
         // Painel de filtro (inline)
         filtroTipo: document.getElementById('filtroTipo'),
-        filtroCategoria: document.getElementById('filtroCategoria')
+        filtroCategoria: document.getElementById('filtroCategoria'),
+        filtroTipoRapido: document.getElementById('filtroTipoRapidoEstoque')
       };
     }
 
@@ -377,6 +378,53 @@
       });
     }
 
+    function normalizarTipos(lista) {
+      const unicos = [];
+      limparVazios(lista).forEach(v => {
+        if (!unicos.some(x => x.toUpperCase() === v.toUpperCase())) {
+          unicos.push(v);
+        }
+      });
+      return unicos.sort((a, b) => a.localeCompare(b));
+    }
+
+    function marcarTipoRapidoAtivo(tipoAtual) {
+      const { filtroTipoRapido } = el();
+      if (!filtroTipoRapido) return;
+      const alvo = String(tipoAtual || '').trim().toUpperCase();
+      filtroTipoRapido.querySelectorAll('button[data-tipo]').forEach(btn => {
+        const tipoBtn = String(btn.dataset.tipo || '').trim().toUpperCase();
+        btn.classList.toggle('ativo', tipoBtn === alvo);
+      });
+    }
+
+    function renderFiltroRapidoTipos(lista) {
+      const { filtroTipoRapido, filtroTipo } = el();
+      if (!filtroTipoRapido) return;
+
+      const tipos = normalizarTipos(lista);
+      filtroTipoRapido.innerHTML = '';
+
+      const criarBotao = (label, tipo) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.textContent = label;
+        btn.dataset.tipo = tipo;
+        btn.addEventListener('click', () => {
+          if (typeof window.setFiltroTipoRapidoEstoque === 'function') {
+            window.setFiltroTipoRapidoEstoque(tipo);
+            return;
+          }
+          if (filtroTipo) filtroTipo.value = tipo;
+        });
+        return btn;
+      };
+
+      filtroTipoRapido.appendChild(criarBotao('Todos', ''));
+      tipos.forEach(tipo => filtroTipoRapido.appendChild(criarBotao(tipo, tipo)));
+      marcarTipoRapidoAtivo(filtroTipo ? filtroTipo.value : '');
+    }
+
     /* =========================
        LISTA + CARDS
     ========================== */
@@ -532,6 +580,8 @@
 
       renderFiltroTipos,
       renderFiltroCategorias,
+      renderFiltroRapidoTipos,
+      marcarTipoRapidoAtivo,
 
       setOpcoesAdicao,
       resetarAdicaoDestino,
