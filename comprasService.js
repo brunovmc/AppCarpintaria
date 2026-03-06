@@ -1,4 +1,6 @@
 const ABA_COMPRAS = 'COMPRAS';
+const COMPRAS_CACHE_SCOPE = 'COMPRAS_LISTA_ATIVAS_PENDENTES';
+const COMPRAS_CACHE_TTL_SEC = 90;
 
 const COMPRAS_SCHEMA = [
   'ID',
@@ -66,13 +68,46 @@ function normalizarPayloadMadeiraCompra(payload) {
   return dados;
 }
 
-function listarCompras() {
+function lerCacheListaCompras() {
+  return appCacheGetJson(COMPRAS_CACHE_SCOPE);
+}
+
+function salvarCacheListaCompras(lista) {
+  appCachePutJson(COMPRAS_CACHE_SCOPE, Array.isArray(lista) ? lista : [], COMPRAS_CACHE_TTL_SEC);
+}
+
+function limparCacheCompras() {
+  return appCacheRemove(COMPRAS_CACHE_SCOPE);
+}
+
+function recarregarCacheCompras() {
+  limparCacheCompras();
+  const dados = listarCompras(true);
+  return {
+    ok: true,
+    scope: COMPRAS_CACHE_SCOPE,
+    ttl_segundos: COMPRAS_CACHE_TTL_SEC,
+    total_itens: Array.isArray(dados) ? dados.length : 0
+  };
+}
+
+function listarCompras(forcarRecarregar) {
+  if (!forcarRecarregar) {
+    const cached = lerCacheListaCompras();
+    if (Array.isArray(cached)) {
+      return cached;
+    }
+  }
+
   const sheet = getDataSpreadsheet().getSheetByName(ABA_COMPRAS);
-  if (!sheet) return [];
+  if (!sheet) {
+    salvarCacheListaCompras([]);
+    return [];
+  }
 
   const rows = rowsToObjects(sheet);
 
-  return rows
+  const lista = rows
     .filter(i => String(i.ativo).toLowerCase() === 'true')
     .filter(i => String(i.adicionado_estoque).toLowerCase() !== 'true')
     .map(i => ({
@@ -84,6 +119,8 @@ function listarCompras() {
         ? Utilities.formatDate(new Date(i.comprado_em), Session.getScriptTimeZone(), 'yyyy-MM-dd')
         : ''
     }));
+  salvarCacheListaCompras(lista);
+  return lista;
 }
 
 function criarItemCompra(payload) {

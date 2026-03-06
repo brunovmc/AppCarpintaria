@@ -1,4 +1,6 @@
 const ABA_ESTOQUE = 'ESTOQUE';
+const ESTOQUE_CACHE_SCOPE = 'ESTOQUE_LISTA_ATIVOS';
+const ESTOQUE_CACHE_TTL_SEC = 90;
 
 const ESTOQUE_SCHEMA = [
   'ID',
@@ -65,13 +67,46 @@ function normalizarPayloadMadeiraEstoque(payload) {
 }
 
 
-function listarEstoque() {
+function lerCacheListaEstoque() {
+  return appCacheGetJson(ESTOQUE_CACHE_SCOPE);
+}
+
+function salvarCacheListaEstoque(lista) {
+  appCachePutJson(ESTOQUE_CACHE_SCOPE, Array.isArray(lista) ? lista : [], ESTOQUE_CACHE_TTL_SEC);
+}
+
+function limparCacheEstoque() {
+  return appCacheRemove(ESTOQUE_CACHE_SCOPE);
+}
+
+function recarregarCacheEstoque() {
+  limparCacheEstoque();
+  const dados = listarEstoque(true);
+  return {
+    ok: true,
+    scope: ESTOQUE_CACHE_SCOPE,
+    ttl_segundos: ESTOQUE_CACHE_TTL_SEC,
+    total_itens: Array.isArray(dados) ? dados.length : 0
+  };
+}
+
+function listarEstoque(forcarRecarregar) {
+  if (!forcarRecarregar) {
+    const cached = lerCacheListaEstoque();
+    if (Array.isArray(cached)) {
+      return cached;
+    }
+  }
+
   const sheet = getDataSpreadsheet().getSheetByName(ABA_ESTOQUE);
-  if (!sheet) return [];
+  if (!sheet) {
+    salvarCacheListaEstoque([]);
+    return [];
+  }
 
   const rows = rowsToObjects(sheet);
 
-  return rows
+  const lista = rows
     .filter(i => String(i.ativo).toLowerCase() === 'true')
     .map(i => ({
       ...i,
@@ -82,6 +117,8 @@ function listarEstoque() {
         ? Utilities.formatDate(new Date(i.comprado_em), Session.getScriptTimeZone(), 'yyyy-MM-dd')
         : ''
     }));
+  salvarCacheListaEstoque(lista);
+  return lista;
 }
 
 function testeListarEstoqueDireto() {

@@ -14,6 +14,65 @@ function getDataSpreadsheet() {
   }
 }
 
+const APP_CACHE_VERSION = 'v1';
+
+function getAppCacheKey(scope) {
+  const id = (typeof DATA_SPREADSHEET_ID === 'string')
+    ? DATA_SPREADSHEET_ID.trim()
+    : '';
+  const escopo = String(scope || '').trim().toUpperCase();
+  return `APP_CACHE:${id || 'SEM_ID'}:${APP_CACHE_VERSION}:${escopo}`;
+}
+
+function appCacheGetJson(scope) {
+  const key = getAppCacheKey(scope);
+  try {
+    const raw = CacheService.getScriptCache().get(key);
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch (error) {
+    return null;
+  }
+}
+
+function appCachePutJson(scope, payload, ttlSec) {
+  const key = getAppCacheKey(scope);
+  const ttl = Number(ttlSec) > 0 ? Number(ttlSec) : 60;
+  try {
+    CacheService.getScriptCache().put(key, JSON.stringify(payload ?? null), ttl);
+    return { ok: true, key, ttl };
+  } catch (error) {
+    return { ok: false, key, ttl, erro: error.message };
+  }
+}
+
+function appCacheRemove(scope) {
+  const key = getAppCacheKey(scope);
+  try {
+    CacheService.getScriptCache().remove(key);
+    return { ok: true, key };
+  } catch (error) {
+    return { ok: false, key, erro: error.message };
+  }
+}
+
+function invalidarCachesRelacionadosAba(sheetName) {
+  const aba = String(sheetName || '').trim().toUpperCase();
+  if (!aba) return;
+
+  if (aba === 'ESTOQUE' && typeof limparCacheEstoque === 'function') {
+    limparCacheEstoque();
+  }
+
+  if (aba === 'COMPRAS' && typeof limparCacheCompras === 'function') {
+    limparCacheCompras();
+  }
+
+  if ((aba === 'VALIDACAO' || aba === 'VALIDACAO_TIPO_CATEGORIA') && typeof limparCacheValidacoes === 'function') {
+    limparCacheValidacoes();
+  }
+}
+
 function getSheet(nome) {
   return getDataSpreadsheet().getSheetByName(nome);
 }
@@ -70,6 +129,7 @@ function insert(sheetName, payload, schema) {
   });
 
   sheet.appendRow(row);
+  invalidarCachesRelacionadosAba(sheetName);
   return true;
 }
 
@@ -97,6 +157,7 @@ function updateById(sheetName, idField, id, payload, schema) {
         }
       });
 
+      invalidarCachesRelacionadosAba(sheetName);
       return true;
     }
   }
