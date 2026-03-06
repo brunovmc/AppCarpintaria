@@ -6,6 +6,9 @@
     let opcoesEstoque = [];
     let opcoesProdutos = [];
     let receitasPorProduto = {};
+    let tiposEntradaValidacao = [];
+    let unidadesValidacao = [];
+    let categoriasValidacao = [];
 
     /* =========================
        HELPERS
@@ -16,18 +19,38 @@
         lista: document.getElementById('listaProdutos'),
 
         nome: document.getElementById('produtoNome'),
-        categoria: document.getElementById('produtoCategoria'),
-        estoque: document.getElementById('produtoEstoque'),
-        descricao: document.getElementById('produtoDescricao'),
-        observacao: document.getElementById('produtoObservacao'),
+        modeloCard: document.getElementById('produtoModeloCard'),
+        modeloNome: document.getElementById('produtoModeloNome'),
+        modeloDescricao: document.getElementById('produtoModeloDescricao'),
+        modeloEntradas: document.getElementById('produtoModeloEntradas'),
+        modeloSaidas: document.getElementById('produtoModeloSaidas'),
+        modeloEtapas: document.getElementById('produtoModeloEtapas'),
+        modeloDatalists: document.getElementById('produtoModeloDatalists'),
         formTitulo: document.getElementById('produtoFormTitulo')
       };
     }
 
-    function setOpcoesReceitas({ estoque, produtos } = {}) {
+    function normalizarListaValidacao(lista) {
+      const map = new Map();
+      (Array.isArray(lista) ? lista : []).forEach(v => {
+        const label = String(v || '').trim();
+        if (!label) return;
+        const chave = label.toUpperCase();
+        if (!map.has(chave)) {
+          map.set(chave, label);
+        }
+      });
+      return [...map.values()];
+    }
+
+    function setOpcoesReceitas({ estoque, produtos, tipos, unidades, categorias } = {}) {
       opcoesEstoque = Array.isArray(estoque) ? estoque : [];
       opcoesProdutos = Array.isArray(produtos) ? produtos : [];
-      renderEstoqueProdutoOptions();
+      tiposEntradaValidacao = normalizarListaValidacao(tipos)
+        .map(t => t.toUpperCase());
+      unidadesValidacao = normalizarListaValidacao(unidades);
+      categoriasValidacao = normalizarListaValidacao(categorias);
+      renderDatalistsFormulario();
     }
 
     function parseNumero(valor) {
@@ -54,8 +77,28 @@
     }
 
     function getTiposEntrada() {
-      const tiposEstoque = getTiposEstoque().sort();
-      return [...tiposEstoque, 'PRODUTO', 'LIVRE'];
+      return [...tiposEntradaValidacao].sort((a, b) => a.localeCompare(b));
+    }
+
+    function getUnidadesValidacao() {
+      return [...unidadesValidacao].sort((a, b) => a.localeCompare(b));
+    }
+
+    function getCategoriasValidacao() {
+      return [...categoriasValidacao].sort((a, b) => a.localeCompare(b));
+    }
+
+    function setSelectByValidation(select, valor) {
+      if (!select) return;
+      const alvo = String(valor || '').trim().toUpperCase();
+      if (!alvo) {
+        select.value = '';
+        return;
+      }
+      const opt = [...select.options].find(o =>
+        String(o.value || '').trim().toUpperCase() === alvo
+      );
+      select.value = opt ? opt.value : '';
     }
 
     function isTipoEstoque(tipo) {
@@ -104,25 +147,10 @@
       return item ? (item.unidade_produto || 'UN') : 'UN';
     }
 
-    function renderEstoqueProdutoOptions() {
-      const { estoque } = el();
-      if (!estoque) return;
-
-      const valorAtual = estoque.value || '';
-      const lista = (opcoesEstoque || [])
-        .filter(i => String(i.tipo || '').toUpperCase() === 'PRODUTO');
-
-      estoque.innerHTML = '<option value="">Selecione o estoque do produto</option>';
-      lista.forEach(i => {
-        const o = document.createElement('option');
-        o.value = i.ID;
-        o.textContent = i.item || i.ID;
-        estoque.appendChild(o);
-      });
-
-      if (valorAtual) {
-        estoque.value = valorAtual;
-      }
+    function renderDatalistsFormulario() {
+      const { modeloDatalists } = el();
+      if (!modeloDatalists) return;
+      modeloDatalists.innerHTML = renderProdutosDatalist('FORM') + renderEstoqueDatalists('FORM');
     }
 
     function contarCompativeis(entrada) {
@@ -241,8 +269,8 @@
 
       if (recIdInput) recIdInput.value = '';
 
-      if (unidadeInput) unidadeInput.value = produtoId ? getProdutoUnidade(produtoId) : '';
-      if (categoriaInput) categoriaInput.value = produtoId ? getProdutoCategoria(produtoId) : '';
+      setSelectByValidation(unidadeInput, produtoId ? getProdutoUnidade(produtoId) : '');
+      setSelectByValidation(categoriaInput, produtoId ? getProdutoCategoria(produtoId) : '');
     }
 
     function atualizarEntradaReceita(input) {
@@ -271,8 +299,8 @@
       if (estoqueIdInput) estoqueIdInput.value = estoqueId;
       input.dataset.estoqueId = estoqueId;
 
-      if (unidadeInput) unidadeInput.value = estoqueId ? (item.unidade || '') : '';
-      if (categoriaInput) categoriaInput.value = estoqueId ? (item.categoria || '') : '';
+      setSelectByValidation(unidadeInput, estoqueId ? (item.unidade || '') : '');
+      setSelectByValidation(categoriaInput, estoqueId ? (item.categoria || '') : '');
     }
 
     function calcularCustoReceita(receita) {
@@ -302,11 +330,29 @@
       return '<option value="">Tipo</option>' + opts;
     }
 
+    function renderOpcoesSelect(lista, selecionado, placeholder) {
+      const selecionadoUpper = String(selecionado || '').trim().toUpperCase();
+      const opts = (Array.isArray(lista) ? lista : []).map(v => {
+        const val = String(v || '').trim();
+        if (!val) return '';
+        const sel = val.toUpperCase() === selecionadoUpper ? 'selected' : '';
+        return `<option value="${val}" ${sel}>${val}</option>`;
+      }).join('');
+      return `<option value="">${placeholder}</option>` + opts;
+    }
+
+    function renderOpcoesCategoria(selecionado) {
+      return renderOpcoesSelect(getCategoriasValidacao(), selecionado, 'Categoria');
+    }
+
+    function renderOpcoesUnidade(selecionado) {
+      return renderOpcoesSelect(getUnidadesValidacao(), selecionado, 'Unidade');
+    }
+
     function renderEntradaEditRow(entrada = {}, produtoId = '') {
       const tipo = String(entrada.tipo_item || '').toUpperCase();
       const isProduto = tipo === 'PRODUTO';
-      const isLivre = tipo === 'LIVRE';
-      const isEstoque = isTipoEstoque(tipo);
+      const isEstoque = !!tipo && !isProduto;
       const isMadeira = tipo === 'MADEIRA';
 
       const produtoRefId = entrada.produto_ref_id || '';
@@ -322,7 +368,6 @@
       const estoqueNome = isEstoque
         ? (getEstoqueNome(estoqueRefId) || entrada.nome_item || '')
         : '';
-      const nomeLivre = isLivre ? (entrada.nome_item || '') : '';
 
       const listaProdutos = produtoId ? `list="produtosAutocomplete_${produtoId}"` : '';
       const listaReceitas = produtoRefId ? `list="receitasAutocomplete_${produtoRefId}"` : '';
@@ -341,7 +386,6 @@
       const dimsHidden = isMadeira ? '' : 'hidden';
       const estoqueHidden = isEstoque ? '' : 'hidden';
       const produtoHidden = isProduto ? '' : 'hidden';
-      const livreHidden = isLivre ? '' : 'hidden';
 
       return `
         <div class="linha-receita-entrada">
@@ -351,9 +395,12 @@
           <input class="entrada-estoque ${estoqueHidden}" placeholder="Item do estoque" value="${estoqueNome}" ${listaEstoque} data-estoque-id="${estoqueRefId}">
           <input class="entrada-produto ${produtoHidden}" placeholder="Produto" value="${produtoNome}" ${listaProdutos} data-produto-id="${produtoRefId}">
           <input class="entrada-receita ${produtoHidden}" placeholder="Receita" value="${receitaNome}" ${listaReceitas} data-produto-id="${produtoRefId}" data-receita-id="${receitaRefId}">
-          <input class="entrada-nome ${livreHidden}" placeholder="Nome livre" value="${nomeLivre}">
-          <input class="entrada-categoria" placeholder="Categoria" value="${categoriaValor}" readonly>
-          <input class="entrada-unidade" placeholder="Unidade" value="${unidadeValor}" readonly>
+          <select class="entrada-categoria">
+            ${renderOpcoesCategoria(categoriaValor)}
+          </select>
+          <select class="entrada-unidade">
+            ${renderOpcoesUnidade(unidadeValor)}
+          </select>
           <input class="entrada-qtd" type="number" step="0.01" min="0" placeholder="Quantidade" value="${entrada.qtd_pecas ?? ''}">
           <input class="entrada-comp ${dimsHidden}" type="number" step="0.01" min="0" placeholder="Comp (cm)" value="${entrada.comprimento_cm ?? ''}">
           <input class="entrada-larg ${dimsHidden}" type="number" step="0.01" min="0" placeholder="Larg (cm)" value="${entrada.largura_cm ?? ''}">
@@ -371,7 +418,9 @@
       return `
         <div class="linha-receita-saida">
           <input class="saida-nome" placeholder="Nome" value="${saida.nome_saida || ''}">
-          <input class="saida-unidade" placeholder="Unidade" value="${saida.unidade || ''}">
+          <select class="saida-unidade">
+            ${renderOpcoesUnidade(saida.unidade || '')}
+          </select>
           <input class="saida-qtd" type="number" step="0.01" min="0" placeholder="Quantidade" value="${saida.quantidade ?? ''}">
           <button class="btn-receita-remover-saida">Remover</button>
         </div>
@@ -413,24 +462,120 @@
       const f = el();
 
       if (f.nome) f.nome.value = data.nome_produto || '';
-      if (f.categoria) f.categoria.value = data.categoria || '';
-      if (f.estoque) f.estoque.value = data.estoque_id || '';
-      if (f.descricao) f.descricao.value = data.descricao || '';
-      if (f.observacao) f.observacao.value = data.observacao || '';
 
       if (f.formTitulo) f.formTitulo.innerText = 'Editar Produto';
+    }
+
+    function renderLinhaEtapaModelo(etapa = {}) {
+      return `
+        <div class="linha-etapa">
+          <input class="input-etapa-edit etapa-nome" value="${etapa.nome_etapa || ''}">
+          <input class="etapa-ordem" type="number" step="1" min="1" value="${etapa.ordem ?? ''}">
+          <button type="button" class="btn-modelo-remover-etapa">Remover</button>
+        </div>
+      `;
+    }
+
+    function adicionarEntradaModeloForm(entrada = {}) {
+      const { modeloEntradas } = el();
+      if (!modeloEntradas) return;
+      modeloEntradas.insertAdjacentHTML('beforeend', renderEntradaEditRow(entrada, 'FORM'));
+    }
+
+    function adicionarSaidaModeloForm(saida = {}) {
+      const { modeloSaidas } = el();
+      if (!modeloSaidas) return;
+      modeloSaidas.insertAdjacentHTML('beforeend', renderSaidaEditRow(saida));
+    }
+
+    function adicionarEtapaModeloForm(etapa = {}) {
+      const { modeloEtapas } = el();
+      if (!modeloEtapas) return;
+      modeloEtapas.insertAdjacentHTML('beforeend', renderLinhaEtapaModelo(etapa));
+    }
+
+    function preencherModeloFormulario(modelo = {}) {
+      const f = el();
+      if (!f.modeloCard) return;
+
+      const dados = modelo?.dados || {};
+      const entradas = Array.isArray(modelo?.entradas) ? modelo.entradas : [];
+      const saidas = Array.isArray(modelo?.saidas) ? modelo.saidas : [];
+      const etapas = Array.isArray(modelo?.etapas) ? modelo.etapas : [];
+
+      if (f.modeloNome) f.modeloNome.value = dados.nome_receita || 'Modelo principal';
+      if (f.modeloDescricao) f.modeloDescricao.value = dados.descricao || '';
+
+      if (f.modeloEntradas) f.modeloEntradas.innerHTML = '';
+      if (f.modeloSaidas) f.modeloSaidas.innerHTML = '';
+      if (f.modeloEtapas) f.modeloEtapas.innerHTML = '';
+
+      if (entradas.length > 0) {
+        entradas.forEach(e => adicionarEntradaModeloForm(e));
+      } else {
+        adicionarEntradaModeloForm();
+      }
+
+      if (saidas.length > 0) {
+        saidas.forEach(s => adicionarSaidaModeloForm(s));
+      } else {
+        adicionarSaidaModeloForm();
+      }
+
+      if (etapas.length > 0) {
+        etapas.forEach(et => adicionarEtapaModeloForm(et));
+      }
+
+      renderDatalistsFormulario();
+    }
+
+    function resetModeloFormulario() {
+      preencherModeloFormulario({
+        dados: { nome_receita: 'Modelo principal', descricao: '' },
+        entradas: [],
+        saidas: [],
+        etapas: []
+      });
+    }
+
+    function obterModeloFormularioPayload() {
+      const card = document.getElementById('produtoModeloCard');
+      if (!card) {
+        return {
+          dados: { nome_receita: 'Modelo principal', descricao: '' },
+          entradas: [],
+          saidas: [],
+          etapas: []
+        };
+      }
+
+      const payloadReceita = coletarDadosReceita(card);
+      const etapas = [...document.querySelectorAll('#produtoModeloEtapas .linha-etapa')]
+        .map((row, idx) => ({
+          nome_etapa: row.querySelector('.etapa-nome')?.value || '',
+          ordem: row.querySelector('.etapa-ordem')?.value || (idx + 1)
+        }))
+        .filter(et => String(et.nome_etapa || '').trim() !== '');
+
+      const nomeReceita = String(payloadReceita?.dados?.nome_receita || '').trim() || 'Modelo principal';
+
+      return {
+        dados: {
+          nome_receita: nomeReceita,
+          descricao: payloadReceita?.dados?.descricao || ''
+        },
+        entradas: payloadReceita?.entradas || [],
+        saidas: payloadReceita?.saidas || [],
+        etapas
+      };
     }
 
     function resetFormulario() {
       const f = el();
 
-      [
-        f.nome,
-        f.categoria,
-        f.estoque,
-        f.descricao,
-        f.observacao
-      ].forEach(i => i && (i.value = ''));
+      [f.nome].forEach(i => i && (i.value = ''));
+
+      resetModeloFormulario();
 
       if (f.formTitulo) f.formTitulo.innerText = 'Novo Produto';
     }
@@ -498,7 +643,6 @@
     function renderReceita(receita, produtoId) {
       const entradas = Array.isArray(receita.entradas) ? receita.entradas : [];
       const saidas = Array.isArray(receita.saidas) ? receita.saidas : [];
-      const isVariante = !!(receita.parent_receita_id);
 
       if (receita._editing) {
         return `
@@ -540,7 +684,7 @@
         <div class="receita-card" data-produto-id="${produtoId}" data-receita-id="${receita.receita_id}">
           <div class="receita-header">
             <strong>${receita.nome_receita || 'Receita'}</strong>
-            <span class="receita-tag">${isVariante ? 'Variante' : 'Base'}</span>
+            <span class="receita-tag">Modelo</span>
           </div>
           ${receita.descricao ? `<div class="comp-meta">${receita.descricao}</div>` : ''}
           <div class="comp-meta">Custo total: ${custoTotal}</div>
@@ -557,8 +701,6 @@
 
           <div class="comp-acoes">
             <button class="btn-receita-editar" data-produto-id="${produtoId}" data-receita-id="${receita.receita_id}">Editar</button>
-            <button class="btn-receita-duplicar" data-produto-id="${produtoId}" data-receita-id="${receita.receita_id}">Duplicar</button>
-            <button class="btn-receita-excluir" data-produto-id="${produtoId}" data-receita-id="${receita.receita_id}">Excluir</button>
           </div>
         </div>
       `;
@@ -577,9 +719,7 @@
         ? '<p>Nenhuma receita cadastrada.</p>'
         : lista.map(r => renderReceita(r, produtoId)).join('');
 
-      return conteudo + `
-        <button class="btn-receita-nova" data-produto-id="${produtoId}">Nova receita</button>
-      `;
+      return conteudo;
     }
 
     function renderProdutosDatalist(produtoId) {
@@ -595,7 +735,13 @@
 
     function renderEstoqueDatalists(produtoId) {
       if (!produtoId) return '';
-      const tipos = getTiposEstoque();
+      const tiposSet = new Set();
+      getTiposEstoque().forEach(t => tiposSet.add(String(t || '').toUpperCase()));
+      getTiposEntrada()
+        .filter(t => String(t || '').toUpperCase() !== 'PRODUTO')
+        .forEach(t => tiposSet.add(String(t || '').toUpperCase()));
+
+      const tipos = [...tiposSet];
       return tipos.map(tipo => {
         const tipoKey = String(tipo || '').replace(/[^a-zA-Z0-9]/g, '');
         const opts = (opcoesEstoque || [])
@@ -621,17 +767,14 @@
 
       const entradas = [...card.querySelectorAll('.linha-receita-entrada')].map(row => {
         const tipo = String(row.querySelector('.entrada-tipo')?.value || '').toUpperCase();
-        const nomeLivre = row.querySelector('.entrada-nome')?.value || '';
         const nomeProduto = row.querySelector('.entrada-produto')?.value || '';
         const nomeEstoque = row.querySelector('.entrada-estoque')?.value || '';
 
         let nomeItem = '';
         if (tipo === 'PRODUTO') {
           nomeItem = nomeProduto;
-        } else if (isTipoEstoque(tipo)) {
-          nomeItem = nomeEstoque;
         } else {
-          nomeItem = nomeLivre;
+          nomeItem = nomeEstoque;
         }
 
         return {
@@ -691,7 +834,19 @@
 
         const receitas = Array.isArray(i.receitas) ? i.receitas : [];
         const receitasCarregadas = !!i.receitasCarregadas;
-        const receitasTexto = receitasCarregadas ? `Receitas: ${receitas.length}` : 'Receitas: -';
+        const entradasDoCache = receitasCarregadas && receitas[0] && Array.isArray(receitas[0].entradas)
+          ? receitas[0].entradas.length
+          : 0;
+        const saidasDoCache = receitasCarregadas && receitas[0] && Array.isArray(receitas[0].saidas)
+          ? receitas[0].saidas.length
+          : 0;
+
+        const entradasTotal = Number(i.modelo_entradas_total || entradasDoCache || 0);
+        const saidasTotal = Number(i.modelo_saidas_total || saidasDoCache || 0);
+        const etapasTotal = Number(i.modelo_etapas_total || 0);
+        const resumoModelo = (entradasTotal + saidasTotal + etapasTotal) > 0
+          ? `Modelo: ${entradasTotal} entradas, ${saidasTotal} saidas, ${etapasTotal} etapas`
+          : 'Modelo: nao configurado';
 
         receitas.forEach(r => {
           (r.entradas || []).forEach(e => {
@@ -706,8 +861,7 @@
         div.innerHTML = `
           <div class="card-resumo">
             <strong>${i.nome_produto || i.produto_id}</strong><br>
-            ${receitasTexto}<br>
-            ${i.descricao || '-'}
+            ${resumoModelo}
           </div>
 
           <button class="ver-mais">Ver mais</button>
@@ -722,10 +876,8 @@
             ${renderProdutosDatalist(i.produto_id)}
             ${renderEstoqueDatalists(i.produto_id)}
 
-            <p><b>Estoque vinculado:</b> ${i.estoque_id ? (getEstoqueNome(i.estoque_id) || i.estoque_id) : '-'}</p>
-            <p><b>Observacao:</b> ${i.observacao || '-'}</p>
-
             <div class="acoes">
+              <button onclick="ProdutosController.enviarParaProducao('${i.produto_id}')">Criar OP</button>
               <button onclick="ProdutosController.editar('${i.produto_id}')">Editar</button>
               <button onclick="ProdutosController.excluir('${i.produto_id}')">Excluir</button>
             </div>
@@ -785,14 +937,6 @@
           return;
         }
 
-        if (e.target.classList.contains('btn-receita-nova')) {
-          const produtoId = e.target.dataset.produtoId;
-          if (window.ProdutosController) {
-            ProdutosController.criarReceita(produtoId);
-          }
-          return;
-        }
-
         if (e.target.classList.contains('btn-receita-editar')) {
           const produtoId = e.target.dataset.produtoId;
           const receitaId = e.target.dataset.receitaId;
@@ -818,24 +962,6 @@
           if (cardReceita && window.ProdutosController) {
             const payload = coletarDadosReceita(cardReceita);
             ProdutosController.salvarReceita(produtoId, receitaId, payload.dados, payload.entradas, payload.saidas);
-          }
-          return;
-        }
-
-        if (e.target.classList.contains('btn-receita-duplicar')) {
-          const produtoId = e.target.dataset.produtoId;
-          const receitaId = e.target.dataset.receitaId;
-          if (window.ProdutosController) {
-            ProdutosController.duplicarReceita(produtoId, receitaId);
-          }
-          return;
-        }
-
-        if (e.target.classList.contains('btn-receita-excluir')) {
-          const produtoId = e.target.dataset.produtoId;
-          const receitaId = e.target.dataset.receitaId;
-          if (window.ProdutosController) {
-            ProdutosController.excluirReceita(produtoId, receitaId);
           }
           return;
         }
@@ -871,6 +997,12 @@
           return;
         }
 
+        if (e.target.classList.contains('btn-modelo-remover-etapa')) {
+          const linha = e.target.closest('.linha-etapa');
+          if (linha) linha.remove();
+          return;
+        }
+
         if (cardAberto && !cardAberto.contains(e.target)) {
           fecharCard();
         }
@@ -884,14 +1016,12 @@
           const produtoId = cardReceita?.dataset.produtoId || '';
           const tipo = String(e.target.value || '').toUpperCase();
           const isProduto = tipo === 'PRODUTO';
-          const isLivre = tipo === 'LIVRE';
-          const isEstoqueTipo = isTipoEstoque(tipo);
+          const isEstoqueTipo = !!tipo && !isProduto;
           const isMadeira = tipo === 'MADEIRA';
 
           const estoqueInput = row.querySelector('.entrada-estoque');
           const produtoInput = row.querySelector('.entrada-produto');
           const receitaInput = row.querySelector('.entrada-receita');
-          const nomeInput = row.querySelector('.entrada-nome');
           const unidadeInput = row.querySelector('.entrada-unidade');
           const categoriaInput = row.querySelector('.entrada-categoria');
           const compInput = row.querySelector('.entrada-comp');
@@ -901,7 +1031,6 @@
           if (estoqueInput) estoqueInput.classList.toggle('hidden', !isEstoqueTipo);
           if (produtoInput) produtoInput.classList.toggle('hidden', !isProduto);
           if (receitaInput) receitaInput.classList.toggle('hidden', !isProduto);
-          if (nomeInput) nomeInput.classList.toggle('hidden', !isLivre);
 
           if (compInput) compInput.classList.toggle('hidden', !isMadeira);
           if (largInput) largInput.classList.toggle('hidden', !isMadeira);
@@ -942,10 +1071,6 @@
             }
             if (prodIdInput) prodIdInput.value = '';
             if (recIdInput) recIdInput.value = '';
-          }
-
-          if (!isLivre && nomeInput) {
-            nomeInput.value = '';
           }
 
           if (unidadeInput) unidadeInput.value = '';
@@ -1036,6 +1161,12 @@
       fecharFormulario,
       preencherFormulario,
       resetFormulario,
+      preencherModeloFormulario,
+      resetModeloFormulario,
+      obterModeloFormularioPayload,
+      adicionarEntradaModeloForm,
+      adicionarSaidaModeloForm,
+      adicionarEtapaModeloForm,
       renderLista,
       setOpcoesReceitas,
       setReceitasProduto

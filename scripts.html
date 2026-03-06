@@ -27,6 +27,7 @@
 
     if (nome === 'producao' && window.ProducaoController) {
       ProducaoController.init();
+      aplicarBuscaProducao();
     }
   }
 
@@ -34,10 +35,12 @@
     const topEstoque = document.getElementById('topBarEstoque');
     const topCompras = document.getElementById('topBarCompras');
     const topProdutos = document.getElementById('topBarProdutos');
+    const topProducao = document.getElementById('topBarProducao');
 
     if (topEstoque) topEstoque.classList.toggle('hidden', nome !== 'estoque');
     if (topCompras) topCompras.classList.toggle('hidden', nome !== 'compras');
     if (topProdutos) topProdutos.classList.toggle('hidden', nome !== 'produtos');
+    if (topProducao) topProducao.classList.toggle('hidden', nome !== 'producao');
 
     if (nome !== 'estoque') fecharPainelFiltro();
     if (nome !== 'compras') fecharPainelFiltroCompras();
@@ -110,6 +113,10 @@
     texto: ''
   };
 
+  const buscaStateProducao = {
+    texto: ''
+  };
+
   function debounce(fn, delay = 250) {
     let t = null;
     return (...args) => {
@@ -131,6 +138,11 @@
   function produtosEstaAtivo() {
     const abaProdutos = document.getElementById('aba-produtos');
     return abaProdutos && !abaProdutos.classList.contains('hidden');
+  }
+
+  function producaoEstaAtivo() {
+    const abaProducao = document.getElementById('aba-producao');
+    return abaProducao && !abaProducao.classList.contains('hidden');
   }
 
   function lerFiltrosDoPainel() {
@@ -215,6 +227,23 @@
   }
 
   const aplicarBuscaProdutosDebounced = debounce(aplicarBuscaProdutos, 200);
+
+  function aplicarBuscaProducao() {
+    if (!producaoEstaAtivo()) return;
+
+    if (!window.ProducaoStore || !window.ProducaoUI) return;
+    if (!ProducaoStore.isLoaded()) return;
+
+    const texto = (buscaStateProducao.texto || '').trim();
+
+    const lista = ProducaoStore.filter({
+      texto: texto || undefined
+    });
+
+    ProducaoUI.renderLista(lista);
+  }
+
+  const aplicarBuscaProducaoDebounced = debounce(aplicarBuscaProducao, 200);
 
   /* =========================
      PAINEL DE FILTRO (UI)
@@ -377,13 +406,22 @@
     });
   }
 
+  function getTiposValidacaoCache() {
+    const cache = window.AppValidacoesCache || {};
+    const tipos = Array.isArray(cache.tipos) ? cache.tipos : [];
+    return uniqueSorted(tipos);
+  }
+
   function popularFiltrosDoPainel() {
     if (!window.EstoqueStore) return;
     if (!EstoqueStore.isLoaded()) return;
 
     const itens = EstoqueStore.get();
 
-    const tipos = uniqueSorted(itens.map(i => i.tipo));
+    const tiposValidacao = getTiposValidacaoCache();
+    const tipos = tiposValidacao.length > 0
+      ? tiposValidacao
+      : uniqueSorted(itens.map(i => i.tipo));
     const categorias = uniqueSorted(itens.map(i => i.categoria));
     const unidades = uniqueSorted(itens.map(i => i.unidade));
 
@@ -429,7 +467,10 @@
 
     const itens = ComprasStore.get();
 
-    const tipos = uniqueSorted(itens.map(i => i.tipo));
+    const tiposValidacao = getTiposValidacaoCache();
+    const tipos = tiposValidacao.length > 0
+      ? tiposValidacao
+      : uniqueSorted(itens.map(i => i.tipo));
     const categorias = uniqueSorted(itens.map(i => i.categoria));
     const unidades = uniqueSorted(itens.map(i => i.unidade));
 
@@ -582,10 +623,29 @@
     }
   }
 
+  function initBuscaProducao() {
+    const input = document.getElementById('buscaProducao');
+    const btnFiltro = document.getElementById('btnFiltroProducao');
+
+    if (input) {
+      input.addEventListener('input', () => {
+        buscaStateProducao.texto = input.value || '';
+        aplicarBuscaProducaoDebounced();
+      });
+    }
+
+    if (btnFiltro) {
+      btnFiltro.addEventListener('click', () => {
+        mostrarToast('Filtro avancado em breve');
+      });
+    }
+  }
+
   document.addEventListener('DOMContentLoaded', () => {
     trocarAba('estoque');
     initBuscaEFiltroEstoque();
     initBuscaEFiltroCompras();
     initBuscaProdutos();
+    initBuscaProducao();
   });
 </script>

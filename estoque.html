@@ -5,43 +5,78 @@
 <div id="formulario" class="form-modal" style="display:none; margin-top:32px;">
   <h2 id="formTitulo">Novo Item</h2>
 
-  <!-- Tipo -->
-  <select id="tipo" onchange="EstoqueUI.handleTipoChange()"></select>
-
-  <!-- Item -->
-  <input id="item" placeholder="Item">
-
-  <!-- Quantidade -->
-  <input id="quantidade" type="number" placeholder="Quantidade">
-
-  <!-- Unidade -->
-  <select id="unidade"></select>
-
-  <!-- Campos especificos de madeira -->
-  <div id="madeiraFields" class="hidden">
-    <input id="comprimento_cm" type="number" step="0.01" placeholder="Comprimento (cm)" oninput="EstoqueUI.atualizarQuantidadeMadeira()">
-    <input id="largura_cm" type="number" step="0.01" placeholder="Largura (cm)" oninput="EstoqueUI.atualizarQuantidadeMadeira()">
-    <input id="espessura_cm" type="number" step="0.01" placeholder="Espessura (cm)" oninput="EstoqueUI.atualizarQuantidadeMadeira()">
+  <div class="campo-ajuda-wrap">
+    <span class="campo-ajuda-tag">Tipo</span>
+    <select id="tipo" onchange="EstoqueUI.handleTipoChange()"></select>
   </div>
 
-  <!-- Categoria -->
-  <input id="categoria" placeholder="Categoria">
+  <div class="campo-ajuda-wrap">
+    <span class="campo-ajuda-tag">Item</span>
+    <input id="item">
+  </div>
 
-  <!-- Fornecedor -->
-  <input id="fornecedor" placeholder="Fornecedor">
+  <div class="campo-ajuda-wrap">
+    <span class="campo-ajuda-tag">Quantidade</span>
+    <input id="quantidade" type="number">
+  </div>
 
-  <!-- Valor unitário -->
-  <input id="valor_unit" type="number" placeholder="Valor unitário">
+  <div class="campo-ajuda-wrap">
+    <span class="campo-ajuda-tag">Unidade</span>
+    <select id="unidade"></select>
+  </div>
 
-  <!-- Observação -->
-  <textarea id="observacao" placeholder="Observação"></textarea>
+  <div id="madeiraFields" class="hidden">
+    <div class="campo-ajuda-wrap">
+      <span class="campo-ajuda-tag">Comprimento (cm)</span>
+      <input id="comprimento_cm" type="number" step="0.01" oninput="EstoqueUI.atualizarQuantidadeMadeira()">
+    </div>
+    <div class="campo-ajuda-wrap">
+      <span class="campo-ajuda-tag">Largura (cm)</span>
+      <input id="largura_cm" type="number" step="0.01" oninput="EstoqueUI.atualizarQuantidadeMadeira()">
+    </div>
+    <div class="campo-ajuda-wrap">
+      <span class="campo-ajuda-tag">Espessura (cm)</span>
+      <input id="espessura_cm" type="number" step="0.01" oninput="EstoqueUI.atualizarQuantidadeMadeira()">
+    </div>
+  </div>
 
-  <!-- Campos específicos de equipamento -->
+  <div class="campo-ajuda-wrap">
+    <span class="campo-ajuda-tag">Categoria</span>
+    <select id="categoria"></select>
+  </div>
+
+  <div class="campo-ajuda-wrap">
+    <span class="campo-ajuda-tag">Fornecedor</span>
+    <input id="fornecedor">
+  </div>
+
+  <div class="campo-ajuda-wrap">
+    <span class="campo-ajuda-tag">Valor unitario (R$)</span>
+    <input id="valor_unit" type="number">
+  </div>
+
+  <div class="campo-ajuda-wrap">
+    <span class="campo-ajuda-tag">Observacao</span>
+    <textarea id="observacao"></textarea>
+  </div>
+
   <div id="equipamentoFields" class="hidden">
-    <input id="potencia" placeholder="Potência">
-    <input id="voltagem" placeholder="Voltagem">
-    <input id="comprado_em" type="date">
-    <input id="vida_util_mes" type="number" placeholder="Vida útil (meses)">
+    <div class="campo-ajuda-wrap">
+      <span class="campo-ajuda-tag">Potencia</span>
+      <input id="potencia">
+    </div>
+    <div class="campo-ajuda-wrap">
+      <span class="campo-ajuda-tag">Voltagem</span>
+      <input id="voltagem">
+    </div>
+    <div class="campo-ajuda-wrap">
+      <span class="campo-ajuda-tag">Comprado em</span>
+      <input id="comprado_em" type="date">
+    </div>
+    <div class="campo-ajuda-wrap">
+      <span class="campo-ajuda-tag">Vida util (meses)</span>
+      <input id="vida_util_mes" type="number">
+    </div>
   </div>
 
   <button onclick="EstoqueController.salvar()">Salvar</button>

@@ -49,17 +49,6 @@
       return isNaN(n) ? 0 : n;
     }
 
-    function garantirOpcao(select, valor) {
-      if (!select || !valor) return;
-      const existe = [...select.options].some(o => o.value === valor);
-      if (!existe) {
-        const opt = document.createElement('option');
-        opt.value = valor;
-        opt.textContent = valor;
-        select.appendChild(opt);
-      }
-    }
-
     function atualizarQuantidadeMadeira() {
       const f = el();
       if (!f.tipo || f.tipo.value !== 'MADEIRA') return;
@@ -184,8 +173,13 @@
       }
 
       if (isMadeira && unidade) {
-        garantirOpcao(unidade, 'M3');
-        unidade.value = 'M3';
+        const optM3 = [...unidade.options].find(o =>
+          String(o.value || '').trim().toUpperCase() === 'M3'
+        );
+        unidade.value = optM3 ? optM3.value : '';
+        if (!optM3 && typeof mostrarToast === 'function') {
+          mostrarToast('Configure M3 na aba VALIDACAO para itens MADEIRA', 'erro');
+        }
         atualizarQuantidadeMadeira();
       }
 
@@ -296,6 +290,7 @@
             <button class="fechar-card">X</button>
 
             <p><b>Fornecedor:</b> ${i.fornecedor || '-'}</p>
+            <p><b>Comprado em:</b> ${i.comprado_em || '-'}</p>
             <p><b>Valor unitario:</b> R$ ${Number(i.valor_unit || 0).toFixed(2)}</p>
             <p><b>Observacao:</b> ${i.observacao || '-'}</p>
 

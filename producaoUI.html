@@ -2,6 +2,8 @@
   window.ProducaoUI = (() => {
     let cardAberto = null;
     let delegationInit = false;
+    let estoqueOpcoes = [];
+    let tiposValidacao = [];
 
     /* =========================
        HELPERS
@@ -25,7 +27,12 @@
         // Modal consumo
         modalConsumo: document.getElementById('modalConsumoProducao'),
         consumoTitulo: document.getElementById('consumoTitulo'),
-        consumoLista: document.getElementById('consumoLista')
+        consumoLista: document.getElementById('consumoLista'),
+
+        // Modal pendencias de vinculo
+        modalPendencias: document.getElementById('modalPendenciasVinculoProducao'),
+        pendenciasTitulo: document.getElementById('pendenciasVinculoTitulo'),
+        pendenciasLista: document.getElementById('pendenciasVinculoLista')
       };
     }
 
@@ -45,6 +52,47 @@
       if (s === '') return 0;
       const n = Number(s.replace(',', '.'));
       return isNaN(n) ? 0 : n;
+    }
+
+    function setEstoqueOpcoes(lista) {
+      estoqueOpcoes = Array.isArray(lista) ? lista : [];
+    }
+
+    function setTiposValidacao(lista) {
+      tiposValidacao = [...new Set((Array.isArray(lista) ? lista : [])
+        .map(v => String(v || '').trim().toUpperCase())
+        .filter(v => v !== ''))];
+    }
+
+    function getTiposEstoque() {
+      const tipos = new Set();
+      (estoqueOpcoes || []).forEach(i => {
+        const t = String(i?.tipo || '').toUpperCase().trim();
+        if (t) tipos.add(t);
+      });
+      return [...tipos].sort((a, b) => a.localeCompare(b));
+    }
+
+    function renderOpcoesEstoque(candidatos, selecionadoId, incluirVazio = true) {
+      const itens = Array.isArray(candidatos) ? candidatos : [];
+      const opts = itens.map(i => {
+        const id = String(i.ID || '');
+        const nome = i.item || id;
+        const tipo = String(i.tipo || '').toUpperCase();
+        const saldo = Number(i.quantidade || 0).toFixed(2);
+        const selected = id === String(selecionadoId || '') ? 'selected' : '';
+        return `<option value="${id}" ${selected}>${nome} (${tipo}) - Saldo ${saldo}</option>`;
+      }).join('');
+      return (incluirVazio ? '<option value="">Selecione no estoque</option>' : '') + opts;
+    }
+
+    function getCandidatosVinculo(vinculo) {
+      const tipo = String(vinculo?.tipo_item || '').toUpperCase().trim();
+      const todos = Array.isArray(estoqueOpcoes) ? estoqueOpcoes : [];
+      if (!tipo) {
+        return todos;
+      }
+      return todos.filter(i => String(i.tipo || '').toUpperCase() === tipo);
     }
 
     /* =========================
@@ -137,7 +185,7 @@
       const clean = (Array.isArray(lista) ? lista : [])
         .filter(v => v && v.receita_id);
 
-      receita.innerHTML = '<option value="">Selecione a receita</option>';
+      receita.innerHTML = '<option value="">Modelo do produto</option>';
       clean.forEach(r => {
         const o = document.createElement('option');
         o.value = r.receita_id;
@@ -166,6 +214,79 @@
       `);
 
       return linhas.join('');
+    }
+
+    function renderFormNovoItemManual(producaoId) {
+      const tipos = (Array.isArray(tiposValidacao) ? tiposValidacao : []);
+      const optsTipo = tipos
+        .map(t => `<option value="${t}">${t}</option>`)
+        .join('');
+
+      const optsEstoque = renderOpcoesEstoque(estoqueOpcoes, '', true);
+
+      return `
+        <div class="receita-card">
+          <div class="comp-meta"><b>Adicionar item manual na OP</b></div>
+          <div class="linha-add-destino">
+            <select id="manualTipo_${producaoId}">
+              <option value="">Tipo</option>
+              ${optsTipo}
+            </select>
+            <input id="manualNome_${producaoId}" placeholder="Nome do item">
+            <input id="manualQtd_${producaoId}" type="number" step="0.01" min="0" placeholder="Qtd prevista">
+            <select id="manualEstoque_${producaoId}">
+              ${optsEstoque}
+            </select>
+            <button class="btn-add-item-manual" data-producao-id="${producaoId}">Adicionar</button>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderVinculos(vinculos, producaoId) {
+      const lista = Array.isArray(vinculos) ? vinculos : [];
+      if (lista.length === 0) {
+        return `<p>Nenhum item da OP.</p>${renderFormNovoItemManual(producaoId)}`;
+      }
+
+      const linhas = lista.map(v => {
+        const prevista = Number(v.quantidade_prevista || 0).toFixed(2);
+        const consumida = Number(v.quantidade_consumida || 0).toFixed(2);
+        const pendente = Number(v.quantidade_pendente || 0).toFixed(2);
+        const saldo = Number(v.saldo_estoque || 0).toFixed(2);
+        const ok = !!v.saldo_suficiente;
+        const vinculado = !!v.vinculado;
+        const statusSaldo = vinculado ? (ok ? 'OK' : 'FALTA') : '-';
+        const origem = v.origem_item ? `Origem: ${v.origem_item}` : 'Origem: -';
+
+        let candidatos = getCandidatosVinculo(v);
+        if (v.estoque_id && !candidatos.some(i => String(i.ID) === String(v.estoque_id))) {
+          const atual = (estoqueOpcoes || []).find(i => String(i.ID) === String(v.estoque_id));
+          if (atual) {
+            candidatos = [atual, ...candidatos];
+          }
+        }
+        const opcoes = renderOpcoesEstoque(candidatos, v.estoque_id, true);
+
+        return `
+          <div class="receita-card linha-vinculo" data-producao-id="${producaoId}" data-vinculo-id="${v.id}">
+            <div><strong>${v.item || v.origem_item || v.id}</strong></div>
+            <div class="comp-meta">Tipo: ${v.tipo_item || '-'} | Status: ${v.status || '-'}</div>
+            <div class="comp-meta">
+              Prev: ${prevista} ${v.unidade || ''} | Cons: ${consumida} | Pend: ${pendente} | Saldo: ${saldo} (${statusSaldo})
+            </div>
+            <div class="comp-meta">${origem}</div>
+            <div class="linha-add-destino">
+              <select class="vinculo-estoque-select">
+                ${opcoes}
+              </select>
+              <button class="btn-vincular-estoque" data-producao-id="${producaoId}" data-vinculo-id="${v.id}">Salvar vinculo</button>
+            </div>
+          </div>
+        `;
+      });
+
+      return linhas.join('') + renderFormNovoItemManual(producaoId);
     }
 
     function renderChecklist(etapas, producaoId) {
@@ -275,6 +396,11 @@
             </div>
 
             <div class="bloco">
+              <p><b>Vinculos com estoque</b></p>
+              ${i.vinculosMateriais ? renderVinculos(i.vinculosMateriais, i.producao_id) : '<p>Carregando vinculos...</p>'}
+            </div>
+
+            <div class="bloco">
               <p><b>Checklist</b></p>
               ${renderChecklist(i.etapas || [], i.producao_id)}
               <div class="linha-etapa-add">
@@ -327,14 +453,16 @@
             <div><strong>${item.item || item.estoque_id}</strong></div>
             <div>${Number(item.quantidade || 0).toFixed(2)} ${item.unidade || ''}</div>
           </div>
-          <input
-            type="number"
-            step="0.01"
-            min="0"
-            data-estoque-id="${item.estoque_id}"
-            placeholder="Qtd a baixar"
-            value="${Number(item.quantidade || 0).toFixed(2)}"
-          >
+          <div class="campo-ajuda-wrap campo-ajuda-consumo">
+            <span class="campo-ajuda-tag">Qtd a baixar</span>
+            <input
+              type="number"
+              step="0.01"
+              min="0"
+              data-estoque-id="${item.estoque_id}"
+              value="${Number(item.quantidade || 0).toFixed(2)}"
+            >
+          </div>
         `;
         consumoLista.appendChild(row);
       });
@@ -365,6 +493,85 @@
       return { producaoId, itens };
     }
 
+    function abrirModalPendenciasVinculo(producaoId, pendencias, opcoes) {
+      if (Array.isArray(opcoes)) {
+        estoqueOpcoes = opcoes;
+      }
+
+      const { modalPendencias, pendenciasTitulo, pendenciasLista } = el();
+      if (!modalPendencias || !pendenciasLista) return;
+
+      modalPendencias.dataset.producaoId = String(producaoId || '');
+      if (pendenciasTitulo) {
+        pendenciasTitulo.textContent = 'Vincular entradas pendentes';
+      }
+
+      pendenciasLista.innerHTML = '';
+      (Array.isArray(pendencias) ? pendencias : []).forEach(p => {
+        const tipo = String(p?.tipo_item || '').toUpperCase().trim();
+        const todos = Array.isArray(estoqueOpcoes) ? estoqueOpcoes : [];
+        const candidatos = (!tipo)
+          ? todos
+          : todos.filter(i => String(i.tipo || '').toUpperCase() === tipo);
+        const opcoesSelect = renderOpcoesEstoque(candidatos, p.estoque_id || '', true);
+
+        const row = document.createElement('div');
+        row.className = 'linha-consumo';
+        row.innerHTML = `
+          <div>
+            <div><strong>${p.item || p.origem_item || p.id}</strong></div>
+            <div>${Number(p.quantidade_prevista || 0).toFixed(2)} ${p.unidade || ''} | Tipo ${tipo || '-'}</div>
+          </div>
+          <div class="campo-ajuda-wrap campo-ajuda-consumo">
+            <span class="campo-ajuda-tag">Item do estoque</span>
+            <select data-vinculo-id="${p.id}">
+              ${opcoesSelect}
+            </select>
+          </div>
+        `;
+        pendenciasLista.appendChild(row);
+      });
+
+      modalPendencias.classList.remove('hidden');
+    }
+
+    function fecharModalPendenciasVinculo() {
+      const { modalPendencias, pendenciasLista } = el();
+      if (!modalPendencias || !pendenciasLista) return;
+
+      modalPendencias.classList.add('hidden');
+      pendenciasLista.innerHTML = '';
+      delete modalPendencias.dataset.producaoId;
+    }
+
+    function obterPendenciasVinculoPayload() {
+      const { modalPendencias, pendenciasLista } = el();
+      if (!modalPendencias || !pendenciasLista) {
+        return { producaoId: '', vinculacoes: [], faltantes: 0 };
+      }
+
+      const producaoId = modalPendencias.dataset.producaoId || '';
+      const selects = pendenciasLista.querySelectorAll('select[data-vinculo-id]');
+      const vinculacoes = [];
+      let faltantes = 0;
+
+      [...selects].forEach(select => {
+        const vinculoId = String(select.dataset.vinculoId || '').trim();
+        const estoqueId = String(select.value || '').trim();
+        if (!vinculoId) return;
+        if (!estoqueId) {
+          faltantes += 1;
+          return;
+        }
+        vinculacoes.push({
+          vinculo_id: vinculoId,
+          estoque_id: estoqueId
+        });
+      });
+
+      return { producaoId, vinculacoes, faltantes };
+    }
+
     /* =========================
        EVENT DELEGATION
     ========================== */
@@ -383,6 +590,7 @@
           abrirCard(card);
           if (card && window.ProducaoController) {
             ProducaoController.carregarMateriaisPrevistos(card.dataset.id, true);
+            ProducaoController.carregarVinculosMateriais?.(card.dataset.id, true);
           }
           return;
         }
@@ -400,6 +608,49 @@
           if (nome && window.ProducaoController) {
             ProducaoController.adicionarEtapa(producaoId, nome);
             if (input) input.value = '';
+          }
+          return;
+        }
+
+        if (e.target.classList.contains('btn-vincular-estoque')) {
+          const producaoId = e.target.dataset.producaoId;
+          const vinculoId = e.target.dataset.vinculoId;
+          const row = e.target.closest('.linha-vinculo');
+          const select = row?.querySelector('.vinculo-estoque-select');
+          const estoqueId = select ? (select.value || '') : '';
+          if (window.ProducaoController) {
+            ProducaoController.vincularItemEstoque(producaoId, vinculoId, estoqueId);
+          }
+          return;
+        }
+
+        if (e.target.classList.contains('btn-add-item-manual')) {
+          const producaoId = e.target.dataset.producaoId;
+          const tipo = document.getElementById(`manualTipo_${producaoId}`)?.value || '';
+          const nome = document.getElementById(`manualNome_${producaoId}`)?.value || '';
+          const qtd = parseNumeroInput(document.getElementById(`manualQtd_${producaoId}`)?.value || 0);
+          const estoqueId = document.getElementById(`manualEstoque_${producaoId}`)?.value || '';
+
+          if (!tipo.trim()) {
+            mostrarToast('Selecione o tipo', 'erro');
+            return;
+          }
+          if (!nome.trim()) {
+            mostrarToast('Informe o nome do item', 'erro');
+            return;
+          }
+          if (!qtd || qtd <= 0) {
+            mostrarToast('Quantidade invalida', 'erro');
+            return;
+          }
+
+          if (window.ProducaoController) {
+            ProducaoController.adicionarItemManual(producaoId, {
+              tipo_item: tipo,
+              nome_item: nome.trim(),
+              quantidade_prevista: qtd,
+              estoque_id: estoqueId
+            });
           }
           return;
         }
@@ -483,10 +734,16 @@
       renderLista,
       renderProdutos,
       renderReceitas,
+      setEstoqueOpcoes,
+      setTiposValidacao,
 
       abrirModalConsumo,
       fecharModalConsumo,
-      obterConsumoPayload
+      obterConsumoPayload,
+
+      abrirModalPendenciasVinculo,
+      fecharModalPendenciasVinculo,
+      obterPendenciasVinculoPayload
     };
 
   })();

@@ -6,6 +6,9 @@
 
     let estoqueOpcoes = [];
     let receitasCache = {};
+    let tiposValidacao = [];
+    let unidadesValidacao = [];
+    let categoriasValidacao = [];
 
     function parseNumeroInput(valor) {
       const s = String(valor ?? '').trim();
@@ -28,9 +31,29 @@
       return getTiposEstoque().has(String(tipo || '').toUpperCase());
     }
 
+    function isTipoValidacao(tipo) {
+      const t = String(tipo || '').toUpperCase();
+      return (tiposValidacao || []).some(v => String(v || '').toUpperCase() === t);
+    }
+
+    function isValorValidacao(lista, valor) {
+      const alvo = String(valor || '').trim().toUpperCase();
+      if (!alvo) return false;
+      return (lista || []).some(v => String(v || '').trim().toUpperCase() === alvo);
+    }
+
+    function isUnidadeValidacao(unidade) {
+      return isValorValidacao(unidadesValidacao, unidade);
+    }
+
+    function isCategoriaValidacao(categoria) {
+      return isValorValidacao(categoriasValidacao, categoria);
+    }
+
     function init() {
       if (iniciado) return;
 
+      carregarValidacoes();
       carregarEstoqueOpcoes();
       carregarProdutos();
 
@@ -42,8 +65,37 @@
       const produtos = ProdutosStore.get();
       ProdutosUI.setOpcoesReceitas({
         estoque: estoqueOpcoes,
-        produtos
+        produtos,
+        tipos: tiposValidacao,
+        unidades: unidadesValidacao,
+        categorias: categoriasValidacao
       });
+    }
+
+    function carregarValidacoes() {
+      google.script.run
+        .withSuccessHandler(data => {
+          const validacoes = data || {};
+          tiposValidacao = Array.isArray(validacoes.tipos) ? validacoes.tipos : [];
+          unidadesValidacao = Array.isArray(validacoes.unidades) ? validacoes.unidades : [];
+          categoriasValidacao = Array.isArray(validacoes.categorias) ? validacoes.categorias : [];
+          if (typeof window !== 'undefined') {
+            window.AppValidacoesCache = {
+              ...(window.AppValidacoesCache || {}),
+              tipos: tiposValidacao,
+              unidades: unidadesValidacao,
+              categorias: categoriasValidacao
+            };
+          }
+          atualizarOpcoesReceitas();
+        })
+        .withFailureHandler(() => {
+          tiposValidacao = [];
+          unidadesValidacao = [];
+          categoriasValidacao = [];
+          atualizarOpcoesReceitas();
+        })
+        .obterValidacoes();
     }
 
     function renderListaAtual() {
@@ -98,9 +150,43 @@
 
       google.script.run
         .withSuccessHandler(receitas => {
-          receitasCache[produtoId] = Array.isArray(receitas) ? receitas : [];
+          const lista = Array.isArray(receitas) ? receitas : [];
+          if (lista.length === 0) {
+            google.script.run
+              .withSuccessHandler(receita => {
+                const receitaBase = receita && receita.receita_id
+                  ? [{
+                    ...receita,
+                    entradas: Array.isArray(receita.entradas) ? receita.entradas : [],
+                    saidas: Array.isArray(receita.saidas) ? receita.saidas : [],
+                    _editing: true
+                  }]
+                  : [];
+
+                receitasCache[produtoId] = receitaBase;
+                ProdutosStore.update(produtoId, {
+                  receitas: receitaBase,
+                  receitasCarregadas: true
+                });
+                renderListaAtual();
+              })
+              .withFailureHandler(() => {
+                mostrarToast('Erro ao criar modelo inicial', 'erro');
+              })
+              .criarReceitaProduto(produtoId, {
+                nome_receita: 'Modelo principal'
+              });
+            return;
+          }
+
+          if (lista.length > 1) {
+            mostrarToast('Apenas um modelo por produto. Usando o modelo principal.');
+          }
+
+          const receitaUnica = [lista[0]];
+          receitasCache[produtoId] = receitaUnica;
           ProdutosStore.update(produtoId, {
-            receitas: Array.isArray(receitas) ? receitas : [],
+            receitas: receitaUnica,
             receitasCarregadas: true
           });
           renderListaAtual();
@@ -121,7 +207,8 @@
 
       google.script.run
         .withSuccessHandler(receitas => {
-          const lista = Array.isArray(receitas) ? receitas : [];
+          const listaBruta = Array.isArray(receitas) ? receitas : [];
+          const lista = listaBruta.length > 0 ? [listaBruta[0]] : [];
           receitasCache[produtoId] = lista;
           ProdutosUI.setReceitasProduto(produtoId, lista);
         })
@@ -135,29 +222,30 @@
       const item = ProdutosStore.getById(produtoId);
       if (!item) return;
 
-      mostrarToast('Criando receita...');
+      mostrarToast('Carregando modelo...');
 
       google.script.run
         .withSuccessHandler(receita => {
-          const receitas = Array.isArray(item.receitas) ? [...item.receitas] : [];
-          receitas.unshift({
+          const receitaUnica = receita && receita.receita_id
+            ? [{
             ...receita,
             entradas: [],
             saidas: [],
             _editing: true
-          });
+          }]
+            : [];
 
           ProdutosStore.update(produtoId, {
-            receitas,
+            receitas: receitaUnica,
             receitasCarregadas: true
           });
           renderListaAtual();
         })
         .withFailureHandler(() => {
-          mostrarToast('Erro ao criar receita', 'erro');
+          mostrarToast('Erro ao carregar modelo', 'erro');
         })
         .criarReceitaProduto(produtoId, {
-          nome_receita: 'Nova receita'
+          nome_receita: 'Modelo principal'
         });
     }
 
@@ -199,6 +287,8 @@
       for (const e of entradas) {
         const tipo = String(e.tipo_item || '').trim().toUpperCase();
         const nomeItem = String(e.nome_item || '').trim();
+        const categoria = String(e.categoria || '').trim();
+        const unidade = String(e.unidade || '').trim();
         const qtd = parseNumeroInput(e.qtd_pecas);
         const comp = parseNumeroInput(e.comprimento_cm);
         const larg = parseNumeroInput(e.largura_cm);
@@ -206,17 +296,14 @@
 
         if (!tipo) return 'Informe o tipo da entrada';
         if (!nomeItem) return 'Informe o nome da entrada';
-        if (tipo !== 'LIVRE' && tipo !== 'PRODUTO' && !isTipoEstoque(tipo)) {
+        if (!isTipoValidacao(tipo)) {
           return 'Tipo de entrada invalido';
         }
-        if (tipo === 'PRODUTO') {
-          const prodId = String(e.produto_ref_id || '').trim();
-          const recId = String(e.receita_ref_id || '').trim();
-          if (!prodId) return 'Selecione o produto da entrada';
-          if (!recId) return 'Selecione a receita da entrada';
+        if (!categoria || !isCategoriaValidacao(categoria)) {
+          return 'Categoria da entrada invalida';
         }
-        if (isTipoEstoque(tipo) && !String(e.estoque_ref_id || '').trim()) {
-          return 'Selecione o item do estoque';
+        if (!unidade || !isUnidadeValidacao(unidade)) {
+          return 'Unidade da entrada invalida';
         }
         if (!qtd || qtd <= 0) return 'Qtd de pecas invalida';
         if (tipo === 'MADEIRA' && (!comp || !larg || !esp)) {
@@ -230,8 +317,12 @@
 
       for (const s of saidas) {
         const nomeSaida = String(s.nome_saida || '').trim();
+        const unidade = String(s.unidade || '').trim();
         const qtd = parseNumeroInput(s.quantidade);
         if (!nomeSaida) return 'Informe o nome da saida';
+        if (!unidade || !isUnidadeValidacao(unidade)) {
+          return 'Unidade da saida invalida';
+        }
         if (!qtd || qtd <= 0) return 'Quantidade de saida invalida';
       }
 
@@ -278,119 +369,68 @@
     }
 
     function duplicarReceita(produtoId, receitaId) {
-      const item = ProdutosStore.getById(produtoId);
-      if (!item) return;
-
-      mostrarToast('Duplicando receita...');
-
-      google.script.run
-        .withFailureHandler(() => {
-          mostrarToast('Erro ao duplicar receita', 'erro');
-        })
-        .withSuccessHandler(() => {
-          carregarReceitas(produtoId, true);
-          mostrarToast('Receita duplicada');
-        })
-        .duplicarReceitaProduto(receitaId);
+      const _ = receitaId;
+      if (!produtoId) return;
+      mostrarToast('Duplicacao desativada: cada produto tem apenas um modelo', 'erro');
     }
 
     function excluirReceita(produtoId, receitaId) {
-      if (!confirm('Deseja remover esta receita?')) return;
-
-      const item = ProdutosStore.getById(produtoId);
-      if (!item) return;
-
-      const snapshot = JSON.parse(JSON.stringify(item));
-      const receitas = (item.receitas || []).filter(r => r.receita_id !== receitaId);
-
-      ProdutosStore.update(produtoId, { receitas });
-      renderListaAtual();
-
-      google.script.run
-        .withFailureHandler(() => {
-          ProdutosStore.update(produtoId, snapshot);
-          renderListaAtual();
-          mostrarToast('Erro ao remover receita', 'erro');
-        })
-        .withSuccessHandler(() => {
-          mostrarToast('Receita removida');
-        })
-        .deletarReceitaProduto(receitaId);
+      const _ = receitaId;
+      if (!produtoId) return;
+      mostrarToast('Exclusao desativada: o modelo do produto deve ser editado', 'erro');
     }
 
     function salvar() {
       const get = id => document.getElementById(id)?.value || '';
-
-      const dados = {
-        nome_produto: get('produtoNome'),
-        unidade_produto: 'UN',
-        estoque_id: get('produtoEstoque'),
-        categoria: get('produtoCategoria'),
-        descricao: get('produtoDescricao'),
-        observacao: get('produtoObservacao')
-      };
-
-      if (editandoId) {
-        const idAtual = editandoId;
-        const snapshot = { ...ProdutosStore.getById(idAtual) };
-
-        ProdutosStore.update(idAtual, dados);
-        renderListaAtual();
-        finalizarUX();
-
-        google.script.run
-          .withFailureHandler(() => {
-            ProdutosStore.update(idAtual, snapshot);
-            renderListaAtual();
-            mostrarToast('Erro ao salvar edicao', 'erro');
-          })
-          .withSuccessHandler(() => {
-            atualizarOpcoesReceitas();
-            mostrarToast('Salvo com sucesso');
-          })
-          .atualizarProduto(idAtual, dados);
-
-        editandoId = null;
+      const nomeProduto = String(get('produtoNome') || '').trim();
+      if (!nomeProduto) {
+        mostrarToast('Informe o nome do produto', 'erro');
         return;
       }
 
-      const tempId = `tmp_${Date.now()}`;
+      const modelo = window.ProdutosUI?.obterModeloFormularioPayload
+        ? ProdutosUI.obterModeloFormularioPayload()
+        : {
+          dados: { nome_receita: 'Modelo principal', descricao: '' },
+          entradas: [],
+          saidas: [],
+          etapas: []
+        };
 
-      const itemTemp = {
-        produto_id: tempId,
-        custo_previsto: 0,
-        ...dados
+      const erroModelo = validarReceita(modelo?.dados, modelo?.entradas, modelo?.saidas);
+      if (erroModelo) {
+        mostrarToast(erroModelo, 'erro');
+        return;
+      }
+
+      const dadosProduto = {
+        nome_produto: nomeProduto,
+        unidade_produto: 'UN'
       };
 
-      ProdutosStore.add(itemTemp);
-      renderListaAtual();
-      finalizarUX();
-      mostrarToast('Salvando...');
+      const produtoId = editandoId || '';
+
+      mostrarToast('Salvando produto e modelo...');
 
       google.script.run
         .withFailureHandler(() => {
-          ProdutosStore.remove(tempId);
-          renderListaAtual();
-          mostrarToast('Erro ao salvar produto', 'erro');
+          mostrarToast('Erro ao salvar produto/modelo', 'erro');
         })
-        .withSuccessHandler(itemSalvo => {
-          ProdutosStore.remove(tempId);
-
-          if (!itemSalvo || !itemSalvo.produto_id) {
-            mostrarToast('Salvo. Atualizando lista...');
-            carregarProdutos();
-            return;
-          }
-
-          ProdutosStore.add({
-            ...itemSalvo,
-            custo_previsto: itemSalvo.custo_previsto || 0
-          });
+        .withSuccessHandler(() => {
+          editandoId = null;
+          finalizarUX();
+          carregarProdutos();
           atualizarOpcoesReceitas();
-          renderListaAtual();
           mostrarToast('Salvo com sucesso');
         })
-        .criarProduto(dados);
+        .salvarProdutoComModelo(
+          produtoId,
+          dadosProduto,
+          modelo?.dados || {},
+          modelo?.entradas || [],
+          modelo?.saidas || [],
+          modelo?.etapas || []
+        );
     }
 
     function finalizarUX() {
@@ -408,7 +448,41 @@
 
       editandoId = id;
       ProdutosUI.preencherFormulario(item);
+      if (window.ProdutosUI?.resetModeloFormulario) {
+        ProdutosUI.resetModeloFormulario();
+      }
       ProdutosUI.mostrarFormulario();
+
+      google.script.run
+        .withSuccessHandler(modelo => {
+          if (window.ProdutosUI?.preencherModeloFormulario) {
+            ProdutosUI.preencherModeloFormulario(modelo || {});
+          }
+        })
+        .withFailureHandler(() => {
+          mostrarToast('Erro ao carregar modelo do produto', 'erro');
+        })
+        .obterModeloProduto(id);
+    }
+
+    function enviarParaProducao(produtoId) {
+      const prodId = String(produtoId || '').trim();
+      if (!prodId) {
+        mostrarToast('Produto invalido', 'erro');
+        return;
+      }
+
+      if (typeof trocarAba === 'function') {
+        trocarAba('producao');
+      }
+
+      setTimeout(() => {
+        if (window.ProducaoController?.abrirFormularioComModelo) {
+          ProducaoController.abrirFormularioComModelo(prodId);
+          return;
+        }
+        mostrarToast('Modulo de producao indisponivel', 'erro');
+      }, 80);
     }
 
     function excluir(id) {
@@ -440,6 +514,7 @@
       init,
       salvar,
       editar,
+      enviarParaProducao,
       excluir,
       carregarReceitas,
       carregarReceitasProdutoEntrada,

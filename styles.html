@@ -44,6 +44,39 @@ textarea {
   border: 1px solid #ccc;
 }
 
+/* Rotulo de apoio no canto superior esquerdo do campo */
+.campo-ajuda-wrap {
+  position: relative;
+  margin-bottom: 8px;
+}
+
+.campo-ajuda-wrap > input,
+.campo-ajuda-wrap > select,
+.campo-ajuda-wrap > textarea {
+  margin-bottom: 0;
+  padding-top: 14px;
+}
+
+.campo-ajuda-tag {
+  position: absolute;
+  top: -7px;
+  left: 10px;
+  z-index: 1;
+  pointer-events: none;
+  font-size: 11px;
+  line-height: 1;
+  color: #666;
+  background: var(--campo-ajuda-bg, #fafafa);
+  padding: 0 6px;
+  border-radius: 4px;
+}
+
+.modal-content .campo-ajuda-tag,
+.card .campo-ajuda-tag,
+.receita-card .campo-ajuda-tag {
+  --campo-ajuda-bg: #fff;
+}
+
 /* VISIBILIDADE */
 .hidden {
   display: none !important;
@@ -208,6 +241,17 @@ textarea {
   gap: 8px;
   padding: 6px 0;
   border-bottom: 1px solid #eee;
+}
+
+.campo-ajuda-consumo {
+  margin-bottom: 0;
+  flex: 0 0 160px;
+}
+
+@media (max-width: 560px) {
+  .campo-ajuda-consumo {
+    flex: 1 1 100%;
+  }
 }
 
 .linha-etapa {
@@ -392,6 +436,26 @@ textarea {
   margin: 0;
   padding: 8px 12px;
   white-space: nowrap;
+}
+
+.linha-vinculo {
+  margin-top: 8px;
+}
+
+.linha-vinculo .linha-add-destino {
+  margin-top: 8px;
+}
+
+.linha-destino {
+  margin-top: 8px;
+}
+
+.linha-destino .linha-add-destino {
+  margin-top: 8px;
+}
+
+.linha-destino .destino-qtd-input {
+  max-width: 140px;
 }
 
 .modal {

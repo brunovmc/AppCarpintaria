@@ -21,9 +21,30 @@ const ESTOQUE_SCHEMA = [
   'observacao'
 ];
 
+function normalizarPayloadMadeiraEstoque(payload) {
+  const dados = { ...(payload || {}) };
+  const tipo = String(dados.tipo || '').trim().toUpperCase();
+  if (tipo !== 'MADEIRA') return dados;
+
+  const comprimento = parseNumeroBR(dados.comprimento_cm);
+  const largura = parseNumeroBR(dados.largura_cm);
+  const espessura = parseNumeroBR(dados.espessura_cm);
+
+  if (comprimento <= 0 || largura <= 0 || espessura <= 0) {
+    throw new Error('Para MADEIRA, informe comprimento, largura e espessura validos.');
+  }
+
+  dados.comprimento_cm = comprimento;
+  dados.largura_cm = largura;
+  dados.espessura_cm = espessura;
+  dados.quantidade = Number(((comprimento * largura * espessura) / 1000000).toFixed(2));
+  dados.unidade = 'M3';
+  return dados;
+}
+
 
 function listarEstoque() {
-  const sheet = SpreadsheetApp.getActive().getSheetByName(ABA_ESTOQUE);
+  const sheet = getDataSpreadsheet().getSheetByName(ABA_ESTOQUE);
   if (!sheet) return [];
 
   const rows = rowsToObjects(sheet);
@@ -60,8 +81,9 @@ function testeDebugEstoque() {
 
 
 function criarItemEstoque(payload) {
+  const dados = normalizarPayloadMadeiraEstoque(payload);
   const novo = {
-    ...payload,
+    ...dados,
     ID: gerarId('EST'),
     ativo: true,
     criado_em: new Date()
@@ -126,11 +148,12 @@ function obterItemEstoque(id) {
 
 
 function atualizarItemEstoque(id, payload) {
+  const dados = normalizarPayloadMadeiraEstoque(payload);
   return updateById(
     ABA_ESTOQUE,
     'ID',
     id,
-    payload,
+    dados,
     ESTOQUE_SCHEMA
   );
 }
@@ -146,4 +169,3 @@ function deletarItemEstoque(id) {
     ESTOQUE_SCHEMA
   );
 }
-

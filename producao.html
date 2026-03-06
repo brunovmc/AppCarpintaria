@@ -5,32 +5,50 @@
 <div id="formularioProducao" class="form-modal" style="display:none; margin-top:32px;">
   <h2 id="producaoFormTitulo">Nova Producao</h2>
 
-  <!-- Produto -->
-  <select id="producaoProduto"></select>
+  <div class="campo-ajuda-wrap">
+    <span class="campo-ajuda-tag">Produto</span>
+    <select id="producaoProduto"></select>
+  </div>
 
-  <!-- Receita -->
-  <select id="producaoReceita"></select>
+  <div class="campo-ajuda-wrap">
+    <span class="campo-ajuda-tag">Modelo</span>
+    <select id="producaoReceita" disabled></select>
+  </div>
 
-  <!-- Nome da ordem -->
-  <input id="producaoNome" placeholder="Nome da ordem (opcional)">
+  <div class="campo-ajuda-wrap">
+    <span class="campo-ajuda-tag">Nome da ordem</span>
+    <input id="producaoNome">
+  </div>
 
-  <!-- Quantidade planejada -->
-  <input id="producaoQtd" type="number" placeholder="Quantidade planejada">
+  <div class="campo-ajuda-wrap">
+    <span class="campo-ajuda-tag">Qtd planejada</span>
+    <input id="producaoQtd" type="number">
+  </div>
 
-  <!-- Status -->
-  <select id="producaoStatus">
-    <option value="Em planejamento">Em planejamento</option>
-    <option value="Em producao">Em producao</option>
-    <option value="Finalizacao">Finalizacao</option>
-    <option value="Concluido">Concluido</option>
-  </select>
+  <div class="campo-ajuda-wrap">
+    <span class="campo-ajuda-tag">Status</span>
+    <select id="producaoStatus">
+      <option value="Em planejamento">Em planejamento</option>
+      <option value="Em producao">Em producao</option>
+      <option value="Finalizacao">Finalizacao</option>
+      <option value="Concluido">Concluido</option>
+    </select>
+  </div>
 
-  <!-- Datas -->
-  <input id="producaoDataInicio" type="date" placeholder="Data inicio">
-  <input id="producaoDataPrevista" type="date" placeholder="Data prevista termino">
+  <div class="campo-ajuda-wrap">
+    <span class="campo-ajuda-tag">Data inicio</span>
+    <input id="producaoDataInicio" type="date">
+  </div>
 
-  <!-- Observacao -->
-  <textarea id="producaoObservacao" placeholder="Observacao"></textarea>
+  <div class="campo-ajuda-wrap">
+    <span class="campo-ajuda-tag">Data termino</span>
+    <input id="producaoDataPrevista" type="date">
+  </div>
+
+  <div class="campo-ajuda-wrap">
+    <span class="campo-ajuda-tag">Observacao</span>
+    <textarea id="producaoObservacao"></textarea>
+  </div>
 
   <button onclick="ProducaoController.salvar()">Salvar</button>
   <button onclick="ProducaoUI.fecharFormulario()">Cancelar</button>
@@ -43,6 +61,17 @@
     <div class="acoes">
       <button id="btnConfirmarConsumo" type="button">Confirmar</button>
       <button id="btnCancelarConsumo" type="button">Cancelar</button>
+    </div>
+  </div>
+</div>
+
+<div id="modalPendenciasVinculoProducao" class="modal hidden">
+  <div class="modal-content">
+    <h3 id="pendenciasVinculoTitulo">Vincular entradas pendentes</h3>
+    <div id="pendenciasVinculoLista"></div>
+    <div class="acoes">
+      <button id="btnConfirmarPendenciasVinculo" type="button">Salvar vinculos</button>
+      <button id="btnCancelarPendenciasVinculo" type="button">Cancelar</button>
     </div>
   </div>
 </div>

@@ -61,8 +61,7 @@
         const t = texto.toLowerCase();
         const toText = v => String(v ?? '');
         resultado = resultado.filter(i =>
-          toText(i.nome_produto).toLowerCase().includes(t) ||
-          toText(i.descricao).toLowerCase().includes(t)
+          toText(i.nome_produto).toLowerCase().includes(t)
         );
       }
 

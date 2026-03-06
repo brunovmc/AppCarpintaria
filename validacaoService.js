@@ -71,6 +71,20 @@ function listarUnidadesPorTipo(tipo) {
  * Retorna TODAS as validações estruturadas
  * Esta será a função padrão para o web app
  */
+function normalizarHeaderValidacao(valor) {
+  return String(valor || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toUpperCase();
+}
+
+function indiceColunaValidacao(headers, nomeEsperado, fallback) {
+  const alvo = normalizarHeaderValidacao(nomeEsperado);
+  const idx = headers.findIndex(h => normalizarHeaderValidacao(h) === alvo);
+  return idx >= 0 ? idx : fallback;
+}
+
 function obterValidacoes() {
   const sheet = getSheet('VALIDACAO');
   if (!sheet) {
@@ -82,8 +96,8 @@ function obterValidacoes() {
       valorKwhPorFornecedor: {}
     };
   }
-  const lastRow = sheet.getLastRow();
-  if (lastRow < 2) {
+  const data = sheet.getDataRange().getValues();
+  if (!Array.isArray(data) || data.length < 2) {
     return {
       tipos: [],
       unidades: [],
@@ -93,9 +107,14 @@ function obterValidacoes() {
     };
   }
 
-  const dados = sheet
-    .getRange(2, 1, lastRow - 1, 5)
-    .getValues();
+  const headers = Array.isArray(data[0]) ? data[0] : [];
+  const dados = data.slice(1);
+
+  const idxTipo = indiceColunaValidacao(headers, 'TIPO', 0);
+  const idxUnidade = indiceColunaValidacao(headers, 'UNIDADE', 1);
+  const idxCategoria = indiceColunaValidacao(headers, 'CATEGORIA', 2);
+  const idxFornecedor = indiceColunaValidacao(headers, 'FORNECEDOR', 3);
+  const idxValorKwh = indiceColunaValidacao(headers, 'VALORKWH', 4);
 
   const tipos = new Set();
   const unidades = new Set();
@@ -104,13 +123,11 @@ function obterValidacoes() {
   const valorKwhPorFornecedor = {};
 
   dados.forEach(linha => {
-    const [
-      tipo,
-      unidade,
-      categoria,
-      fornecedor,
-      valorKwh
-    ] = linha;
+    const tipo = linha[idxTipo];
+    const unidade = linha[idxUnidade];
+    const categoria = linha[idxCategoria];
+    const fornecedor = linha[idxFornecedor];
+    const valorKwh = linha[idxValorKwh];
 
     if (tipo && tipo.toString().trim() !== '') {
       tipos.add(tipo);

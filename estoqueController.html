@@ -40,6 +40,13 @@
           validacoes.categorias ||= [];
           validacoes.fornecedores ||= [];
 
+          if (typeof window !== 'undefined') {
+            window.AppValidacoesCache = {
+              ...(window.AppValidacoesCache || {}),
+              tipos: validacoes.tipos
+            };
+          }
+
           EstoqueUI.renderTipos?.(validacoes.tipos);
           EstoqueUI.renderUnidades?.(validacoes.unidades);
           EstoqueUI.renderCategorias?.(validacoes.categorias);
@@ -47,6 +54,9 @@
 
           EstoqueUI.renderFiltroTipos?.(validacoes.tipos);
           EstoqueUI.renderFiltroCategorias?.(validacoes.categorias);
+          if (typeof popularFiltrosDoPainel === 'function') {
+            popularFiltrosDoPainel();
+          }
         })
         .obterValidacoes();
     }
@@ -78,17 +88,27 @@
       };
 
       const tipo = get('tipo');
-      const comprimento_cm = tipo === 'MADEIRA' ? parseNumeroInput(get('comprimento_cm')) : '';
-      const largura_cm = tipo === 'MADEIRA' ? parseNumeroInput(get('largura_cm')) : '';
-      const espessura_cm = tipo === 'MADEIRA' ? parseNumeroInput(get('espessura_cm')) : '';
-      const qtdMadeira = (tipo === 'MADEIRA' && comprimento_cm && largura_cm && espessura_cm)
+      const comprimentoInput = tipo === 'MADEIRA' ? parseNumeroInput(get('comprimento_cm')) : '';
+      const larguraInput = tipo === 'MADEIRA' ? parseNumeroInput(get('largura_cm')) : '';
+      const espessuraInput = tipo === 'MADEIRA' ? parseNumeroInput(get('espessura_cm')) : '';
+
+      const comprimento_cm = tipo === 'MADEIRA' ? Number(comprimentoInput || 0) : '';
+      const largura_cm = tipo === 'MADEIRA' ? Number(larguraInput || 0) : '';
+      const espessura_cm = tipo === 'MADEIRA' ? Number(espessuraInput || 0) : '';
+
+      if (tipo === 'MADEIRA' && (comprimento_cm <= 0 || largura_cm <= 0 || espessura_cm <= 0)) {
+        mostrarToast('Para MADEIRA, informe comprimento, largura e espessura validos', 'erro');
+        return;
+      }
+
+      const qtdMadeira = tipo === 'MADEIRA'
         ? Number(((comprimento_cm * largura_cm * espessura_cm) / 1000000).toFixed(2))
         : '';
 
       const dados = {
         tipo,
         item: get('item'),
-        quantidade: tipo === 'MADEIRA' && qtdMadeira !== '' ? qtdMadeira : parseNumeroInput(get('quantidade')) || 0,
+        quantidade: tipo === 'MADEIRA' ? qtdMadeira : parseNumeroInput(get('quantidade')) || 0,
         unidade: tipo === 'MADEIRA' ? 'M3' : get('unidade'),
         categoria: get('categoria'),
         fornecedor: get('fornecedor'),

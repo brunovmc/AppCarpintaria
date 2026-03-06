@@ -1,5 +1,5 @@
 function gerarId(prefixo) {
-  const ss = SpreadsheetApp.getActive();
+  const ss = getDataSpreadsheet();
   const props = PropertiesService.getScriptProperties();
   const chave = `SEQ_${prefixo}`;
 

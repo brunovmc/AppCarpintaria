@@ -23,8 +23,29 @@ const COMPRAS_SCHEMA = [
   'estoque_id'
 ];
 
+function normalizarPayloadMadeiraCompra(payload) {
+  const dados = { ...(payload || {}) };
+  const tipo = String(dados.tipo || '').trim().toUpperCase();
+  if (tipo !== 'MADEIRA') return dados;
+
+  const comprimento = parseNumeroBR(dados.comprimento_cm);
+  const largura = parseNumeroBR(dados.largura_cm);
+  const espessura = parseNumeroBR(dados.espessura_cm);
+
+  if (comprimento <= 0 || largura <= 0 || espessura <= 0) {
+    throw new Error('Para MADEIRA, informe comprimento, largura e espessura validos.');
+  }
+
+  dados.comprimento_cm = comprimento;
+  dados.largura_cm = largura;
+  dados.espessura_cm = espessura;
+  dados.quantidade = Number(((comprimento * largura * espessura) / 1000000).toFixed(2));
+  dados.unidade = 'M3';
+  return dados;
+}
+
 function listarCompras() {
-  const sheet = SpreadsheetApp.getActive().getSheetByName(ABA_COMPRAS);
+  const sheet = getDataSpreadsheet().getSheetByName(ABA_COMPRAS);
   if (!sheet) return [];
 
   const rows = rowsToObjects(sheet);
@@ -44,8 +65,9 @@ function listarCompras() {
 }
 
 function criarItemCompra(payload) {
+  const dados = normalizarPayloadMadeiraCompra(payload);
   const novo = {
-    ...payload,
+    ...dados,
     ID: gerarId('COM'),
     ativo: true,
     criado_em: new Date(),
@@ -56,11 +78,12 @@ function criarItemCompra(payload) {
 }
 
 function atualizarItemCompra(id, payload) {
+  const dados = normalizarPayloadMadeiraCompra(payload);
   return updateById(
     ABA_COMPRAS,
     'ID',
     id,
-    payload,
+    dados,
     COMPRAS_SCHEMA
   );
 }
@@ -103,25 +126,27 @@ function adicionarCompraAoEstoque(compraId) {
       throw new Error('Compra ja adicionada ao estoque');
     }
 
+    const compraNormalizada = normalizarPayloadMadeiraCompra(compra);
+
     const itemEstoqueCriado = {
       ID: gerarId('EST'),
-      tipo: compra.tipo || '',
-      item: compra.item || '',
-      unidade: compra.unidade || '',
-      valor_unit: compra.valor_unit || 0,
+      tipo: compraNormalizada.tipo || '',
+      item: compraNormalizada.item || '',
+      unidade: compraNormalizada.unidade || '',
+      valor_unit: compraNormalizada.valor_unit || 0,
       ativo: true,
       criado_em: new Date(),
-      quantidade: compra.quantidade || 0,
-      comprimento_cm: compra.comprimento_cm || '',
-      largura_cm: compra.largura_cm || '',
-      espessura_cm: compra.espessura_cm || '',
-      categoria: compra.categoria || '',
-      fornecedor: compra.fornecedor || '',
-      potencia: compra.potencia || '',
-      voltagem: compra.voltagem || '',
-      comprado_em: compra.comprado_em || '',
-      vida_util_mes: compra.vida_util_mes || '',
-      observacao: compra.observacao || ''
+      quantidade: compraNormalizada.quantidade || 0,
+      comprimento_cm: compraNormalizada.comprimento_cm || '',
+      largura_cm: compraNormalizada.largura_cm || '',
+      espessura_cm: compraNormalizada.espessura_cm || '',
+      categoria: compraNormalizada.categoria || '',
+      fornecedor: compraNormalizada.fornecedor || '',
+      potencia: compraNormalizada.potencia || '',
+      voltagem: compraNormalizada.voltagem || '',
+      comprado_em: compraNormalizada.comprado_em || '',
+      vida_util_mes: compraNormalizada.vida_util_mes || '',
+      observacao: compraNormalizada.observacao || ''
     };
 
     insert(ABA_ESTOQUE, itemEstoqueCriado, ESTOQUE_SCHEMA);

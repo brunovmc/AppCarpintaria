@@ -1,5 +1,21 @@
+function getDataSpreadsheet() {
+  const id = (typeof DATA_SPREADSHEET_ID === 'string')
+    ? DATA_SPREADSHEET_ID.trim()
+    : '';
+
+  if (!id) {
+    throw new Error('DATA_SPREADSHEET_ID nao configurado em main.js');
+  }
+
+  try {
+    return SpreadsheetApp.openById(id);
+  } catch (error) {
+    throw new Error('Nao foi possivel abrir a planilha de dados. Verifique o DATA_SPREADSHEET_ID e as permissoes de acesso. Detalhes: ' + error.message);
+  }
+}
+
 function getSheet(nome) {
-  return SpreadsheetApp.getActive().getSheetByName(nome);
+  return getDataSpreadsheet().getSheetByName(nome);
 }
 
 function getHeaderMap(sheet) {
@@ -38,7 +54,7 @@ function rowsToObjects(sheet) {
 }
 
 function insert(sheetName, payload, schema) {
-  const ss = SpreadsheetApp.getActive();
+  const ss = getDataSpreadsheet();
   let sheet = ss.getSheetByName(sheetName);
   if (!sheet) {
     sheet = ss.insertSheet(sheetName);
@@ -59,7 +75,7 @@ function insert(sheetName, payload, schema) {
 
 
 function updateById(sheetName, idField, id, payload, schema) {
-  const ss = SpreadsheetApp.getActive();
+  const ss = getDataSpreadsheet();
   let sheet = ss.getSheetByName(sheetName);
   if (!sheet) {
     sheet = ss.insertSheet(sheetName);

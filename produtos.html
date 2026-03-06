@@ -5,11 +5,41 @@
 <div id="formularioProduto" class="form-modal" style="display:none; margin-top:32px;">
   <h2 id="produtoFormTitulo">Novo Produto</h2>
 
-  <input id="produtoNome" placeholder="Nome">
-  <input id="produtoCategoria" placeholder="Categoria">
-  <select id="produtoEstoque"></select>
-  <input id="produtoDescricao" placeholder="Descricao">
-  <textarea id="produtoObservacao" placeholder="Observacao"></textarea>
+  <div class="campo-ajuda-wrap">
+    <span class="campo-ajuda-tag">Nome</span>
+    <input id="produtoNome">
+  </div>
+
+  <div class="bloco">
+    <p><b>Modelo do produto</b></p>
+
+    <div id="produtoModeloCard" class="receita-card editing" data-produto-id="FORM" data-receita-id="">
+      <div class="receita-header">
+        <input id="produtoModeloNome" class="receita-nome" value="Modelo principal">
+      </div>
+      <textarea id="produtoModeloDescricao" class="receita-desc"></textarea>
+
+      <div class="bloco">
+        <p><b>Entradas</b></p>
+        <div id="produtoModeloEntradas" class="receita-entradas"></div>
+        <button type="button" onclick="ProdutosUI.adicionarEntradaModeloForm()">Adicionar entrada</button>
+      </div>
+
+      <div class="bloco">
+        <p><b>Saidas</b></p>
+        <div id="produtoModeloSaidas" class="receita-saidas"></div>
+        <button type="button" onclick="ProdutosUI.adicionarSaidaModeloForm()">Adicionar saida</button>
+      </div>
+    </div>
+
+    <div class="bloco">
+      <p><b>Etapas (opcional)</b></p>
+      <div id="produtoModeloEtapas"></div>
+      <button type="button" onclick="ProdutosUI.adicionarEtapaModeloForm()">Adicionar etapa</button>
+    </div>
+
+    <div id="produtoModeloDatalists" class="hidden"></div>
+  </div>
 
   <button onclick="ProdutosController.salvar()">Salvar</button>
   <button onclick="ProdutosUI.fecharFormulario()">Cancelar</button>

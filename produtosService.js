@@ -9,10 +9,6 @@ const PRODUTOS_SCHEMA = [
   'produto_id',
   'nome_produto',
   'unidade_produto',
-  'estoque_id',
-  'categoria',
-  'descricao',
-  'observacao',
   'ativo',
   'criado_em'
 ];
@@ -74,8 +70,22 @@ const PRODUTOS_RECEITAS_SAIDAS_SCHEMA = [
   'ativo'
 ];
 
+function getResumoModeloProduto(produtoId) {
+  const modelo = obterModeloProduto(produtoId);
+  const entradasTotal = Array.isArray(modelo?.entradas) ? modelo.entradas.length : 0;
+  const saidasTotal = Array.isArray(modelo?.saidas) ? modelo.saidas.length : 0;
+  const etapasTotal = Array.isArray(modelo?.etapas) ? modelo.etapas.length : 0;
+
+  return {
+    modelo_entradas_total: entradasTotal,
+    modelo_saidas_total: saidasTotal,
+    modelo_etapas_total: etapasTotal,
+    modelo_resumo: `${entradasTotal} entradas, ${saidasTotal} saidas, ${etapasTotal} etapas`
+  };
+}
+
 function listarProdutos() {
-  const sheet = SpreadsheetApp.getActive().getSheetByName(ABA_PRODUTOS);
+  const sheet = getDataSpreadsheet().getSheetByName(ABA_PRODUTOS);
   if (!sheet) return [];
 
   const rows = rowsToObjects(sheet);
@@ -92,8 +102,11 @@ function listarProdutos() {
         custoErro = err && err.message ? err.message : 'Erro ao calcular custo';
       }
 
+      const resumoModelo = getResumoModeloProduto(i.produto_id);
+
       return {
         ...i,
+        ...resumoModelo,
         custo_previsto: custoPrevisto,
         custo_erro: custoErro,
         criado_em: i.criado_em
@@ -104,8 +117,14 @@ function listarProdutos() {
 }
 
 function criarProduto(payload) {
+  const nome = String(payload?.nome_produto || '').trim();
+  if (!nome) {
+    throw new Error('Nome do produto obrigatorio');
+  }
+
   const novo = {
-    ...payload,
+    nome_produto: nome,
+    unidade_produto: String(payload?.unidade_produto || 'UN').trim() || 'UN',
     produto_id: gerarId('PRD'),
     ativo: true,
     criado_em: new Date()
@@ -120,7 +139,7 @@ function criarProduto(payload) {
 }
 
 function obterProduto(produtoId) {
-  const sheet = SpreadsheetApp.getActive().getSheetByName(ABA_PRODUTOS);
+  const sheet = getDataSpreadsheet().getSheetByName(ABA_PRODUTOS);
   if (!sheet) return null;
 
   const rows = rowsToObjects(sheet);
@@ -148,7 +167,7 @@ function deletarProduto(produtoId) {
 }
 
 function listarComponentesProduto(produtoId) {
-  const sheet = SpreadsheetApp.getActive().getSheetByName(ABA_PRODUTOS_COMPONENTES);
+  const sheet = getDataSpreadsheet().getSheetByName(ABA_PRODUTOS_COMPONENTES);
   if (!sheet) return [];
 
   const rows = rowsToObjects(sheet);
@@ -171,7 +190,7 @@ function listarComposicaoProduto(produtoId) {
 }
 
 function validarCicloComposicao(produtoId, linhas) {
-  const sheet = SpreadsheetApp.getActive().getSheetByName(ABA_PRODUTOS_COMPONENTES);
+  const sheet = getDataSpreadsheet().getSheetByName(ABA_PRODUTOS_COMPONENTES);
   const rows = sheet ? rowsToObjects(sheet) : [];
 
   const ativos = rows
@@ -239,7 +258,7 @@ function deletarComponenteProduto(id) {
 }
 
 function salvarComposicaoProduto(produtoId, linhas) {
-  const ss = SpreadsheetApp.getActive();
+  const ss = getDataSpreadsheet();
   let sheet = ss.getSheetByName(ABA_PRODUTOS_COMPONENTES);
   if (!sheet) {
     sheet = ss.insertSheet(ABA_PRODUTOS_COMPONENTES);
@@ -289,7 +308,7 @@ function adicionarMaterialProduto(produtoId, estoqueId, quantidade) {
     throw new Error('Quantidade invalida');
   }
 
-  const sheetEstoque = SpreadsheetApp.getActive().getSheetByName('ESTOQUE');
+  const sheetEstoque = getDataSpreadsheet().getSheetByName('ESTOQUE');
   if (!sheetEstoque) {
     throw new Error('Aba ESTOQUE nao encontrada');
   }
@@ -326,7 +345,7 @@ function adicionarMaterialProduto(produtoId, estoqueId, quantidade) {
 }
 
 function listarEtapasProduto(produtoId) {
-  const sheet = SpreadsheetApp.getActive().getSheetByName(ABA_PRODUTOS_ETAPAS);
+  const sheet = getDataSpreadsheet().getSheetByName(ABA_PRODUTOS_ETAPAS);
   if (!sheet) return [];
 
   const rows = rowsToObjects(sheet);
@@ -367,16 +386,68 @@ function deletarEtapaProduto(id) {
   );
 }
 
+function limparEtapasProduto(produtoId) {
+  const ss = getDataSpreadsheet();
+  let sheet = ss.getSheetByName(ABA_PRODUTOS_ETAPAS);
+  if (!sheet) {
+    sheet = ss.insertSheet(ABA_PRODUTOS_ETAPAS);
+  }
+
+  ensureSchema(sheet, PRODUTOS_ETAPAS_SCHEMA);
+
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0] || [];
+  const idxProduto = headers.indexOf('produto_id');
+
+  if (idxProduto === -1 || data.length <= 1) return;
+
+  for (let i = data.length - 1; i >= 1; i--) {
+    if (String(data[i][idxProduto] || '') === String(produtoId || '')) {
+      sheet.deleteRow(i + 1);
+    }
+  }
+}
+
+function salvarEtapasProduto(produtoId, etapas) {
+  if (!produtoId) throw new Error('Produto invalido');
+
+  limparEtapasProduto(produtoId);
+
+  const linhas = Array.isArray(etapas) ? etapas : [];
+  let ordemSeq = 1;
+
+  linhas.forEach(et => {
+    const nomeEtapa = String(et?.nome_etapa || '').trim();
+    if (!nomeEtapa) return;
+
+    const ordemInformada = parseNumeroBR(et?.ordem);
+    const ordem = ordemInformada > 0 ? ordemInformada : ordemSeq;
+
+    const novo = {
+      id: gerarId('ETP'),
+      produto_id: produtoId,
+      nome_etapa: nomeEtapa,
+      ordem,
+      ativo: true
+    };
+
+    insert(ABA_PRODUTOS_ETAPAS, novo, PRODUTOS_ETAPAS_SCHEMA);
+    ordemSeq += 1;
+  });
+
+  return true;
+}
+
 function listarReceitasProduto(produtoId) {
-  const sheet = SpreadsheetApp.getActive().getSheetByName(ABA_PRODUTOS_RECEITAS);
+  const sheet = getDataSpreadsheet().getSheetByName(ABA_PRODUTOS_RECEITAS);
   if (!sheet) return [];
 
   const receitas = rowsToObjects(sheet)
     .filter(i => String(i.ativo).toLowerCase() === 'true')
     .filter(i => i.produto_id === produtoId);
 
-  const sheetEntradas = SpreadsheetApp.getActive().getSheetByName(ABA_PRODUTOS_RECEITAS_ENTRADAS);
-  const sheetSaidas = SpreadsheetApp.getActive().getSheetByName(ABA_PRODUTOS_RECEITAS_SAIDAS);
+  const sheetEntradas = getDataSpreadsheet().getSheetByName(ABA_PRODUTOS_RECEITAS_ENTRADAS);
+  const sheetSaidas = getDataSpreadsheet().getSheetByName(ABA_PRODUTOS_RECEITAS_SAIDAS);
 
   const entradas = sheetEntradas ? rowsToObjects(sheetEntradas) : [];
   const saidas = sheetSaidas ? rowsToObjects(sheetSaidas) : [];
@@ -395,10 +466,19 @@ function listarReceitasProduto(produtoId) {
 }
 
 function criarReceitaProduto(produtoId, payload) {
+  if (!produtoId) {
+    throw new Error('Produto invalido');
+  }
+
+  const receitasAtuais = listarReceitasProduto(produtoId);
+  if (receitasAtuais.length > 0) {
+    return receitasAtuais[0];
+  }
+
   const novo = {
     receita_id: gerarId('REC'),
     produto_id: produtoId,
-    nome_receita: payload?.nome_receita || 'Nova receita',
+    nome_receita: payload?.nome_receita || 'Modelo principal',
     descricao: payload?.descricao || '',
     parent_receita_id: payload?.parent_receita_id || '',
     ativo: true,
@@ -424,7 +504,7 @@ function atualizarReceitaProduto(receitaId, payload) {
 }
 
 function inativarLinhasReceita(sheetName, receitaId) {
-  const sheet = SpreadsheetApp.getActive().getSheetByName(sheetName);
+  const sheet = getDataSpreadsheet().getSheetByName(sheetName);
   if (!sheet) return;
 
   const data = sheet.getDataRange().getValues();
@@ -457,7 +537,7 @@ function deletarReceitaProduto(receitaId) {
 }
 
 function limparLinhasReceita(sheetName, receitaId) {
-  const ss = SpreadsheetApp.getActive();
+  const ss = getDataSpreadsheet();
   let sheet = ss.getSheetByName(sheetName);
   if (!sheet) {
     sheet = ss.insertSheet(sheetName);
@@ -477,7 +557,7 @@ function limparLinhasReceita(sheetName, receitaId) {
 }
 
 function salvarEntradasReceita(receitaId, linhas) {
-  const ss = SpreadsheetApp.getActive();
+  const ss = getDataSpreadsheet();
   let sheet = ss.getSheetByName(ABA_PRODUTOS_RECEITAS_ENTRADAS);
   if (!sheet) {
     sheet = ss.insertSheet(ABA_PRODUTOS_RECEITAS_ENTRADAS);
@@ -513,7 +593,7 @@ function salvarEntradasReceita(receitaId, linhas) {
 }
 
 function salvarSaidasReceita(receitaId, linhas) {
-  const ss = SpreadsheetApp.getActive();
+  const ss = getDataSpreadsheet();
   let sheet = ss.getSheetByName(ABA_PRODUTOS_RECEITAS_SAIDAS);
   if (!sheet) {
     sheet = ss.insertSheet(ABA_PRODUTOS_RECEITAS_SAIDAS);
@@ -539,76 +619,8 @@ function salvarSaidasReceita(receitaId, linhas) {
 }
 
 function duplicarReceitaProduto(receitaId) {
-  const sheet = SpreadsheetApp.getActive().getSheetByName(ABA_PRODUTOS_RECEITAS);
-  if (!sheet) return null;
-
-  const receitas = rowsToObjects(sheet);
-  const receita = receitas.find(r => r.receita_id === receitaId);
-  if (!receita) return null;
-
-  const sheetEntradas = SpreadsheetApp.getActive().getSheetByName(ABA_PRODUTOS_RECEITAS_ENTRADAS);
-  const sheetSaidas = SpreadsheetApp.getActive().getSheetByName(ABA_PRODUTOS_RECEITAS_SAIDAS);
-
-  const entradas = sheetEntradas ? rowsToObjects(sheetEntradas) : [];
-  const saidas = sheetSaidas ? rowsToObjects(sheetSaidas) : [];
-
-  const entradasAtivas = entradas
-    .filter(i => String(i.ativo).toLowerCase() === 'true')
-    .filter(i => i.receita_id === receitaId);
-  const saidasAtivas = saidas
-    .filter(i => String(i.ativo).toLowerCase() === 'true')
-    .filter(i => i.receita_id === receitaId);
-
-  const novo = {
-    receita_id: gerarId('REC'),
-    produto_id: receita.produto_id,
-    nome_receita: `${receita.nome_receita || 'Receita'} (Copia)`,
-    descricao: receita.descricao || '',
-    parent_receita_id: receita.parent_receita_id || receita.receita_id,
-    ativo: true,
-    criado_em: new Date()
-  };
-
-  insert(ABA_PRODUTOS_RECEITAS, novo, PRODUTOS_RECEITAS_SCHEMA);
-
-  entradasAtivas.forEach(l => {
-    const novoItem = {
-      id: gerarId('REN'),
-      receita_id: novo.receita_id,
-      tipo_item: String(l.tipo_item || '').toUpperCase(),
-      nome_item: l.nome_item || '',
-      estoque_ref_id: l.estoque_ref_id || '',
-      produto_ref_id: l.produto_ref_id || '',
-      receita_ref_id: l.receita_ref_id || '',
-      categoria: l.categoria || '',
-      unidade: l.unidade || '',
-      qtd_pecas: parseNumeroBR(l.qtd_pecas),
-      comprimento_cm: parseNumeroBR(l.comprimento_cm),
-      largura_cm: parseNumeroBR(l.largura_cm),
-      espessura_cm: parseNumeroBR(l.espessura_cm),
-      custo_manual: parseNumeroBR(l.custo_manual),
-      observacao: l.observacao || '',
-      ativo: true
-    };
-    insert(ABA_PRODUTOS_RECEITAS_ENTRADAS, novoItem, PRODUTOS_RECEITAS_ENTRADAS_SCHEMA);
-  });
-
-  saidasAtivas.forEach(l => {
-    const novoItem = {
-      id: gerarId('RSA'),
-      receita_id: novo.receita_id,
-      nome_saida: l.nome_saida || '',
-      unidade: l.unidade || '',
-      quantidade: parseNumeroBR(l.quantidade),
-      ativo: true
-    };
-    insert(ABA_PRODUTOS_RECEITAS_SAIDAS, novoItem, PRODUTOS_RECEITAS_SAIDAS_SCHEMA);
-  });
-
-  return {
-    ...novo,
-    criado_em: Utilities.formatDate(novo.criado_em, Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm')
-  };
+  const _ = receitaId;
+  throw new Error('Duplicacao desativada: cada produto possui apenas um modelo');
 }
 
 function salvarReceitaCompleta(receitaId, dados, entradas, saidas) {
@@ -618,16 +630,127 @@ function salvarReceitaCompleta(receitaId, dados, entradas, saidas) {
   return true;
 }
 
+function inativarReceitasSecundariasProduto(produtoId, receitaPrincipalId) {
+  const sheet = getDataSpreadsheet().getSheetByName(ABA_PRODUTOS_RECEITAS);
+  if (!sheet) return true;
+
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0] || [];
+  const idxProduto = headers.indexOf('produto_id');
+  const idxReceita = headers.indexOf('receita_id');
+  const idxAtivo = headers.indexOf('ativo');
+
+  if (idxProduto === -1 || idxReceita === -1 || idxAtivo === -1) return true;
+
+  for (let i = 1; i < data.length; i++) {
+    const rowProdutoId = String(data[i][idxProduto] || '');
+    const rowReceitaId = String(data[i][idxReceita] || '');
+    if (rowProdutoId !== String(produtoId || '')) continue;
+    if (rowReceitaId === String(receitaPrincipalId || '')) continue;
+    sheet.getRange(i + 1, idxAtivo + 1).setValue(false);
+  }
+
+  return true;
+}
+
+function obterModeloProduto(produtoId) {
+  if (!produtoId) {
+    return {
+      receita_id: '',
+      dados: { nome_receita: 'Modelo principal', descricao: '' },
+      entradas: [],
+      saidas: [],
+      etapas: []
+    };
+  }
+
+  const receitas = listarReceitasProduto(produtoId);
+  const receita = Array.isArray(receitas) && receitas.length > 0 ? receitas[0] : null;
+  const etapas = listarEtapasProduto(produtoId);
+
+  if (!receita) {
+    return {
+      receita_id: '',
+      dados: { nome_receita: 'Modelo principal', descricao: '' },
+      entradas: [],
+      saidas: [],
+      etapas
+    };
+  }
+
+  return {
+    receita_id: receita.receita_id || '',
+    dados: {
+      nome_receita: receita.nome_receita || 'Modelo principal',
+      descricao: receita.descricao || ''
+    },
+    entradas: Array.isArray(receita.entradas) ? receita.entradas : [],
+    saidas: Array.isArray(receita.saidas) ? receita.saidas : [],
+    etapas: Array.isArray(etapas) ? etapas : []
+  };
+}
+
+function salvarProdutoComModelo(produtoId, payloadProduto, dadosReceita, entradas, saidas, etapas) {
+  const dadosProduto = {
+    nome_produto: String(payloadProduto?.nome_produto || '').trim(),
+    unidade_produto: String(payloadProduto?.unidade_produto || 'UN').trim() || 'UN'
+  };
+
+  if (!dadosProduto.nome_produto) {
+    throw new Error('Nome do produto obrigatorio');
+  }
+
+  let id = String(produtoId || '').trim();
+  if (id) {
+    atualizarProduto(id, dadosProduto);
+  } else {
+    const criado = criarProduto(dadosProduto);
+    id = criado.produto_id;
+  }
+
+  const modeloDados = {
+    nome_receita: String(dadosReceita?.nome_receita || 'Modelo principal').trim() || 'Modelo principal',
+    descricao: String(dadosReceita?.descricao || '').trim(),
+    parent_receita_id: ''
+  };
+
+  const receitasAtuais = listarReceitasProduto(id);
+  const receitaPrincipal = Array.isArray(receitasAtuais) && receitasAtuais.length > 0
+    ? receitasAtuais[0]
+    : criarReceitaProduto(id, modeloDados);
+
+  atualizarReceitaProduto(receitaPrincipal.receita_id, modeloDados);
+  salvarEntradasReceita(receitaPrincipal.receita_id, entradas || []);
+  salvarSaidasReceita(receitaPrincipal.receita_id, saidas || []);
+  inativarReceitasSecundariasProduto(id, receitaPrincipal.receita_id);
+  salvarEtapasProduto(id, etapas || []);
+
+  const produtoAtual = obterProduto(id) || {};
+  const resumoModelo = getResumoModeloProduto(id);
+
+  return {
+    ...produtoAtual,
+    ...resumoModelo,
+    produto_id: id,
+    nome_produto: produtoAtual.nome_produto || dadosProduto.nome_produto,
+    unidade_produto: produtoAtual.unidade_produto || dadosProduto.unidade_produto,
+    criado_em: produtoAtual.criado_em
+      ? Utilities.formatDate(new Date(produtoAtual.criado_em), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm')
+      : ''
+  };
+}
+
 function obterReceitaPadraoProduto(produtoId) {
-  const sheet = SpreadsheetApp.getActive().getSheetByName(ABA_PRODUTOS_RECEITAS);
+  const sheet = getDataSpreadsheet().getSheetByName(ABA_PRODUTOS_RECEITAS);
   if (!sheet) return null;
 
   const receitas = rowsToObjects(sheet)
     .filter(i => String(i.ativo).toLowerCase() === 'true')
-    .filter(i => i.produto_id === produtoId)
-    .filter(i => i.parent_receita_id);
+    .filter(i => i.produto_id === produtoId);
 
-  return receitas[0] || null;
+  if (receitas.length === 0) return null;
+  const semParent = receitas.find(i => !String(i.parent_receita_id || '').trim());
+  return semParent || receitas[0] || null;
 }
 
 function escolherSaidaPrincipal(saidas, nomeProduto) {
@@ -651,158 +774,24 @@ function escolherSaidaPrincipal(saidas, nomeProduto) {
   return escolhida;
 }
 
-function explodirReceita(produtoId, receitaId, qtdPlanejada) {
-  if (!produtoId || !receitaId) return { itens: [], custoPrevisto: 0 };
-
-  const sheetReceitas = SpreadsheetApp.getActive().getSheetByName(ABA_PRODUTOS_RECEITAS);
-  if (!sheetReceitas) return { itens: [], custoPrevisto: 0 };
-
-  const receitas = rowsToObjects(sheetReceitas)
-    .filter(i => String(i.ativo).toLowerCase() === 'true');
-  const receita = receitas.find(r => r.receita_id === receitaId && r.produto_id === produtoId);
-  if (!receita) {
-    throw new Error('Receita nao encontrada');
-  }
-  if (!receita.parent_receita_id) {
-    throw new Error('Receita base nao pode ser usada');
-  }
-
-  const sheetEntradas = SpreadsheetApp.getActive().getSheetByName(ABA_PRODUTOS_RECEITAS_ENTRADAS);
-  const sheetSaidas = SpreadsheetApp.getActive().getSheetByName(ABA_PRODUTOS_RECEITAS_SAIDAS);
-  const entradas = sheetEntradas ? rowsToObjects(sheetEntradas) : [];
-  const saidas = sheetSaidas ? rowsToObjects(sheetSaidas) : [];
-
-  const entradasAtivas = entradas
-    .filter(i => String(i.ativo).toLowerCase() === 'true')
-    .filter(i => i.receita_id === receitaId);
-  const saidasAtivas = saidas
-    .filter(i => String(i.ativo).toLowerCase() === 'true')
-    .filter(i => i.receita_id === receitaId);
-
-  const produtosSheet = SpreadsheetApp.getActive().getSheetByName(ABA_PRODUTOS);
-  const produtosRows = produtosSheet ? rowsToObjects(produtosSheet) : [];
-  const produtosMap = {};
-  produtosRows
-    .filter(i => String(i.ativo).toLowerCase() === 'true')
-    .forEach(p => {
-      produtosMap[p.produto_id] = p;
-    });
-
-  const produtoRef = produtosMap[produtoId] || {};
-  const produtoNome = produtoRef.nome_produto || '';
-  const saidaPrincipal = escolherSaidaPrincipal(saidasAtivas, produtoNome);
-  if (!saidaPrincipal) {
-    throw new Error('Receita sem saida principal');
-  }
-
-  const qtdSaida = parseNumeroBR(saidaPrincipal.quantidade);
-  if (!qtdSaida || qtdSaida <= 0) {
-    throw new Error('Saida principal invalida');
-  }
-
-  const qtdPlanejadaNum = parseNumeroBR(qtdPlanejada);
-  if (!qtdPlanejadaNum || qtdPlanejadaNum <= 0) {
-    return { itens: [], custoPrevisto: 0 };
-  }
-
-  const fator = qtdPlanejadaNum / qtdSaida;
-
-  const sheetEstoque = SpreadsheetApp.getActive().getSheetByName(ABA_ESTOQUE);
-  const estoqueRows = sheetEstoque ? rowsToObjects(sheetEstoque) : [];
-  const estoqueMap = {};
-  estoqueRows.forEach(i => {
-    estoqueMap[i.ID] = i;
-  });
-
+function agruparItensExplosaoPorEstoque(itens) {
   const resultado = {};
   let custoPrevisto = 0;
 
-  entradasAtivas.forEach(e => {
-    const tipo = String(e.tipo_item || '').toUpperCase();
-    if (tipo === 'LIVRE') return;
+  (Array.isArray(itens) ? itens : []).forEach(i => {
+    if (!i || !i.estoque_id) return;
 
-    let estoqueId = '';
-    let itemNome = '';
-    let unidade = '';
-    let valorUnit = 0;
-    let quantidade = 0;
+    const estoqueId = String(i.estoque_id);
+    const quantidade = parseNumeroBR(i.quantidade);
+    if (!quantidade || quantidade <= 0) return;
 
-    const qtdBase = parseNumeroBR(e.qtd_pecas);
-    if (!qtdBase || qtdBase <= 0) {
-      throw new Error(`Qtd de pecas invalida: ${e.nome_item || e.estoque_ref_id || e.produto_ref_id || ''}`);
-    }
-
-    if (tipo === 'PRODUTO') {
-      const prodId = e.produto_ref_id || '';
-      if (!prodId) {
-        throw new Error('Entrada de produto sem referencia');
-      }
-
-      const prod = produtosMap[prodId] || null;
-      if (!prod) {
-        throw new Error(`Produto nao encontrado: ${prodId}`);
-      }
-
-      estoqueId = prod.estoque_id || '';
-      if (!estoqueId) {
-        throw new Error(`Produto sem estoque vinculado: ${prod.nome_produto || prodId}`);
-      }
-
-      const estoqueItem = estoqueMap[estoqueId];
-      if (!estoqueItem) {
-        throw new Error(`Item de estoque nao encontrado: ${estoqueId}`);
-      }
-      if (String(estoqueItem.ativo).toLowerCase() !== 'true') {
-        throw new Error(`Item de estoque inativo: ${estoqueId}`);
-      }
-      if (String(estoqueItem.tipo || '').toUpperCase() !== 'PRODUTO') {
-        throw new Error(`Item de estoque do produto deve ser do tipo PRODUTO: ${estoqueId}`);
-      }
-
-      itemNome = estoqueItem.item || prod.nome_produto || estoqueId;
-      unidade = estoqueItem.unidade || '';
-      valorUnit = parseNumeroBR(estoqueItem.valor_unit);
-      quantidade = qtdBase * fator;
-    } else {
-      estoqueId = e.estoque_ref_id || '';
-      if (!estoqueId) {
-        throw new Error(`Item de estoque nao informado: ${e.nome_item || ''}`);
-      }
-
-      const estoqueItem = estoqueMap[estoqueId];
-      if (!estoqueItem) {
-        throw new Error(`Item de estoque nao encontrado: ${estoqueId}`);
-      }
-      if (String(estoqueItem.ativo).toLowerCase() !== 'true') {
-        throw new Error(`Item de estoque inativo: ${estoqueId}`);
-      }
-
-      itemNome = estoqueItem.item || e.nome_item || estoqueId;
-      unidade = estoqueItem.unidade || e.unidade || '';
-      valorUnit = parseNumeroBR(estoqueItem.valor_unit);
-
-      if (tipo === 'MADEIRA') {
-        const comp = parseNumeroBR(e.comprimento_cm);
-        const larg = parseNumeroBR(e.largura_cm);
-        const esp = parseNumeroBR(e.espessura_cm);
-        if (!comp || !larg || !esp) {
-          throw new Error(`Madeira sem medidas: ${itemNome}`);
-        }
-        const volumeM3 = (comp * larg * esp) / 1000000;
-        quantidade = qtdBase * volumeM3 * fator;
-        unidade = 'M3';
-      } else {
-        quantidade = qtdBase * fator;
-      }
-    }
-
-    if (!estoqueId || !quantidade || quantidade <= 0) return;
+    const valorUnit = parseNumeroBR(i.valor_unit);
 
     if (!resultado[estoqueId]) {
       resultado[estoqueId] = {
         estoque_id: estoqueId,
-        item: itemNome,
-        unidade,
+        item: i.item || estoqueId,
+        unidade: i.unidade || '',
         quantidade: 0,
         valor_unit: valorUnit
       };
@@ -818,6 +807,192 @@ function explodirReceita(produtoId, receitaId, qtdPlanejada) {
   };
 }
 
+function explodirReceitaDetalhada(produtoId, receitaId, qtdPlanejada) {
+  if (!produtoId || !receitaId) return { itens: [], custoPrevisto: 0 };
+
+  const sheetReceitas = getDataSpreadsheet().getSheetByName(ABA_PRODUTOS_RECEITAS);
+  if (!sheetReceitas) return { itens: [], custoPrevisto: 0 };
+
+  const receitas = rowsToObjects(sheetReceitas)
+    .filter(i => String(i.ativo).toLowerCase() === 'true');
+  const receita = receitas.find(r => r.receita_id === receitaId && r.produto_id === produtoId);
+  if (!receita) {
+    throw new Error('Receita nao encontrada');
+  }
+
+  const sheetEntradas = getDataSpreadsheet().getSheetByName(ABA_PRODUTOS_RECEITAS_ENTRADAS);
+  const entradas = sheetEntradas ? rowsToObjects(sheetEntradas) : [];
+
+  const entradasAtivas = entradas
+    .filter(i => String(i.ativo).toLowerCase() === 'true')
+    .filter(i => i.receita_id === receitaId);
+
+  const produtosSheet = getDataSpreadsheet().getSheetByName(ABA_PRODUTOS);
+  const produtosRows = produtosSheet ? rowsToObjects(produtosSheet) : [];
+  const produtosMap = {};
+  produtosRows
+    .filter(i => String(i.ativo).toLowerCase() === 'true')
+    .forEach(p => {
+      produtosMap[p.produto_id] = p;
+    });
+
+  const qtdPlanejadaNum = parseNumeroBR(qtdPlanejada);
+  if (!qtdPlanejadaNum || qtdPlanejadaNum <= 0) {
+    return { itens: [], custoPrevisto: 0 };
+  }
+
+  // A OP representa quantidade de modelos, entao cada linha da receita multiplica por qtdPlanejada.
+  const fator = qtdPlanejadaNum;
+
+  const sheetEstoque = getDataSpreadsheet().getSheetByName(ABA_ESTOQUE);
+  const estoqueRows = sheetEstoque ? rowsToObjects(sheetEstoque) : [];
+  const estoqueMap = {};
+  estoqueRows.forEach(i => {
+    estoqueMap[i.ID] = i;
+  });
+
+  const itensDetalhados = [];
+  let custoPrevisto = 0;
+
+  entradasAtivas.forEach(e => {
+    const tipo = String(e.tipo_item || '').toUpperCase();
+    const prodId = e.produto_ref_id || '';
+
+    let estoqueId = e.estoque_ref_id || '';
+    let itemNome = e.nome_item || '';
+    let unidade = e.unidade || '';
+    let valorUnit = parseNumeroBR(e.custo_manual);
+    let quantidade = 0;
+
+    const qtdBase = parseNumeroBR(e.qtd_pecas);
+    if (!qtdBase || qtdBase <= 0) return;
+
+    if (tipo === 'PRODUTO' && prodId) {
+      const prod = produtosMap[prodId] || null;
+      if (prod) {
+        itemNome = prod.nome_produto || itemNome || prodId;
+        unidade = prod.unidade_produto || unidade || 'UN';
+      }
+    }
+
+    if (tipo === 'MADEIRA') {
+      const comp = parseNumeroBR(e.comprimento_cm);
+      const larg = parseNumeroBR(e.largura_cm);
+      const esp = parseNumeroBR(e.espessura_cm);
+      const volumeM3 = (comp > 0 && larg > 0 && esp > 0)
+        ? ((comp * larg * esp) / 1000000)
+        : 1;
+      quantidade = qtdBase * volumeM3 * fator;
+      unidade = unidade || 'M3';
+    } else {
+      quantidade = qtdBase * fator;
+    }
+
+    const estoqueItem = estoqueId ? (estoqueMap[estoqueId] || null) : null;
+    if (estoqueItem) {
+      itemNome = estoqueItem.item || itemNome || estoqueId;
+      unidade = estoqueItem.unidade || unidade || '';
+      const valorEstoque = parseNumeroBR(estoqueItem.valor_unit);
+      if (valorEstoque > 0 || !valorUnit) {
+        valorUnit = valorEstoque;
+      }
+    }
+
+    if (!quantidade || quantidade <= 0) return;
+    if (!itemNome) {
+      itemNome = prodId || e.nome_item || `Item ${tipo || 'LIVRE'}`;
+    }
+
+    const quantidadeNorm = parseNumeroBR(quantidade);
+    const valorUnitNorm = parseNumeroBR(valorUnit);
+    const total = quantidadeNorm * valorUnitNorm;
+
+    itensDetalhados.push({
+      receita_entrada_id: e.id || '',
+      receita_id: receitaId,
+      estoque_id: estoqueId,
+      tipo_item: tipo,
+      origem_item: e.nome_item || itemNome,
+      item: itemNome,
+      unidade,
+      quantidade: quantidadeNorm,
+      valor_unit: valorUnitNorm,
+      total_previsto: total
+    });
+
+    custoPrevisto += total;
+  });
+
+  return {
+    itens: itensDetalhados,
+    custoPrevisto
+  };
+}
+
+function explodirSaidasReceitaDetalhada(produtoId, receitaId, qtdPlanejada) {
+  if (!produtoId || !receitaId) return { itens: [] };
+
+  const sheetReceitas = getDataSpreadsheet().getSheetByName(ABA_PRODUTOS_RECEITAS);
+  if (!sheetReceitas) return { itens: [] };
+
+  const receitas = rowsToObjects(sheetReceitas)
+    .filter(i => String(i.ativo).toLowerCase() === 'true');
+  const receita = receitas.find(r => r.receita_id === receitaId && r.produto_id === produtoId);
+  if (!receita) {
+    throw new Error('Receita nao encontrada');
+  }
+
+  const sheetSaidas = getDataSpreadsheet().getSheetByName(ABA_PRODUTOS_RECEITAS_SAIDAS);
+  const saidas = sheetSaidas ? rowsToObjects(sheetSaidas) : [];
+  const saidasAtivas = saidas
+    .filter(i => String(i.ativo).toLowerCase() === 'true')
+    .filter(i => i.receita_id === receitaId);
+
+  const produtosSheet = getDataSpreadsheet().getSheetByName(ABA_PRODUTOS);
+  const produto = produtosSheet
+    ? rowsToObjects(produtosSheet).find(i => i.produto_id === produtoId && String(i.ativo).toLowerCase() === 'true')
+    : null;
+  const nomeProduto = produto ? (produto.nome_produto || '') : '';
+
+  const qtdPlanejadaNum = parseNumeroBR(qtdPlanejada);
+  if (!qtdPlanejadaNum || qtdPlanejadaNum <= 0) {
+    return { itens: [] };
+  }
+
+  // A OP representa quantidade de modelos, entao cada saida multiplica por qtdPlanejada.
+  const fator = qtdPlanejadaNum;
+
+  const itens = [];
+  saidasAtivas.forEach(s => {
+    const qtdBase = parseNumeroBR(s.quantidade);
+    if (!qtdBase || qtdBase <= 0) return;
+
+    const nomeSaida = String(s.nome_saida || '').trim() || nomeProduto || 'Saida';
+    const quantidade = parseNumeroBR(qtdBase * fator);
+    if (!quantidade || quantidade <= 0) return;
+
+    itens.push({
+      receita_saida_id: s.id || '',
+      receita_id: receitaId,
+      nome_saida: nomeSaida,
+      unidade: s.unidade || '',
+      quantidade
+    });
+  });
+
+  return { itens };
+}
+
+function explodirReceita(produtoId, receitaId, qtdPlanejada) {
+  const detalhada = explodirReceitaDetalhada(produtoId, receitaId, qtdPlanejada);
+  const agrupada = agruparItensExplosaoPorEstoque(detalhada.itens || []);
+
+  return {
+    itens: agrupada.itens || [],
+    custoPrevisto: parseNumeroBR(agrupada.custoPrevisto)
+  };
+}
+
 function calcularCustoProduto(produtoId) {
   if (!produtoId) return 0;
   const receita = obterReceitaPadraoProduto(produtoId);
@@ -829,7 +1004,7 @@ function calcularCustoProduto(produtoId) {
 }
 
 function explodirBOM(produtoId, qtd) {
-  const sheetComponentes = SpreadsheetApp.getActive().getSheetByName(ABA_PRODUTOS_COMPONENTES);
+  const sheetComponentes = getDataSpreadsheet().getSheetByName(ABA_PRODUTOS_COMPONENTES);
   if (!sheetComponentes) return { itens: [], custoPrevisto: 0 };
 
   const allComponentes = rowsToObjects(sheetComponentes)
@@ -843,7 +1018,7 @@ function explodirBOM(produtoId, qtd) {
     componentesPorProduto[c.produto_id].push(c);
   });
 
-  const sheetEstoque = SpreadsheetApp.getActive().getSheetByName(ABA_ESTOQUE);
+  const sheetEstoque = getDataSpreadsheet().getSheetByName(ABA_ESTOQUE);
   const estoqueRows = sheetEstoque ? rowsToObjects(sheetEstoque) : [];
   const estoqueMap = {};
   estoqueRows
