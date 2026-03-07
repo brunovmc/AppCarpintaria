@@ -1,6 +1,7 @@
 <div id="filtroTipoRapidoEstoque" class="tipo-filtro-linha"></div>
 
 <div id="lista"></div>
+<div id="listaControlesEstoque" class="lista-controles"></div>
 
 <div id="formulario" class="form-modal" style="display:none; margin-top:32px;">
   <h2 id="formTitulo">Novo Item</h2>
@@ -79,6 +80,6 @@
     </div>
   </div>
 
-  <button onclick="EstoqueController.salvar()">Salvar</button>
+  <button id="btnSalvarEstoque" onclick="EstoqueController.salvar()">Salvar</button>
   <button onclick="EstoqueUI.fecharFormulario()">Cancelar</button>
 </div>

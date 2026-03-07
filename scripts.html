@@ -243,7 +243,7 @@
     EstoqueUI.renderLista(lista);
   }
 
-  const aplicarBuscaEstoqueDebounced = debounce(aplicarBuscaEstoque, 200);
+  const aplicarBuscaEstoqueDebounced = debounce(aplicarBuscaEstoque, 350);
 
   function aplicarBuscaCompras() {
     if (!comprasEstaAtivo()) return;
@@ -266,7 +266,7 @@
     ComprasUI.renderLista(lista);
   }
 
-  const aplicarBuscaComprasDebounced = debounce(aplicarBuscaCompras, 200);
+  const aplicarBuscaComprasDebounced = debounce(aplicarBuscaCompras, 350);
 
   function aplicarBuscaProdutos() {
     if (!produtosEstaAtivo()) return;
@@ -283,7 +283,7 @@
     ProdutosUI.renderLista(lista);
   }
 
-  const aplicarBuscaProdutosDebounced = debounce(aplicarBuscaProdutos, 200);
+  const aplicarBuscaProdutosDebounced = debounce(aplicarBuscaProdutos, 350);
 
   function aplicarBuscaProducao() {
     if (!producaoEstaAtivo()) return;
@@ -300,7 +300,7 @@
     ProducaoUI.renderLista(lista);
   }
 
-  const aplicarBuscaProducaoDebounced = debounce(aplicarBuscaProducao, 200);
+  const aplicarBuscaProducaoDebounced = debounce(aplicarBuscaProducao, 350);
 
   /* =========================
      PAINEL DE FILTRO (UI)

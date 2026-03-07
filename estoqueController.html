@@ -3,10 +3,19 @@
 
     let editandoId = null;
     let iniciado = false;
+    let salvando = false;
 
     let validacoes = null;
 
     let destinosProducao = [];
+
+    function setSalvando(ativo) {
+      salvando = !!ativo;
+      const btn = document.getElementById('btnSalvarEstoque');
+      if (!btn) return;
+      btn.disabled = salvando;
+      btn.textContent = salvando ? 'Salvando...' : 'Salvar';
+    }
 
     function init() {
       if (iniciado) return;
@@ -98,6 +107,8 @@
     }
 
     function salvar() {
+      if (salvando) return;
+
       const get = id => document.getElementById(id)?.value || '';
       const parseNumeroInput = valor => {
         const s = String(valor ?? '').trim();
@@ -139,20 +150,17 @@
         fornecedor: get('fornecedor'),
         valor_unit: parseNumeroInput(get('valor_unit')) || 0,
         observacao: get('observacao'),
-
         comprimento_cm,
         largura_cm,
         espessura_cm,
-
         potencia: get('potencia'),
         voltagem: get('voltagem'),
         comprado_em: get('comprado_em'),
         vida_util_mes: parseNumeroInput(get('vida_util_mes')) || ''
       };
 
-      /* =========
-         EDIÇÃO
-      ========= */
+      setSalvando(true);
+
       if (editandoId) {
         const idAtual = editandoId;
         const snapshot = { ...EstoqueStore.getById(idAtual) };
@@ -165,10 +173,12 @@
           .withFailureHandler(() => {
             EstoqueStore.update(idAtual, snapshot);
             EstoqueUI.renderLista(EstoqueStore.get());
-            mostrarToast('Erro ao salvar edição', 'erro');
+            mostrarToast('Erro ao salvar edicao', 'erro');
+            setSalvando(false);
           })
           .withSuccessHandler(() => {
             mostrarToast('Salvo com sucesso');
+            setSalvando(false);
           })
           .atualizarItemEstoque(idAtual, dados);
 
@@ -176,11 +186,7 @@
         return;
       }
 
-      /* =========
-         CRIAÇÃO
-      ========= */
       const tempId = `tmp_${Date.now()}`;
-
       const itemTemp = {
         ID: tempId,
         ...dados
@@ -196,21 +202,22 @@
           EstoqueStore.remove(tempId);
           EstoqueUI.renderLista(EstoqueStore.get());
           mostrarToast('Erro ao salvar item', 'erro');
+          setSalvando(false);
         })
         .withSuccessHandler(itemSalvo => {
-          // ✅ sempre remove o temporário
           EstoqueStore.remove(tempId);
 
-          // ✅ se o backend não devolveu objeto com ID, faz refetch (fallback robusto)
           if (!itemSalvo || !itemSalvo.ID) {
-            mostrarToast('Salvo. Atualizando lista…');
+            mostrarToast('Salvo. Atualizando lista...');
             carregarEstoque();
+            setSalvando(false);
             return;
           }
 
           EstoqueStore.add(itemSalvo);
           EstoqueUI.renderLista(EstoqueStore.get());
           mostrarToast('Salvo com sucesso');
+          setSalvando(false);
         })
         .criarItemEstoque(dados);
     }
@@ -224,7 +231,7 @@
       const item = EstoqueStore.getById(id);
 
       if (!item) {
-        mostrarToast('Item não encontrado', 'erro');
+        mostrarToast('Item nao encontrado', 'erro');
         return;
       }
 
@@ -297,3 +304,4 @@
 
   })();
 </script>
+

@@ -150,12 +150,19 @@ function updateById(sheetName, idField, id, payload, schema) {
   for (let i = 1; i < data.length; i++) {
     if (data[i][idCol] === id) {
       const headerMap = getHeaderMap(sheet);
+      const row = [...data[i]];
+      let alterou = false;
 
-      Object.keys(payload).forEach(key => {
+      Object.keys(payload || {}).forEach(key => {
         if (key in headerMap) {
-          sheet.getRange(i + 1, headerMap[key] + 1).setValue(payload[key]);
+          row[headerMap[key]] = payload[key];
+          alterou = true;
         }
       });
+
+      if (alterou) {
+        sheet.getRange(i + 1, 1, 1, row.length).setValues([row]);
+      }
 
       invalidarCachesRelacionadosAba(sheetName);
       return true;

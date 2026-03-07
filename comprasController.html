@@ -3,9 +3,18 @@
 
     let editandoId = null;
     let iniciado = false;
+    let salvando = false;
     const adicionandoAoEstoque = new Set();
 
     let validacoes = null;
+
+    function setSalvando(ativo) {
+      salvando = !!ativo;
+      const btn = document.getElementById('btnSalvarCompra');
+      if (!btn) return;
+      btn.disabled = salvando;
+      btn.textContent = salvando ? 'Salvando...' : 'Salvar';
+    }
 
     function init() {
       if (iniciado) return;
@@ -81,6 +90,8 @@
     }
 
     function salvar() {
+      if (salvando) return;
+
       const get = id => document.getElementById(id)?.value || '';
       const parseNumeroInput = valor => {
         const s = String(valor ?? '').trim();
@@ -128,16 +139,16 @@
         fornecedor: get('compraFornecedor'),
         valor_unit: parseNumeroInput(get('compraValorUnit')) || 0,
         observacao: get('compraObservacao'),
-
         comprimento_cm,
         largura_cm,
         espessura_cm,
-
         potencia: get('compraPotencia'),
         voltagem: get('compraVoltagem'),
         comprado_em: compradoEm,
         vida_util_mes: parseNumeroInput(get('compraVidaUtilMes')) || ''
       };
+
+      setSalvando(true);
 
       if (editandoId) {
         const idAtual = editandoId;
@@ -152,9 +163,11 @@
             ComprasStore.update(idAtual, snapshot);
             renderListaAtual();
             mostrarToast('Erro ao salvar edicao', 'erro');
+            setSalvando(false);
           })
           .withSuccessHandler(() => {
             mostrarToast('Salvo com sucesso');
+            setSalvando(false);
           })
           .atualizarItemCompra(idAtual, dados);
 
@@ -163,7 +176,6 @@
       }
 
       const tempId = `tmp_${Date.now()}`;
-
       const itemTemp = {
         ID: tempId,
         ...dados
@@ -179,6 +191,7 @@
           ComprasStore.remove(tempId);
           renderListaAtual();
           mostrarToast('Erro ao salvar compra', 'erro');
+          setSalvando(false);
         })
         .withSuccessHandler(itemSalvo => {
           ComprasStore.remove(tempId);
@@ -186,12 +199,14 @@
           if (!itemSalvo || !itemSalvo.ID) {
             mostrarToast('Salvo. Atualizando lista...');
             carregarCompras();
+            setSalvando(false);
             return;
           }
 
           ComprasStore.add(itemSalvo);
           renderListaAtual();
           mostrarToast('Salvo com sucesso');
+          setSalvando(false);
         })
         .criarItemCompra(dados);
     }

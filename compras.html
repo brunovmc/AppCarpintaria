@@ -1,6 +1,7 @@
 <div id="filtroTipoRapidoCompras" class="tipo-filtro-linha"></div>
 
 <div id="listaCompras"></div>
+<div id="listaControlesCompras" class="lista-controles"></div>
 
 <div id="formularioCompra" class="form-modal" style="display:none; margin-top:32px;">
   <h2 id="compraFormTitulo">Nova Compra</h2>
@@ -80,6 +81,6 @@
     </div>
   </div>
 
-  <button onclick="ComprasController.salvar()">Salvar</button>
+  <button id="btnSalvarCompra" onclick="ComprasController.salvar()">Salvar</button>
   <button onclick="ComprasUI.fecharFormulario()">Cancelar</button>
 </div>
