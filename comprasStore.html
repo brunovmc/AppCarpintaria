@@ -4,16 +4,79 @@
     let itens = [];
     let carregado = false;
 
+    function jaAdicionadaAoEstoque(item) {
+      return String(item?.adicionado_estoque ?? '').trim().toLowerCase() === 'true';
+    }
+
+    function extrairSequenciaId(id) {
+      const m = String(id || '').trim().match(/-(\d+)$/);
+      return m ? Number(m[1]) || 0 : 0;
+    }
+
+    function parseData(valor) {
+      if (!valor) return 0;
+      if (valor instanceof Date) return valor.getTime() || 0;
+
+      if (typeof valor === 'number' && Number.isFinite(valor)) {
+        return valor > 0 ? valor : 0;
+      }
+
+      const s = String(valor).trim();
+      if (!s) return 0;
+
+      // Aceita formatos comuns usados no app: yyyy-MM-dd e yyyy-MM-dd HH:mm
+      if (/^\d{4}-\d{2}-\d{2}( \d{2}:\d{2})?$/.test(s)) {
+        const iso = s.includes(' ') ? s.replace(' ', 'T') : `${s}T00:00`;
+        const t = Date.parse(iso);
+        if (!isNaN(t)) return t;
+      }
+
+      const t = Date.parse(s);
+      return isNaN(t) ? 0 : t;
+    }
+
+    function getOrdemTempo(item) {
+      const criadoEm = parseData(item?.criado_em);
+      if (criadoEm > 0) return criadoEm;
+
+      const compradoEm = parseData(item?.comprado_em);
+      if (compradoEm > 0) return compradoEm;
+
+      const seq = extrairSequenciaId(item?.ID);
+      return seq > 0 ? seq : 0;
+    }
+
+    function ordenarCompras(lista) {
+      return [...(Array.isArray(lista) ? lista : [])].sort((a, b) => {
+        // Pendentes primeiro, adicionadas depois.
+        const grupoA = jaAdicionadaAoEstoque(a) ? 1 : 0;
+        const grupoB = jaAdicionadaAoEstoque(b) ? 1 : 0;
+        if (grupoA !== grupoB) return grupoA - grupoB;
+
+        // Mais nova para mais antiga dentro do grupo.
+        const tempoA = getOrdemTempo(a);
+        const tempoB = getOrdemTempo(b);
+        if (tempoA !== tempoB) return tempoB - tempoA;
+
+        // Desempate por sequencia do ID (desc).
+        const seqA = extrairSequenciaId(a?.ID);
+        const seqB = extrairSequenciaId(b?.ID);
+        if (seqA !== seqB) return seqB - seqA;
+
+        return String(b?.ID || '').localeCompare(String(a?.ID || ''));
+      });
+    }
+
     /* =========================
        BASICO
     ========================== */
     function set(lista) {
-      itens = Array.isArray(lista) ? [...lista] : [];
+      itens = ordenarCompras(lista);
       carregado = true;
     }
 
     function get() {
-      return [...itens];
+      return ordenarCompras(itens);
     }
 
     function isLoaded() {
@@ -31,6 +94,7 @@
     function add(item) {
       if (!item || !item.ID) return;
       itens.unshift(item);
+      itens = ordenarCompras(itens);
     }
 
     function update(id, dados) {
@@ -41,6 +105,7 @@
         ...itens[idx],
         ...dados
       };
+      itens = ordenarCompras(itens);
     }
 
     function remove(id) {
@@ -78,7 +143,7 @@
         resultado = resultado.filter(i => i.categoria === categoria);
       }
 
-      return resultado;
+      return ordenarCompras(resultado);
     }
 
     /* =========================

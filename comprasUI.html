@@ -8,6 +8,7 @@
     let itensPorId = {};
     let qtdRenderizada = 0;
     let carregandoMais = false;
+    let indiceSeparadorAdicionadas = -1;
 
     const PAGE_SIZE = 30;
 
@@ -60,6 +61,24 @@
       if (s === '') return 0;
       const n = Number(s.replace(',', '.'));
       return isNaN(n) ? 0 : n;
+    }
+
+    function compraJaAdicionadaAoEstoque(item) {
+      return String(item?.adicionado_estoque ?? '').trim().toLowerCase() === 'true';
+    }
+
+    function calcularIndiceSeparadorAdicionadas(lista) {
+      const arr = Array.isArray(lista) ? lista : [];
+      const idxPrimeiraAdicionada = arr.findIndex(item => compraJaAdicionadaAoEstoque(item));
+      if (idxPrimeiraAdicionada <= 0) return -1;
+      return idxPrimeiraAdicionada;
+    }
+
+    function criarSeparadorAdicionadas() {
+      const div = document.createElement('div');
+      div.className = 'compras-separador-grupo';
+      div.textContent = 'Ja adicionadas ao estoque';
+      return div;
     }
 
     function normalizarMapaCategoriasPorTipo(mapa) {
@@ -138,6 +157,9 @@
        FORMULARIO
     ========================== */
     function abrirFormularioNovo() {
+      if (window.ComprasController?.limparEdicao) {
+        ComprasController.limparEdicao();
+      }
       resetFormulario();
       mostrarFormulario();
     }
@@ -165,6 +187,12 @@
       }
     }
 
+    function definirTituloFormulario(titulo) {
+      const { formTitulo } = el();
+      if (!formTitulo) return;
+      formTitulo.innerText = String(titulo || 'Nova Compra');
+    }
+
     function preencherFormulario(data) {
       const f = el();
 
@@ -189,7 +217,7 @@
       if (f.comprado_em) f.comprado_em.value = data.comprado_em || '';
       if (f.vida_util_mes) f.vida_util_mes.value = data.vida_util_mes || '';
 
-      if (f.formTitulo) f.formTitulo.innerText = 'Editar Compra';
+      definirTituloFormulario('Editar Compra');
       handleTipoChange();
     }
 
@@ -218,7 +246,7 @@
       if (f.madeiraFields) f.madeiraFields.classList.add('hidden');
       if (f.quantidade) f.quantidade.readOnly = false;
       renderCategoriasDoTipo('', '');
-      if (f.formTitulo) f.formTitulo.innerText = 'Nova Compra';
+      definirTituloFormulario('Nova Compra');
     }
 
     function handleTipoChange() {
@@ -334,6 +362,7 @@
       div.className = 'card';
       div.dataset.id = i.ID;
       const isMadeira = String(i.tipo || '').toUpperCase() === 'MADEIRA';
+      const status = compraJaAdicionadaAoEstoque(i) ? 'Ja adicionada ao estoque' : 'Pendente para estoque';
 
       div.innerHTML = `
         <div class="card-resumo">
@@ -341,6 +370,7 @@
           ${i.tipo} > ${i.categoria || '-'}<br>
           ${i.quantidade || 0} ${i.unidade || ''}
           ${isMadeira ? `<br><span>(${i.comprimento_cm || '-'} x ${i.largura_cm || '-'} x ${i.espessura_cm || '-'}) cm</span>` : ''}
+          <br><span>${status}</span>
         </div>
 
         <button class="ver-mais">Ver mais</button>
@@ -356,8 +386,16 @@
 
     function montarDetalhesCard(i) {
       const isMadeira = String(i.tipo || '').toUpperCase() === 'MADEIRA';
+      const jaAdicionada = compraJaAdicionadaAoEstoque(i);
+      const status = jaAdicionada
+        ? `Ja adicionada ao estoque${i.estoque_id ? ` (ID: ${i.estoque_id})` : ''}`
+        : 'Pendente para estoque';
+      const botaoAdicionarAoEstoque = jaAdicionada
+        ? ''
+        : `<button onclick="ComprasController.adicionarAoEstoque('${i.ID}')">Adicionar ao estoque</button>`;
       return `
         <p><b>Fornecedor:</b> ${i.fornecedor || '-'}</p>
+        <p><b>Status:</b> ${status}</p>
         <p><b>Comprado em:</b> ${i.comprado_em || '-'}</p>
         <p><b>Valor unitario:</b> R$ ${Number(i.valor_unit || 0).toFixed(2)}</p>
         <p><b>Observacao:</b> ${i.observacao || '-'}</p>
@@ -372,7 +410,8 @@
         ` : ''}
 
         <div class="acoes">
-          <button onclick="ComprasController.adicionarAoEstoque('${i.ID}')">Adicionar ao estoque</button>
+          ${botaoAdicionarAoEstoque}
+          <button onclick="ComprasController.refazer('${i.ID}')">Refazer compra</button>
           <button onclick="ComprasController.editar('${i.ID}')">Editar</button>
           <button onclick="ComprasController.excluir('${i.ID}')">Excluir</button>
         </div>
@@ -429,12 +468,14 @@
       carregandoMais = true;
       const inicio = qtdRenderizada;
       const fim = Math.min(inicio + PAGE_SIZE, listaFiltradaAtual.length);
-      const fatia = listaFiltradaAtual.slice(inicio, fim);
       const fragment = document.createDocumentFragment();
 
-      fatia.forEach(i => {
-        fragment.appendChild(montarCardResumo(i));
-      });
+      for (let idx = inicio; idx < fim; idx++) {
+        if (idx === indiceSeparadorAdicionadas) {
+          fragment.appendChild(criarSeparadorAdicionadas());
+        }
+        fragment.appendChild(montarCardResumo(listaFiltradaAtual[idx]));
+      }
 
       lista.appendChild(fragment);
       qtdRenderizada = fim;
@@ -506,6 +547,7 @@
       construirIndiceItens(listaFiltradaAtual);
       qtdRenderizada = 0;
       carregandoMais = false;
+      indiceSeparadorAdicionadas = calcularIndiceSeparadorAdicionadas(listaFiltradaAtual);
 
       if (listaFiltradaAtual.length === 0) {
         lista.innerHTML = '<p>Nenhum item em compras.</p>';
@@ -581,7 +623,8 @@
       renderFornecedores,
       renderFiltroRapidoTipos,
       marcarTipoRapidoAtivo,
-      atualizarQuantidadeMadeira
+      atualizarQuantidadeMadeira,
+      definirTituloFormulario
     };
 
   })();

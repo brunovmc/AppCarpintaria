@@ -2,11 +2,20 @@
   window.ComprasController = (() => {
 
     let editandoId = null;
+    let origemRefazerId = null;
     let iniciado = false;
     let salvando = false;
     const adicionandoAoEstoque = new Set();
 
     let validacoes = null;
+
+    function getDataHojeISO() {
+      const agora = new Date();
+      const yyyy = agora.getFullYear();
+      const mm = String(agora.getMonth() + 1).padStart(2, '0');
+      const dd = String(agora.getDate()).padStart(2, '0');
+      return `${yyyy}-${mm}-${dd}`;
+    }
 
     function setSalvando(ativo) {
       salvando = !!ativo;
@@ -148,6 +157,10 @@
         vida_util_mes: parseNumeroInput(get('compraVidaUtilMes')) || ''
       };
 
+      if (!editandoId && origemRefazerId) {
+        dados.origem_compra_id = origemRefazerId;
+      }
+
       setSalvando(true);
 
       if (editandoId) {
@@ -172,6 +185,7 @@
           .atualizarItemCompra(idAtual, dados);
 
         editandoId = null;
+        origemRefazerId = null;
         return;
       }
 
@@ -225,7 +239,34 @@
       }
 
       editandoId = id;
+      origemRefazerId = null;
       ComprasUI.preencherFormulario(item);
+      ComprasUI.mostrarFormulario();
+    }
+
+    function refazer(id) {
+      const item = ComprasStore.getById(id);
+
+      if (!item) {
+        mostrarToast('Compra nao encontrada', 'erro');
+        return;
+      }
+
+      const clone = {
+        ...item,
+        comprado_em: getDataHojeISO(),
+        adicionado_estoque: false,
+        estoque_id: '',
+        origem_compra_id: ''
+      };
+
+      delete clone.ID;
+      delete clone.criado_em;
+
+      editandoId = null;
+      origemRefazerId = id;
+      ComprasUI.preencherFormulario(clone);
+      ComprasUI.definirTituloFormulario('Revise a nova compra');
       ComprasUI.mostrarFormulario();
     }
 
@@ -257,20 +298,27 @@
         return;
       }
 
+      const jaAdicionada = String(snapshot.adicionado_estoque).toLowerCase() === 'true';
+      if (jaAdicionada) {
+        mostrarToast('Compra ja adicionada ao estoque', 'erro');
+        return;
+      }
+
       adicionandoAoEstoque.add(id);
-      ComprasStore.remove(id);
-      renderListaAtual();
       mostrarToast('Adicionando ao estoque...');
 
       google.script.run
         .withFailureHandler(() => {
           adicionandoAoEstoque.delete(id);
-          ComprasStore.add(snapshot);
-          renderListaAtual();
           mostrarToast('Erro ao adicionar ao estoque', 'erro');
         })
         .withSuccessHandler(resp => {
           adicionandoAoEstoque.delete(id);
+          ComprasStore.update(id, {
+            adicionado_estoque: true,
+            estoque_id: resp?.compraAtualizada?.estoque_id || resp?.itemEstoqueCriado?.ID || ''
+          });
+          renderListaAtual();
           if (resp?.itemEstoqueCriado && window.EstoqueStore) {
             // Se o estoque ainda nao foi carregado, add nao liga o flag isLoaded.
             const atual = EstoqueStore.isLoaded() ? EstoqueStore.get() : [];
@@ -291,12 +339,14 @@
 
     function limparEdicao() {
       editandoId = null;
+      origemRefazerId = null;
     }
 
     return {
       init,
       salvar,
       editar,
+      refazer,
       excluir,
       adicionarAoEstoque,
       limparEdicao

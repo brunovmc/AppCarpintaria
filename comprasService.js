@@ -1,5 +1,5 @@
 const ABA_COMPRAS = 'COMPRAS';
-const COMPRAS_CACHE_SCOPE = 'COMPRAS_LISTA_ATIVAS_PENDENTES';
+const COMPRAS_CACHE_SCOPE = 'COMPRAS_LISTA_ATIVAS';
 const COMPRAS_CACHE_TTL_SEC = 90;
 
 const COMPRAS_SCHEMA = [
@@ -22,7 +22,8 @@ const COMPRAS_SCHEMA = [
   'vida_util_mes',
   'observacao',
   'adicionado_estoque',
-  'estoque_id'
+  'estoque_id',
+  'origem_compra_id'
 ];
 
 function categoriaValidaParaTipoCompra(tipo, categoria) {
@@ -109,7 +110,6 @@ function listarCompras(forcarRecarregar) {
 
   const lista = rows
     .filter(i => String(i.ativo).toLowerCase() === 'true')
-    .filter(i => String(i.adicionado_estoque).toLowerCase() !== 'true')
     .map(i => ({
       ...i,
       criado_em: i.criado_em
@@ -130,7 +130,8 @@ function criarItemCompra(payload) {
     ID: gerarId('COM'),
     ativo: true,
     criado_em: new Date(),
-    adicionado_estoque: false
+    adicionado_estoque: false,
+    origem_compra_id: dados.origem_compra_id || ''
   };
 
   return insert(ABA_COMPRAS, novo, COMPRAS_SCHEMA);
