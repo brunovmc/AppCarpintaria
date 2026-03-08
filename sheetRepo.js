@@ -68,8 +68,31 @@ function invalidarCachesRelacionadosAba(sheetName) {
     limparCacheCompras();
   }
 
+  if (aba === 'DESPESAS_GERAIS' && typeof limparCacheDespesasGerais === 'function') {
+    limparCacheDespesasGerais();
+  }
+
+  if (aba === 'PAGAMENTOS') {
+    if (typeof limparCachePagamentos === 'function') {
+      limparCachePagamentos();
+    }
+    if (typeof limparCacheCompras === 'function') {
+      limparCacheCompras();
+    }
+    if (typeof limparCacheDespesasGerais === 'function') {
+      limparCacheDespesasGerais();
+    }
+  }
+
   if ((aba === 'VALIDACAO' || aba === 'VALIDACAO_TIPO_CATEGORIA') && typeof limparCacheValidacoes === 'function') {
     limparCacheValidacoes();
+  }
+
+  if (
+    (aba === 'ESTOQUE' || aba === 'COMPRAS' || aba === 'DESPESAS_GERAIS' || aba === 'PAGAMENTOS') &&
+    typeof limparCacheDashboardFinanceiro === 'function'
+  ) {
+    limparCacheDashboardFinanceiro();
   }
 }
 

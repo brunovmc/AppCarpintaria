@@ -1,0 +1,488 @@
+<script>
+  window.DashboardController = (() => {
+    let iniciado = false;
+    let validacoes = {};
+    let despesas = [];
+    let salvandoDespesa = false;
+    let despesaPagamentoId = null;
+    let salvandoPagamentoDespesa = false;
+
+    function el() {
+      return {
+        mesReferencia: document.getElementById('dashMesReferencia'),
+        cards: document.getElementById('dashboardCards'),
+        gastoPorTipo: document.getElementById('dashGastoPorTipo'),
+        gastoPorCategoria: document.getElementById('dashGastoPorCategoria'),
+        gastoPorFornecedor: document.getElementById('dashGastoPorFornecedor'),
+        estoquePorTipo: document.getElementById('dashEstoquePorTipo'),
+        evolucaoMensal: document.getElementById('dashEvolucaoMensal'),
+
+        listaDespesas: document.getElementById('listaDespesasGerais'),
+        formDespesa: document.getElementById('formularioDespesaGeral'),
+        btnSalvarDespesa: document.getElementById('btnSalvarDespesaGeral'),
+
+        despesaDescricao: document.getElementById('despesaDescricao'),
+        despesaCategoria: document.getElementById('despesaCategoria'),
+        despesaFornecedor: document.getElementById('despesaFornecedor'),
+        despesaValorTotal: document.getElementById('despesaValorTotal'),
+        despesaDataCompetencia: document.getElementById('despesaDataCompetencia'),
+        despesaDataVencimento: document.getElementById('despesaDataVencimento'),
+        despesaFormaPadrao: document.getElementById('despesaFormaPadrao'),
+        despesaObservacao: document.getElementById('despesaObservacao'),
+
+        modalPagamentoDespesa: document.getElementById('modalPagamentoDespesa'),
+        pagDespesaTitulo: document.getElementById('pagDespesaTitulo'),
+        pagDespesaData: document.getElementById('pagDespesaData'),
+        pagDespesaValor: document.getElementById('pagDespesaValor'),
+        pagDespesaForma: document.getElementById('pagDespesaForma'),
+        pagDespesaObservacao: document.getElementById('pagDespesaObservacao'),
+        btnConfirmarPagDespesa: document.getElementById('btnConfirmarPagDespesa')
+      };
+    }
+
+    function getHojeISO() {
+      const d = new Date();
+      const yyyy = d.getFullYear();
+      const mm = String(d.getMonth() + 1).padStart(2, '0');
+      const dd = String(d.getDate()).padStart(2, '0');
+      return `${yyyy}-${mm}-${dd}`;
+    }
+
+    function getMesAtualISO() {
+      const d = new Date();
+      const yyyy = d.getFullYear();
+      const mm = String(d.getMonth() + 1).padStart(2, '0');
+      return `${yyyy}-${mm}`;
+    }
+
+    function parseNumeroInput(valor) {
+      const s = String(valor ?? '').trim();
+      if (!s) return 0;
+      const n = Number(s.replace(',', '.'));
+      return isNaN(n) ? 0 : n;
+    }
+
+    function formatarMoeda(valor) {
+      const n = Number(valor || 0);
+      const seguro = isNaN(n) ? 0 : n;
+      return `R$ ${seguro.toFixed(2)}`;
+    }
+
+    function escapeHtml(valor) {
+      return String(valor ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    function renderSelect(selectEl, valores, placeholder = 'Selecione') {
+      if (!selectEl || selectEl.tagName !== 'SELECT') return;
+
+      const lista = (Array.isArray(valores) ? valores : [])
+        .map(v => String(v || '').trim())
+        .filter(v => v !== '');
+      const atual = String(selectEl.value || '').trim().toUpperCase();
+
+      selectEl.innerHTML = '';
+      const o0 = document.createElement('option');
+      o0.value = '';
+      o0.textContent = placeholder;
+      selectEl.appendChild(o0);
+
+      lista.forEach(v => {
+        const o = document.createElement('option');
+        o.value = v;
+        o.textContent = v;
+        selectEl.appendChild(o);
+      });
+
+      const match = [...selectEl.options].find(o => String(o.value || '').trim().toUpperCase() === atual);
+      selectEl.value = match ? match.value : '';
+    }
+
+    function carregarValidacoes(onDone) {
+      google.script.run
+        .withSuccessHandler(data => {
+          validacoes = data || {};
+          validacoes.categorias ||= [];
+          validacoes.fornecedores ||= [];
+          validacoes.formasPagamento ||= [];
+
+          const f = el();
+          renderSelect(f.despesaCategoria, validacoes.categorias);
+          renderSelect(f.despesaFornecedor, validacoes.fornecedores);
+          renderSelect(f.despesaFormaPadrao, validacoes.formasPagamento);
+          renderSelect(f.pagDespesaForma, validacoes.formasPagamento);
+
+          if (typeof onDone === 'function') onDone();
+        })
+        .withFailureHandler(() => {
+          mostrarToast('Falha ao carregar validacoes', 'erro');
+          if (typeof onDone === 'function') onDone();
+        })
+        .obterValidacoes();
+    }
+
+    function init() {
+      if (!iniciado) {
+        const f = el();
+        if (f.mesReferencia && !f.mesReferencia.value) {
+          f.mesReferencia.value = getMesAtualISO();
+        }
+        if (f.despesaDataCompetencia && !f.despesaDataCompetencia.value) {
+          f.despesaDataCompetencia.value = getHojeISO();
+        }
+
+        carregarValidacoes(() => {
+          atualizar();
+        });
+        iniciado = true;
+        return;
+      }
+
+      atualizar();
+    }
+
+    function renderListaAgregada(container, itens) {
+      if (!container) return;
+      const lista = Array.isArray(itens) ? itens : [];
+      if (lista.length === 0) {
+        container.innerHTML = '<p class="dash-empty">Sem dados no periodo.</p>';
+        return;
+      }
+
+      container.innerHTML = lista.map(i => `
+        <div class="dash-lista-linha">
+          <span>${escapeHtml(i.label || '-')}</span>
+          <strong>${formatarMoeda(i.valor || 0)}</strong>
+        </div>
+      `).join('');
+    }
+
+    function renderEvolucaoMensal(container, itens) {
+      if (!container) return;
+      const lista = Array.isArray(itens) ? itens : [];
+      if (lista.length === 0) {
+        container.innerHTML = '<p class="dash-empty">Sem dados de pagamentos.</p>';
+        return;
+      }
+
+      container.innerHTML = lista.map(i => `
+        <div class="dash-lista-linha">
+          <span>${escapeHtml(i.mes || '-')}</span>
+          <strong>${formatarMoeda(i.valor || 0)}</strong>
+        </div>
+      `).join('');
+    }
+
+    function renderCards(cards, referencia) {
+      const f = el();
+      if (!f.cards) return;
+      const c = cards || {};
+      f.cards.innerHTML = `
+        <div class="dash-card">
+          <div class="dash-card-label">Referencia</div>
+          <div class="dash-card-valor">${escapeHtml(referencia || '-')}</div>
+        </div>
+        <div class="dash-card">
+          <div class="dash-card-label">Pago no mes</div>
+          <div class="dash-card-valor">${formatarMoeda(c.gasto_pago_mes || 0)}</div>
+        </div>
+        <div class="dash-card">
+          <div class="dash-card-label">Pendente total</div>
+          <div class="dash-card-valor">${formatarMoeda(c.pendente_total || 0)}</div>
+        </div>
+        <div class="dash-card">
+          <div class="dash-card-label">Vencido</div>
+          <div class="dash-card-valor">${formatarMoeda(c.vencido_total || 0)}</div>
+        </div>
+        <div class="dash-card">
+          <div class="dash-card-label">A vencer (7 dias)</div>
+          <div class="dash-card-valor">${formatarMoeda(c.avencer_7_dias || 0)}</div>
+        </div>
+        <div class="dash-card">
+          <div class="dash-card-label">Valor em estoque</div>
+          <div class="dash-card-valor">${formatarMoeda(c.valor_estoque_total || 0)}</div>
+        </div>
+        <div class="dash-card">
+          <div class="dash-card-label">Itens ativos em estoque</div>
+          <div class="dash-card-valor">${Number(c.quantidade_itens_estoque || 0)}</div>
+        </div>
+      `;
+    }
+
+    function carregarResumo() {
+      const f = el();
+      const referencia = String(f.mesReferencia?.value || getMesAtualISO()).trim() || getMesAtualISO();
+
+      google.script.run
+        .withSuccessHandler(resumo => {
+          renderCards(resumo?.cards || {}, resumo?.referencia || referencia);
+          renderListaAgregada(f.gastoPorTipo, resumo?.agregados?.gasto_por_tipo);
+          renderListaAgregada(f.gastoPorCategoria, resumo?.agregados?.gasto_por_categoria);
+          renderListaAgregada(f.gastoPorFornecedor, resumo?.agregados?.gasto_por_fornecedor);
+          renderListaAgregada(f.estoquePorTipo, resumo?.agregados?.valor_estoque_por_tipo);
+          renderEvolucaoMensal(f.evolucaoMensal, resumo?.evolucao_mensal);
+        })
+        .withFailureHandler(() => {
+          mostrarToast('Erro ao carregar dashboard', 'erro');
+        })
+        .obterResumoDashboardFinanceiro(referencia);
+    }
+
+    function atualizar() {
+      carregarResumo();
+      carregarDespesas();
+    }
+
+    function limparFormularioDespesa() {
+      const f = el();
+      if (f.despesaDescricao) f.despesaDescricao.value = '';
+      if (f.despesaCategoria) f.despesaCategoria.value = '';
+      if (f.despesaFornecedor) f.despesaFornecedor.value = '';
+      if (f.despesaValorTotal) f.despesaValorTotal.value = '';
+      if (f.despesaDataCompetencia) f.despesaDataCompetencia.value = getHojeISO();
+      if (f.despesaDataVencimento) f.despesaDataVencimento.value = '';
+      if (f.despesaFormaPadrao) f.despesaFormaPadrao.value = '';
+      if (f.despesaObservacao) f.despesaObservacao.value = '';
+    }
+
+    function abrirFormularioDespesa() {
+      const f = el();
+      if (!f.formDespesa) return;
+      limparFormularioDespesa();
+      f.formDespesa.classList.remove('hidden');
+      f.formDespesa.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
+    function cancelarFormularioDespesa() {
+      const f = el();
+      if (!f.formDespesa) return;
+      f.formDespesa.classList.add('hidden');
+      limparFormularioDespesa();
+    }
+
+    function setSalvandoDespesa(ativo) {
+      salvandoDespesa = !!ativo;
+      const f = el();
+      if (f.btnSalvarDespesa) {
+        f.btnSalvarDespesa.disabled = salvandoDespesa;
+        f.btnSalvarDespesa.textContent = salvandoDespesa ? 'Salvando...' : 'Salvar despesa';
+      }
+    }
+
+    function salvarDespesa() {
+      if (salvandoDespesa) return;
+      const f = el();
+
+      const descricao = String(f.despesaDescricao?.value || '').trim();
+      const valorTotal = parseNumeroInput(f.despesaValorTotal?.value);
+      if (!descricao) {
+        mostrarToast('Descricao da despesa e obrigatoria', 'erro');
+        return;
+      }
+      if (!isFinite(valorTotal) || valorTotal <= 0) {
+        mostrarToast('Valor total invalido', 'erro');
+        return;
+      }
+
+      const payload = {
+        descricao,
+        categoria: String(f.despesaCategoria?.value || '').trim(),
+        fornecedor: String(f.despesaFornecedor?.value || '').trim(),
+        valor_total: valorTotal,
+        data_competencia: String(f.despesaDataCompetencia?.value || '').trim(),
+        data_vencimento: String(f.despesaDataVencimento?.value || '').trim(),
+        forma_pagamento_padrao: String(f.despesaFormaPadrao?.value || '').trim(),
+        observacao: String(f.despesaObservacao?.value || '').trim()
+      };
+
+      setSalvandoDespesa(true);
+      google.script.run
+        .withFailureHandler(err => {
+          setSalvandoDespesa(false);
+          mostrarToast(err?.message || 'Erro ao salvar despesa', 'erro');
+        })
+        .withSuccessHandler(() => {
+          setSalvandoDespesa(false);
+          cancelarFormularioDespesa();
+          mostrarToast('Despesa salva');
+          atualizar();
+        })
+        .criarDespesaGeral(payload);
+    }
+
+    function carregarDespesas() {
+      google.script.run
+        .withFailureHandler(() => {
+          mostrarToast('Erro ao carregar despesas gerais', 'erro');
+        })
+        .withSuccessHandler(lista => {
+          despesas = Array.isArray(lista) ? lista : [];
+          renderDespesas();
+        })
+        .listarDespesasGerais();
+    }
+
+    function renderDespesas() {
+      const f = el();
+      if (!f.listaDespesas) return;
+      if (!Array.isArray(despesas) || despesas.length === 0) {
+        f.listaDespesas.innerHTML = '<p>Nenhuma despesa geral cadastrada.</p>';
+        return;
+      }
+
+      f.listaDespesas.innerHTML = despesas.map(d => {
+        const pendente = Number(d.total_pendente || 0);
+        const podePagar = pendente > 0.009;
+        return `
+          <div class="card">
+            <div class="card-resumo">
+              <strong>${escapeHtml(d.descricao || '-')}</strong><br>
+              ${escapeHtml(d.categoria || 'SEM_CATEGORIA')} | ${escapeHtml(d.fornecedor || 'SEM_FORNECEDOR')}<br>
+              Previsto: ${formatarMoeda(d.total_previsto || 0)} | Pago: ${formatarMoeda(d.total_pago || 0)} | Pendente: ${formatarMoeda(d.total_pendente || 0)}<br>
+              Status: ${escapeHtml(d.status_pagamento || 'PENDENTE')} | Vencimento: ${escapeHtml(d.data_vencimento || '-')}
+            </div>
+            <div class="acoes">
+              ${podePagar ? `<button onclick="DashboardController.registrarPagamentoDespesa('${escapeHtml(d.ID)}')">Registrar pagamento</button>` : ''}
+              <button onclick="DashboardController.excluirDespesa('${escapeHtml(d.ID)}')">Excluir</button>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function excluirDespesa(id) {
+      const despesaId = String(id || '').trim();
+      if (!despesaId) return;
+      if (!confirm('Deseja remover esta despesa geral?')) return;
+
+      google.script.run
+        .withFailureHandler(() => {
+          mostrarToast('Erro ao remover despesa', 'erro');
+        })
+        .withSuccessHandler(() => {
+          mostrarToast('Despesa removida');
+          atualizar();
+        })
+        .deletarDespesaGeral(despesaId);
+    }
+
+    function setSalvandoPagamentoDespesa(ativo) {
+      salvandoPagamentoDespesa = !!ativo;
+      const f = el();
+      [f.pagDespesaData, f.pagDespesaValor, f.pagDespesaForma, f.pagDespesaObservacao, f.btnConfirmarPagDespesa]
+        .forEach(input => {
+          if (input) input.disabled = salvandoPagamentoDespesa;
+        });
+      if (f.btnConfirmarPagDespesa) {
+        f.btnConfirmarPagDespesa.textContent = salvandoPagamentoDespesa
+          ? 'Salvando...'
+          : 'Confirmar pagamento';
+      }
+    }
+
+    function registrarPagamentoDespesa(id) {
+      if (salvandoPagamentoDespesa) return;
+      const despesaId = String(id || '').trim();
+      const item = despesas.find(d => String(d.ID || '').trim() === despesaId);
+      if (!item) {
+        mostrarToast('Despesa nao encontrada', 'erro');
+        return;
+      }
+
+      const pendente = Number(item.total_pendente || 0);
+      if (pendente <= 0.009) {
+        mostrarToast('Despesa ja esta paga');
+        return;
+      }
+
+      const formas = Array.isArray(validacoes?.formasPagamento) ? validacoes.formasPagamento : [];
+      if (formas.length === 0) {
+        mostrarToast('Cadastre FORMA_PAGAMENTO na aba VALIDACAO', 'erro');
+        return;
+      }
+
+      const f = el();
+      despesaPagamentoId = despesaId;
+      if (f.pagDespesaTitulo) {
+        f.pagDespesaTitulo.textContent = `Registrar pagamento: ${item.descricao || despesaId}`;
+      }
+      if (f.pagDespesaData) f.pagDespesaData.value = getHojeISO();
+      if (f.pagDespesaValor) f.pagDespesaValor.value = pendente.toFixed(2);
+      if (f.pagDespesaForma) f.pagDespesaForma.value = item.forma_pagamento_padrao || '';
+      if (f.pagDespesaObservacao) f.pagDespesaObservacao.value = '';
+      if (f.modalPagamentoDespesa) f.modalPagamentoDespesa.classList.remove('hidden');
+      setSalvandoPagamentoDespesa(false);
+    }
+
+    function confirmarPagamentoDespesa() {
+      if (salvandoPagamentoDespesa) return;
+      if (!despesaPagamentoId) {
+        mostrarToast('Despesa nao selecionada', 'erro');
+        return;
+      }
+
+      const f = el();
+      const dataPagamento = String(f.pagDespesaData?.value || '').trim();
+      const valorPago = parseNumeroInput(f.pagDespesaValor?.value);
+      const formaPagamento = String(f.pagDespesaForma?.value || '').trim();
+      const observacao = String(f.pagDespesaObservacao?.value || '').trim();
+
+      if (!dataPagamento) {
+        mostrarToast('Data de pagamento e obrigatoria', 'erro');
+        return;
+      }
+      if (!formaPagamento) {
+        mostrarToast('Forma de pagamento e obrigatoria', 'erro');
+        return;
+      }
+      if (!isFinite(valorPago) || valorPago <= 0) {
+        mostrarToast('Valor pago invalido', 'erro');
+        return;
+      }
+
+      setSalvandoPagamentoDespesa(true);
+      google.script.run
+        .withFailureHandler(err => {
+          setSalvandoPagamentoDespesa(false);
+          mostrarToast(err?.message || 'Erro ao registrar pagamento', 'erro');
+        })
+        .withSuccessHandler(() => {
+          setSalvandoPagamentoDespesa(false);
+          cancelarPagamentoDespesa();
+          mostrarToast('Pagamento registrado');
+          atualizar();
+        })
+        .registrarPagamentoDespesaGeral(despesaPagamentoId, {
+          data_pagamento: dataPagamento,
+          valor_pago: valorPago,
+          forma_pagamento: formaPagamento,
+          observacao
+        });
+    }
+
+    function cancelarPagamentoDespesa() {
+      despesaPagamentoId = null;
+      setSalvandoPagamentoDespesa(false);
+      const f = el();
+      if (f.modalPagamentoDespesa) {
+        f.modalPagamentoDespesa.classList.add('hidden');
+      }
+    }
+
+    return {
+      init,
+      atualizar,
+      abrirFormularioDespesa,
+      cancelarFormularioDespesa,
+      salvarDespesa,
+      excluirDespesa,
+      registrarPagamentoDespesa,
+      confirmarPagamentoDespesa,
+      cancelarPagamentoDespesa
+    };
+  })();
+</script>

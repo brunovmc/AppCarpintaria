@@ -66,6 +66,16 @@
     <input id="compraCompradoEm" type="date" required>
   </div>
 
+  <div class="campo-ajuda-wrap">
+    <span class="campo-ajuda-tag">Vencimento</span>
+    <input id="compraDataVencimento" type="date">
+  </div>
+
+  <div class="campo-ajuda-wrap">
+    <span class="campo-ajuda-tag">Forma pagamento padrao</span>
+    <select id="compraFormaPagamentoPadrao"></select>
+  </div>
+
   <div id="compraEquipamentoFields" class="hidden">
     <div class="campo-ajuda-wrap">
       <span class="campo-ajuda-tag">Potencia</span>
@@ -83,4 +93,33 @@
 
   <button id="btnSalvarCompra" onclick="ComprasController.salvar()">Salvar</button>
   <button onclick="ComprasUI.fecharFormulario()">Cancelar</button>
+</div>
+
+<div id="modalPagamentoCompra" class="modal hidden">
+  <div class="modal-content">
+    <h3 id="pagamentoCompraTitulo">Registrar pagamento</h3>
+
+    <div class="campo-ajuda-wrap">
+      <span class="campo-ajuda-tag">Data de pagamento</span>
+      <input id="pagamentoCompraData" type="date">
+    </div>
+
+    <div class="campo-ajuda-wrap">
+      <span class="campo-ajuda-tag">Valor pago (R$)</span>
+      <input id="pagamentoCompraValor" type="number" step="0.01" min="0">
+    </div>
+
+    <div class="campo-ajuda-wrap">
+      <span class="campo-ajuda-tag">Forma de pagamento</span>
+      <select id="pagamentoCompraForma"></select>
+    </div>
+
+    <div class="campo-ajuda-wrap">
+      <span class="campo-ajuda-tag">Observacao</span>
+      <textarea id="pagamentoCompraObservacao"></textarea>
+    </div>
+
+    <button id="btnConfirmarPagamentoCompra" onclick="ComprasController.confirmarPagamentoCompra()">Confirmar pagamento</button>
+    <button onclick="ComprasController.cancelarPagamentoCompra()">Cancelar</button>
+  </div>
 </div>

@@ -30,6 +30,10 @@
       aplicarBuscaEstoque(); // reaplica filtros ao voltar pra aba
     }
 
+    if (nome === 'dashboard' && window.DashboardController) {
+      DashboardController.init();
+    }
+
     if (nome === 'compras' && window.ComprasController) {
       ComprasController.init();
       aplicarBuscaCompras();
@@ -51,11 +55,13 @@
     const topCompras = document.getElementById('topBarCompras');
     const topProdutos = document.getElementById('topBarProdutos');
     const topProducao = document.getElementById('topBarProducao');
+    const bottomBar = document.querySelector('.bottom-bar');
 
     if (topEstoque) topEstoque.classList.toggle('hidden', nome !== 'estoque');
     if (topCompras) topCompras.classList.toggle('hidden', nome !== 'compras');
     if (topProdutos) topProdutos.classList.toggle('hidden', nome !== 'produtos');
     if (topProducao) topProducao.classList.toggle('hidden', nome !== 'producao');
+    if (bottomBar) bottomBar.classList.toggle('hidden', nome === 'dashboard');
 
     if (nome !== 'estoque') fecharPainelFiltro();
     if (nome !== 'compras') fecharPainelFiltroCompras();
@@ -88,6 +94,10 @@
         ProducaoUI.abrirFormularioNovo();
       } else if (window.ProducaoUI?.abrirFormulario) {
         ProducaoUI.abrirFormulario();
+      }
+    } else if (abaAtiva.id === 'aba-dashboard') {
+      if (window.DashboardController?.abrirFormularioDespesa) {
+        DashboardController.abrirFormularioDespesa();
       }
     }
   }

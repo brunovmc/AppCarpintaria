@@ -13,6 +13,7 @@
 
     <!-- NAVBAR -->
     <div class="navbar">
+      <button type="button" data-aba="dashboard" onclick="trocarAba('dashboard')">Dashboard</button>
       <button type="button" data-aba="estoque" onclick="trocarAba('estoque')">Estoque</button>
       <button type="button" data-aba="compras" onclick="trocarAba('compras')">Compras</button>
       <button type="button" data-aba="produtos" onclick="trocarAba('produtos')">Produtos</button>
@@ -77,6 +78,10 @@
     </div>
 
     <!-- ABAS -->
+    <div id="aba-dashboard" class="aba hidden">
+      <?!= include('dashboard'); ?>
+    </div>
+
     <div id="aba-estoque" class="aba">
       <?!= include('estoque'); ?>
     </div>
@@ -117,6 +122,7 @@
     <?!= include('producaoStore'); ?>
     <?!= include('producaoUI'); ?>
     <?!= include('producaoController'); ?>
+    <?!= include('dashboardController'); ?>
 
     <script>
       window.onload = () => {

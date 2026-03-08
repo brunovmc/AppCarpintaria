@@ -19,6 +19,8 @@ const COMPRAS_SCHEMA = [
   'potencia',
   'voltagem',
   'comprado_em',
+  'data_vencimento',
+  'forma_pagamento_padrao',
   'vida_util_mes',
   'observacao',
   'adicionado_estoque',
@@ -51,7 +53,14 @@ function normalizarPayloadMadeiraCompra(payload) {
     throw new Error('Categoria invalida para o tipo selecionado.');
   }
 
-  if (tipo !== 'MADEIRA') return dados;
+  if (tipo !== 'MADEIRA') {
+    const quantidade = parseNumeroBR(dados.quantidade);
+    if (quantidade <= 0) {
+      throw new Error('Quantidade deve ser maior que zero.');
+    }
+    dados.quantidade = quantidade;
+    return dados;
+  }
 
   const comprimento = parseNumeroBR(dados.comprimento_cm);
   const largura = parseNumeroBR(dados.largura_cm);
@@ -67,6 +76,27 @@ function normalizarPayloadMadeiraCompra(payload) {
   dados.quantidade = Number(((comprimento * largura * espessura) / 1000000).toFixed(2));
   dados.unidade = 'M3';
   return dados;
+}
+
+function normalizarCamposFinanceirosCompra(payload) {
+  const dados = { ...(payload || {}) };
+  dados.data_vencimento = normalizarDataFinanceiro(dados.data_vencimento, false, 'Data de vencimento');
+  dados.forma_pagamento_padrao = validarFormaPagamentoFinanceiro(dados.forma_pagamento_padrao, false);
+  return dados;
+}
+
+function formatarDataCompraSeguro(valor, formato) {
+  if (!valor) return '';
+  let d = null;
+  if (typeof parseDataFinanceiro === 'function') {
+    d = parseDataFinanceiro(valor);
+  }
+  if (!d) {
+    const fallback = new Date(valor);
+    d = isNaN(fallback.getTime()) ? null : fallback;
+  }
+  if (!d) return '';
+  return Utilities.formatDate(d, Session.getScriptTimeZone(), formato);
 }
 
 function lerCacheListaCompras() {
@@ -108,23 +138,24 @@ function listarCompras(forcarRecarregar) {
 
   const rows = rowsToObjects(sheet);
 
-  const lista = rows
+  const base = rows
     .filter(i => String(i.ativo).toLowerCase() === 'true')
     .map(i => ({
       ...i,
-      criado_em: i.criado_em
-        ? Utilities.formatDate(new Date(i.criado_em), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm')
-        : '',
-      comprado_em: i.comprado_em
-        ? Utilities.formatDate(new Date(i.comprado_em), Session.getScriptTimeZone(), 'yyyy-MM-dd')
-        : ''
+      criado_em: formatarDataCompraSeguro(i.criado_em, 'yyyy-MM-dd HH:mm'),
+      comprado_em: formatarDataCompraSeguro(i.comprado_em, 'yyyy-MM-dd'),
+      data_vencimento: formatarDataCompraSeguro(i.data_vencimento, 'yyyy-MM-dd')
     }));
+
+  const lista = (typeof enriquecerComprasComResumoPagamento === 'function')
+    ? enriquecerComprasComResumoPagamento(base)
+    : base;
   salvarCacheListaCompras(lista);
   return lista;
 }
 
 function criarItemCompra(payload) {
-  const dados = normalizarPayloadMadeiraCompra(payload);
+  const dados = normalizarCamposFinanceirosCompra(normalizarPayloadMadeiraCompra(payload));
   const novo = {
     ...dados,
     ID: gerarId('COM'),
@@ -134,11 +165,13 @@ function criarItemCompra(payload) {
     origem_compra_id: dados.origem_compra_id || ''
   };
 
-  return insert(ABA_COMPRAS, novo, COMPRAS_SCHEMA);
+  const ok = insert(ABA_COMPRAS, novo, COMPRAS_SCHEMA);
+  if (!ok) return null;
+  return listarCompras(true).find(i => i.ID === novo.ID) || null;
 }
 
 function atualizarItemCompra(id, payload) {
-  const dados = normalizarPayloadMadeiraCompra(payload);
+  const dados = normalizarCamposFinanceirosCompra(normalizarPayloadMadeiraCompra(payload));
   return updateById(
     ABA_COMPRAS,
     'ID',
@@ -205,6 +238,7 @@ function adicionarCompraAoEstoque(compraId) {
       potencia: compraNormalizada.potencia || '',
       voltagem: compraNormalizada.voltagem || '',
       comprado_em: compraNormalizada.comprado_em || '',
+      data_vencimento: compraNormalizada.data_vencimento || '',
       vida_util_mes: compraNormalizada.vida_util_mes || '',
       observacao: compraNormalizada.observacao || ''
     };
@@ -231,9 +265,9 @@ function adicionarCompraAoEstoque(compraId) {
       },
       itemEstoqueCriado: {
         ...itemEstoqueCriado,
-        criado_em: Utilities.formatDate(new Date(itemEstoqueCriado.criado_em), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm'),
+        criado_em: formatarDataCompraSeguro(itemEstoqueCriado.criado_em, 'yyyy-MM-dd HH:mm'),
         comprado_em: itemEstoqueCriado.comprado_em
-          ? Utilities.formatDate(new Date(itemEstoqueCriado.comprado_em), Session.getScriptTimeZone(), 'yyyy-MM-dd')
+          ? formatarDataCompraSeguro(itemEstoqueCriado.comprado_em, 'yyyy-MM-dd')
           : ''
       }
     };

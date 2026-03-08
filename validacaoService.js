@@ -72,7 +72,8 @@ function recarregarCacheValidacoes() {
     tipos: Array.isArray(dados?.tipos) ? dados.tipos.length : 0,
     unidades: Array.isArray(dados?.unidades) ? dados.unidades.length : 0,
     categorias: Array.isArray(dados?.categorias) ? dados.categorias.length : 0,
-    fornecedores: Array.isArray(dados?.fornecedores) ? dados.fornecedores.length : 0
+    fornecedores: Array.isArray(dados?.fornecedores) ? dados.fornecedores.length : 0,
+    formas_pagamento: Array.isArray(dados?.formasPagamento) ? dados.formasPagamento.length : 0
   };
 }
 
@@ -195,6 +196,7 @@ function obterValidacoes(forcarRecarregar) {
       unidades: [],
       categorias: [],
       fornecedores: [],
+      formasPagamento: [],
       valorKwhPorFornecedor: {},
       categoriasPorTipo
     };
@@ -208,6 +210,7 @@ function obterValidacoes(forcarRecarregar) {
       unidades: [],
       categorias: [],
       fornecedores: [],
+      formasPagamento: [],
       valorKwhPorFornecedor: {},
       categoriasPorTipo
     };
@@ -223,11 +226,13 @@ function obterValidacoes(forcarRecarregar) {
   const idxCategoria = indiceColunaValidacao(headers, 'CATEGORIA', 2);
   const idxFornecedor = indiceColunaValidacao(headers, 'FORNECEDOR', 3);
   const idxValorKwh = indiceColunaValidacao(headers, 'VALORKWH', 4);
+  const idxFormaPagamento = indiceColunaValidacao(headers, 'FORMA_PAGAMENTO', 5);
 
   const tipos = new Set();
   const unidades = new Set();
   const categorias = new Set();
   const fornecedores = new Set();
+  const formasPagamento = new Set();
   const valorKwhPorFornecedor = {};
 
   dados.forEach(linha => {
@@ -236,6 +241,7 @@ function obterValidacoes(forcarRecarregar) {
     const categoria = linha[idxCategoria];
     const fornecedor = linha[idxFornecedor];
     const valorKwh = linha[idxValorKwh];
+    const formaPagamento = linha[idxFormaPagamento];
 
     if (tipo && tipo.toString().trim() !== '') {
       tipos.add(tipo);
@@ -260,6 +266,10 @@ function obterValidacoes(forcarRecarregar) {
         valorKwhPorFornecedor[fornecedor] = Number(valorKwh);
       }
     }
+
+    if (formaPagamento && formaPagamento.toString().trim() !== '') {
+      formasPagamento.add(formaPagamento);
+    }
   });
 
   Object.keys(categoriasPorTipo).forEach(tipo => {
@@ -275,6 +285,7 @@ function obterValidacoes(forcarRecarregar) {
     unidades: [...unidades],
     categorias: [...categorias],
     fornecedores: [...fornecedores],
+    formasPagamento: [...formasPagamento],
     valorKwhPorFornecedor,
     categoriasPorTipo
   };

@@ -38,11 +38,21 @@
         potencia: document.getElementById('compraPotencia'),
         voltagem: document.getElementById('compraVoltagem'),
         comprado_em: document.getElementById('compraCompradoEm'),
+        data_vencimento: document.getElementById('compraDataVencimento'),
+        forma_pagamento_padrao: document.getElementById('compraFormaPagamentoPadrao'),
         vida_util_mes: document.getElementById('compraVidaUtilMes'),
 
         equipamentoFields: document.getElementById('compraEquipamentoFields'),
         madeiraFields: document.getElementById('compraMadeiraFields'),
         formTitulo: document.getElementById('compraFormTitulo'),
+
+        pagamentoModal: document.getElementById('modalPagamentoCompra'),
+        pagamentoTitulo: document.getElementById('pagamentoCompraTitulo'),
+        pagamentoData: document.getElementById('pagamentoCompraData'),
+        pagamentoValor: document.getElementById('pagamentoCompraValor'),
+        pagamentoForma: document.getElementById('pagamentoCompraForma'),
+        pagamentoObservacao: document.getElementById('pagamentoCompraObservacao'),
+        pagamentoConfirmar: document.getElementById('btnConfirmarPagamentoCompra'),
 
         // Painel de filtro (inline)
         filtroTipo: document.getElementById('filtroTipoCompras'),
@@ -61,6 +71,20 @@
       if (s === '') return 0;
       const n = Number(s.replace(',', '.'));
       return isNaN(n) ? 0 : n;
+    }
+
+    function formatarMoeda(valor) {
+      const n = Number(valor || 0);
+      const seguro = isNaN(n) ? 0 : n;
+      return `R$ ${seguro.toFixed(2)}`;
+    }
+
+    function getHojeISO() {
+      const d = new Date();
+      const yyyy = d.getFullYear();
+      const mm = String(d.getMonth() + 1).padStart(2, '0');
+      const dd = String(d.getDate()).padStart(2, '0');
+      return `${yyyy}-${mm}-${dd}`;
     }
 
     function compraJaAdicionadaAoEstoque(item) {
@@ -215,6 +239,8 @@
       if (f.potencia) f.potencia.value = data.potencia || '';
       if (f.voltagem) f.voltagem.value = data.voltagem || '';
       if (f.comprado_em) f.comprado_em.value = data.comprado_em || '';
+      if (f.data_vencimento) f.data_vencimento.value = data.data_vencimento || '';
+      if (f.forma_pagamento_padrao) f.forma_pagamento_padrao.value = data.forma_pagamento_padrao || '';
       if (f.vida_util_mes) f.vida_util_mes.value = data.vida_util_mes || '';
 
       definirTituloFormulario('Editar Compra');
@@ -239,6 +265,8 @@
         f.potencia,
         f.voltagem,
         f.comprado_em,
+        f.data_vencimento,
+        f.forma_pagamento_padrao,
         f.vida_util_mes
       ].forEach(i => i && (i.value = ''));
 
@@ -348,6 +376,28 @@
       }
     }
 
+    function renderFormasPagamento(lista) {
+      const { forma_pagamento_padrao, pagamentoForma } = el();
+      const clean = limparVazios(lista);
+
+      const preencher = selectEl => {
+        if (!selectEl || selectEl.tagName !== 'SELECT') return;
+        const atual = String(selectEl.value || '').trim();
+        selectEl.innerHTML = '<option value="">Selecione</option>';
+        clean.forEach(v => {
+          const o = document.createElement('option');
+          o.value = v;
+          o.textContent = v;
+          selectEl.appendChild(o);
+        });
+        const match = [...selectEl.options].find(o => String(o.value || '').trim().toUpperCase() === atual.toUpperCase());
+        selectEl.value = match ? match.value : '';
+      };
+
+      preencher(forma_pagamento_padrao);
+      preencher(pagamentoForma);
+    }
+
     function construirIndiceItens(lista) {
       itensPorId = {};
       (Array.isArray(lista) ? lista : []).forEach(i => {
@@ -393,10 +443,21 @@
       const botaoAdicionarAoEstoque = jaAdicionada
         ? ''
         : `<button onclick="ComprasController.adicionarAoEstoque('${i.ID}')">Adicionar ao estoque</button>`;
+      const statusPagamento = String(i.status_pagamento || 'PENDENTE').toUpperCase();
+      const totalPrevisto = Number(i.total_previsto || 0);
+      const totalPago = Number(i.total_pago || 0);
+      const totalPendente = Number(i.total_pendente || 0);
+      const pagamentoResumo = `${statusPagamento} | Pago: ${formatarMoeda(totalPago)} | Pendente: ${formatarMoeda(totalPendente)} | Previsto: ${formatarMoeda(totalPrevisto)}`;
+      const botaoPagamento = totalPendente > 0.009
+        ? `<button onclick="ComprasController.registrarPagamento('${i.ID}')">Registrar pagamento</button>`
+        : '';
       return `
         <p><b>Fornecedor:</b> ${i.fornecedor || '-'}</p>
         <p><b>Status:</b> ${status}</p>
+        <p><b>Financeiro:</b> ${pagamentoResumo}</p>
         <p><b>Comprado em:</b> ${i.comprado_em || '-'}</p>
+        <p><b>Vencimento:</b> ${i.data_vencimento || '-'}</p>
+        <p><b>Ultimo pagamento:</b> ${i.data_ultimo_pagamento || '-'}${i.forma_ultimo_pagamento ? ` (${i.forma_ultimo_pagamento})` : ''}</p>
         <p><b>Valor unitario:</b> R$ ${Number(i.valor_unit || 0).toFixed(2)}</p>
         <p><b>Observacao:</b> ${i.observacao || '-'}</p>
 
@@ -411,6 +472,7 @@
 
         <div class="acoes">
           ${botaoAdicionarAoEstoque}
+          ${botaoPagamento}
           <button onclick="ComprasController.refazer('${i.ID}')">Refazer compra</button>
           <button onclick="ComprasController.editar('${i.ID}')">Editar</button>
           <button onclick="ComprasController.excluir('${i.ID}')">Excluir</button>
@@ -605,6 +667,57 @@
       cardAberto = null;
     }
 
+    function abrirModalPagamentoCompra(item) {
+      const f = el();
+      if (!f.pagamentoModal) return;
+
+      if (f.pagamentoTitulo) {
+        const nome = String(item?.item || '').trim();
+        f.pagamentoTitulo.textContent = nome
+          ? `Registrar pagamento: ${nome}`
+          : 'Registrar pagamento';
+      }
+
+      if (f.pagamentoData) f.pagamentoData.value = getHojeISO();
+      if (f.pagamentoValor) {
+        const pendente = Number(item?.total_pendente || 0);
+        f.pagamentoValor.value = pendente > 0 ? pendente.toFixed(2) : '';
+      }
+      if (f.pagamentoForma) f.pagamentoForma.value = item?.forma_pagamento_padrao || '';
+      if (f.pagamentoObservacao) f.pagamentoObservacao.value = '';
+
+      f.pagamentoModal.classList.remove('hidden');
+    }
+
+    function setModalPagamentoCompraProcessando(processando) {
+      const f = el();
+      const on = !!processando;
+      [f.pagamentoData, f.pagamentoValor, f.pagamentoForma, f.pagamentoObservacao, f.pagamentoConfirmar]
+        .forEach(input => {
+          if (input) input.disabled = on;
+        });
+      if (f.pagamentoConfirmar) {
+        f.pagamentoConfirmar.textContent = on ? 'Salvando...' : 'Confirmar pagamento';
+      }
+    }
+
+    function fecharModalPagamentoCompra() {
+      const f = el();
+      if (!f.pagamentoModal) return;
+      f.pagamentoModal.classList.add('hidden');
+      setModalPagamentoCompraProcessando(false);
+    }
+
+    function lerModalPagamentoCompra() {
+      const f = el();
+      return {
+        data_pagamento: String(f.pagamentoData?.value || '').trim(),
+        valor_pago: String(f.pagamentoValor?.value || '').trim(),
+        forma_pagamento: String(f.pagamentoForma?.value || '').trim(),
+        observacao: String(f.pagamentoObservacao?.value || '').trim()
+      };
+    }
+
     /* =========================
        API PUBLICA
     ========================== */
@@ -621,10 +734,15 @@
       renderUnidades,
       renderCategorias,
       renderFornecedores,
+      renderFormasPagamento,
       renderFiltroRapidoTipos,
       marcarTipoRapidoAtivo,
       atualizarQuantidadeMadeira,
-      definirTituloFormulario
+      definirTituloFormulario,
+      abrirModalPagamentoCompra,
+      fecharModalPagamentoCompra,
+      lerModalPagamentoCompra,
+      setModalPagamentoCompraProcessando
     };
 
   })();
