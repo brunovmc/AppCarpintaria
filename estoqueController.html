@@ -169,6 +169,10 @@
       const qtdMadeira = tipo === 'MADEIRA'
         ? Number(((comprimento_cm * largura_cm * espessura_cm) / 1000000).toFixed(2))
         : '';
+      const custoUnitarioBruto = parseNumeroInput(get('custo_unitario'));
+      const precoVendaBruto = parseNumeroInput(get('preco_venda'));
+      const custoUnitario = custoUnitarioBruto === '' ? 0 : custoUnitarioBruto;
+      const precoVenda = precoVendaBruto === '' ? '' : precoVendaBruto;
 
       const dados = {
         tipo,
@@ -181,7 +185,9 @@
         data_pagamento: dataPagamento,
         forma_pagamento: formaPagamento,
         parcelas,
-        valor_unit: parseNumeroInput(get('valor_unit')) || 0,
+        custo_unitario: custoUnitario,
+        preco_venda: precoVenda,
+        valor_unit: custoUnitario,
         observacao: get('observacao'),
         comprimento_cm,
         largura_cm,

@@ -5,6 +5,7 @@ const ABA_PRODUCAO_MATERIAIS = 'PRODUCAO_MATERIAIS';
 const ABA_PRODUCAO_MATERIAIS_PREVISTOS = 'PRODUCAO_MATERIAIS_PREVISTOS';
 const ABA_PRODUCAO_VINCULOS = 'PRODUCAO_VINCULOS_MATERIAIS';
 const ABA_PRODUCAO_DESTINOS = 'PRODUCAO_DESTINOS';
+const ABA_PRODUCAO_SAIDAS_LOTES = 'PRODUCAO_SAIDAS_LOTES';
 
 const PRODUCAO_SCHEMA = [
   'producao_id',
@@ -95,6 +96,19 @@ const PRODUCAO_DESTINOS_SCHEMA = [
   'quantidade_prevista',
   'quantidade_produzida',
   'status',
+  'criado_em',
+  'ativo'
+];
+
+const PRODUCAO_SAIDAS_LOTES_SCHEMA = [
+  'id',
+  'producao_id',
+  'estoque_id',
+  'nome_saida',
+  'unidade',
+  'quantidade',
+  'custo_unitario',
+  'custo_total',
   'criado_em',
   'ativo'
 ];
@@ -1595,11 +1609,28 @@ function localizarItemEstoqueProdutoPorSaida(estoqueRows, nomeSaida, unidadeSaid
   return exato || null;
 }
 
-function lancarSaidasProducaoNoEstoque(producaoId, saidasAgrupadas, estoqueRows, estoqueAtivoMap) {
+function obterCustoUnitarioEstoqueItem(item) {
+  return parseNumeroBR(item?.custo_unitario || item?.valor_unit);
+}
+
+function calcularCustoUnitarioSaidas(totalConsumo, saidasAgrupadas) {
+  const totalConsumoSeguro = parseNumeroBR(totalConsumo);
+  const totalSaidas = (Array.isArray(saidasAgrupadas) ? saidasAgrupadas : [])
+    .reduce((acc, s) => acc + parseNumeroBR(s?.quantidade), 0);
+
+  if (totalSaidas <= 0 || totalConsumoSeguro <= 0) {
+    return 0;
+  }
+  return Number((totalConsumoSeguro / totalSaidas).toFixed(6));
+}
+
+function lancarSaidasProducaoNoEstoque(producaoId, saidasAgrupadas, estoqueRows, estoqueAtivoMap, custoUnitarioSaida) {
   const saidas = Array.isArray(saidasAgrupadas) ? saidasAgrupadas : [];
   const linhasEstoque = Array.isArray(estoqueRows) ? estoqueRows : [];
   const mapaAtivos = estoqueAtivoMap || {};
   const atualizados = [];
+  const lotesCriados = [];
+  const custoSaida = parseNumeroBR(custoUnitarioSaida);
 
   saidas.forEach(s => {
     const nomeSaida = String(s.nome_saida || '').trim();
@@ -1609,6 +1640,9 @@ function lancarSaidasProducaoNoEstoque(producaoId, saidasAgrupadas, estoqueRows,
     if (!nomeSaida || quantidade <= 0) return;
 
     const itemExistente = localizarItemEstoqueProdutoPorSaida(linhasEstoque, nomeSaida, unidade);
+    let estoqueId = '';
+    let novoSaldo = quantidade;
+    let custoUnitarioFinal = custoSaida;
 
     if (!itemExistente) {
       const novoItem = {
@@ -1616,54 +1650,96 @@ function lancarSaidasProducaoNoEstoque(producaoId, saidasAgrupadas, estoqueRows,
         tipo: 'PRODUTO',
         item: nomeSaida,
         unidade,
-        valor_unit: 0,
+        valor_unit: custoSaida,
+        custo_unitario: custoSaida,
+        preco_venda: '',
         ativo: true,
         criado_em: new Date(),
         quantidade,
         comprimento_cm: '',
         largura_cm: '',
         espessura_cm: '',
-        categoria: 'PRODUTO',
+        categoria: 'PECA',
         fornecedor: '',
+        pago_por: '',
         potencia: '',
         voltagem: '',
         comprado_em: '',
+        data_pagamento: '',
+        forma_pagamento: '',
+        parcelas: 1,
         vida_util_mes: '',
-        observacao: `Gerado na OP ${producaoId}`
+        observacao: `Gerado na OP ${producaoId}`,
+        origem_tipo: 'PRODUCAO',
+        origem_id: producaoId,
+        op_id: producaoId
       };
 
       insert(ABA_ESTOQUE, novoItem, ESTOQUE_SCHEMA);
       linhasEstoque.push(novoItem);
       mapaAtivos[novoItem.ID] = novoItem;
+      estoqueId = novoItem.ID;
 
       atualizados.push({
         ID: novoItem.ID,
         quantidade: parseNumeroBR(novoItem.quantidade)
       });
-      return;
+    } else {
+      const saldoAtual = parseNumeroBR(itemExistente.quantidade);
+      novoSaldo = saldoAtual + quantidade;
+      const custoAtual = obterCustoUnitarioEstoqueItem(itemExistente);
+      custoUnitarioFinal = novoSaldo > 0
+        ? Number((((saldoAtual * custoAtual) + (quantidade * custoSaida)) / novoSaldo).toFixed(6))
+        : 0;
+
+      updateById(
+        ABA_ESTOQUE,
+        'ID',
+        itemExistente.ID,
+        {
+          quantidade: novoSaldo,
+          custo_unitario: custoUnitarioFinal,
+          valor_unit: custoUnitarioFinal,
+          origem_tipo: 'PRODUCAO',
+          origem_id: producaoId,
+          op_id: producaoId
+        },
+        ESTOQUE_SCHEMA
+      );
+
+      itemExistente.quantidade = novoSaldo;
+      itemExistente.custo_unitario = custoUnitarioFinal;
+      itemExistente.valor_unit = custoUnitarioFinal;
+      mapaAtivos[itemExistente.ID] = itemExistente;
+      estoqueId = itemExistente.ID;
+
+      atualizados.push({
+        ID: itemExistente.ID,
+        quantidade: novoSaldo
+      });
     }
 
-    const saldoAtual = parseNumeroBR(itemExistente.quantidade);
-    const novoSaldo = saldoAtual + quantidade;
-
-    updateById(
-      ABA_ESTOQUE,
-      'ID',
-      itemExistente.ID,
-      { quantidade: novoSaldo },
-      ESTOQUE_SCHEMA
-    );
-
-    itemExistente.quantidade = novoSaldo;
-    mapaAtivos[itemExistente.ID] = itemExistente;
-
-    atualizados.push({
-      ID: itemExistente.ID,
-      quantidade: novoSaldo
+    const custoTotalLote = Number((quantidade * custoSaida).toFixed(6));
+    const lote = {
+      id: gerarId('LOT'),
+      producao_id: producaoId,
+      estoque_id: estoqueId,
+      nome_saida: nomeSaida,
+      unidade,
+      quantidade,
+      custo_unitario: custoSaida,
+      custo_total: custoTotalLote,
+      criado_em: new Date(),
+      ativo: true
+    };
+    insert(ABA_PRODUCAO_SAIDAS_LOTES, lote, PRODUCAO_SAIDAS_LOTES_SCHEMA);
+    lotesCriados.push({
+      ...lote,
+      criado_em: formatDateSafe(lote.criado_em, 'yyyy-MM-dd HH:mm')
     });
   });
 
-  return atualizados;
+  return { atualizados, lotesCriados };
 }
 
 function consumirEstoque(producaoId, itensParaBaixar) {
@@ -1807,7 +1883,7 @@ function consumirEstoque(producaoId, itensParaBaixar) {
         quantidade: novoSaldo
       });
 
-      const valorUnit = parseNumeroBR(estoqueItem.valor_unit);
+      const valorUnit = parseNumeroBR(estoqueItem.custo_unitario || estoqueItem.valor_unit);
       const total = i.quantidade * valorUnit;
 
       const consumo = {
@@ -1837,14 +1913,18 @@ function consumirEstoque(producaoId, itensParaBaixar) {
     if (saidasAgrupadas.length === 0) {
       throw new Error('Receita sem saidas configuradas para lancamento no estoque');
     }
+    const custoTotalEntradas = consumoRegistrado
+      .reduce((acc, c) => acc + parseNumeroBR(c?.total_snapshot), 0);
+    const custoUnitarioSaida = calcularCustoUnitarioSaidas(custoTotalEntradas, saidasAgrupadas);
 
-    const saidasAtualizadas = lancarSaidasProducaoNoEstoque(
+    const resultadoSaidas = lancarSaidasProducaoNoEstoque(
       producaoId,
       saidasAgrupadas,
       estoqueRows,
-      estoqueMapAtivo
+      estoqueMapAtivo,
+      custoUnitarioSaida
     );
-    estoqueAtualizados.push(...saidasAtualizadas);
+    estoqueAtualizados.push(...(resultadoSaidas.atualizados || []));
 
     const dataAtualizacao = new Date();
     updateById(
@@ -1876,9 +1956,140 @@ function consumirEstoque(producaoId, itensParaBaixar) {
         estoque_atualizado: true,
         data_estoque_atualizado: formatDateSafe(dataAtualizacao, 'yyyy-MM-dd')
       },
-      saidasLancadas: saidasAgrupadas
+      saidasLancadas: saidasAgrupadas,
+      saidasLotes: resultadoSaidas.lotesCriados || []
     };
   } finally {
     lock.releaseLock();
   }
+}
+
+function listarSaidasLotesProducao(producaoId) {
+  const prodId = String(producaoId || '').trim();
+  if (!prodId) return [];
+
+  const sheet = getDataSpreadsheet().getSheetByName(ABA_PRODUCAO_SAIDAS_LOTES);
+  if (!sheet) return [];
+
+  return rowsToObjects(sheet)
+    .filter(i =>
+      String(i.ativo).toLowerCase() === 'true' &&
+      String(i.producao_id || '').trim() === prodId
+    )
+    .map(i => ({
+      ...i,
+      quantidade: parseNumeroBR(i.quantidade),
+      custo_unitario: parseNumeroBR(i.custo_unitario),
+      custo_total: parseNumeroBR(i.custo_total),
+      criado_em: i.criado_em
+        ? formatDateSafe(i.criado_em, 'yyyy-MM-dd HH:mm')
+        : ''
+    }))
+    .sort((a, b) => {
+      const da = new Date(a.criado_em || 0).getTime() || 0;
+      const db = new Date(b.criado_em || 0).getTime() || 0;
+      return db - da;
+    });
+}
+
+function recalcularCustoMedioSaidasNoEstoque(estoqueId) {
+  const estId = String(estoqueId || '').trim();
+  if (!estId) return null;
+
+  const sheetLotes = getDataSpreadsheet().getSheetByName(ABA_PRODUCAO_SAIDAS_LOTES);
+  if (!sheetLotes) return null;
+
+  const lotes = rowsToObjects(sheetLotes)
+    .filter(i =>
+      String(i.ativo).toLowerCase() === 'true' &&
+      String(i.estoque_id || '').trim() === estId
+    );
+
+  const totalQtd = lotes.reduce((acc, l) => acc + parseNumeroBR(l.quantidade), 0);
+  const totalCusto = lotes.reduce((acc, l) => acc + parseNumeroBR(l.custo_total), 0);
+  if (totalQtd <= 0) return null;
+
+  const custoMedio = Number((totalCusto / totalQtd).toFixed(6));
+  updateById(
+    ABA_ESTOQUE,
+    'ID',
+    estId,
+    {
+      custo_unitario: custoMedio,
+      valor_unit: custoMedio
+    },
+    ESTOQUE_SCHEMA
+  );
+
+  return {
+    ID: estId,
+    custo_unitario: custoMedio,
+    valor_unit: custoMedio
+  };
+}
+
+function atualizarCustoLoteSaidaProducao(producaoId, loteId, custoUnitario) {
+  const prodId = String(producaoId || '').trim();
+  const lotId = String(loteId || '').trim();
+  const novoCusto = parseNumeroBR(custoUnitario);
+
+  if (!prodId) {
+    throw new Error('Producao invalida.');
+  }
+  if (!lotId) {
+    throw new Error('Lote de saida invalido.');
+  }
+  if (novoCusto < 0) {
+    throw new Error('Custo unitario nao pode ser negativo.');
+  }
+
+  const sheetProducao = getDataSpreadsheet().getSheetByName(ABA_PRODUCAO);
+  if (!sheetProducao) {
+    throw new Error('Aba PRODUCAO nao encontrada');
+  }
+  const ordem = rowsToObjects(sheetProducao).find(i => String(i.producao_id || '').trim() === prodId);
+  if (!ordem) {
+    throw new Error('Producao nao encontrada');
+  }
+  if (String(ordem.estoque_atualizado).toLowerCase() !== 'true') {
+    throw new Error('Custo de saida so pode ser editado apos atualizar o estoque da OP.');
+  }
+
+  const sheetLotes = getDataSpreadsheet().getSheetByName(ABA_PRODUCAO_SAIDAS_LOTES);
+  if (!sheetLotes) {
+    throw new Error('Aba PRODUCAO_SAIDAS_LOTES nao encontrada');
+  }
+
+  const lote = rowsToObjects(sheetLotes).find(i =>
+    String(i.id || '').trim() === lotId &&
+    String(i.producao_id || '').trim() === prodId &&
+    String(i.ativo).toLowerCase() === 'true'
+  );
+  if (!lote) {
+    throw new Error('Lote de saida nao encontrado para a OP informada.');
+  }
+
+  const quantidade = parseNumeroBR(lote.quantidade);
+  const novoTotal = Number((quantidade * novoCusto).toFixed(6));
+  updateById(
+    ABA_PRODUCAO_SAIDAS_LOTES,
+    'id',
+    lotId,
+    {
+      custo_unitario: novoCusto,
+      custo_total: novoTotal
+    },
+    PRODUCAO_SAIDAS_LOTES_SCHEMA
+  );
+
+  const estoqueAtualizado = recalcularCustoMedioSaidasNoEstoque(lote.estoque_id);
+  const saidasLotes = listarSaidasLotesProducao(prodId);
+  const loteAtualizado = saidasLotes.find(i => String(i.id || '').trim() === lotId) || null;
+
+  return {
+    ok: true,
+    loteAtualizado,
+    estoqueAtualizado,
+    saidasLotes
+  };
 }

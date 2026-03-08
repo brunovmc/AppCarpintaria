@@ -131,6 +131,10 @@
       };
 
       const tipo = get('compraTipo');
+      if (String(tipo || '').trim().toUpperCase() === 'PRODUTO') {
+        mostrarToast('Tipo PRODUTO nao e permitido em compras. Use a aba Estoque ou Producao.', 'erro');
+        return;
+      }
       const compradoEm = String(get('compraCompradoEm') || '').trim();
       const categoria = get('compraCategoria');
       const dataPagamento = String(get('compraDataPagamento') || '').trim();

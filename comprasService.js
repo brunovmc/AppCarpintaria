@@ -53,6 +53,10 @@ function normalizarPayloadMadeiraCompra(payload) {
   const tipo = String(dados.tipo || '').trim().toUpperCase();
   dados.pago_por = validarPagoPorCompra(dados.pago_por);
 
+  if (tipo === 'PRODUTO') {
+    throw new Error('Tipo PRODUTO nao pode ser criado em COMPRAS. Cadastre em ESTOQUE ou via PRODUCAO.');
+  }
+
   if (!categoriaValidaParaTipoCompra(tipo, dados.categoria)) {
     throw new Error('Categoria invalida para o tipo selecionado.');
   }
@@ -249,7 +253,9 @@ function adicionarCompraAoEstoque(compraId) {
       tipo: compraNormalizada.tipo || '',
       item: compraNormalizada.item || '',
       unidade: compraNormalizada.unidade || '',
-      valor_unit: compraNormalizada.valor_unit || 0,
+      valor_unit: parseNumeroBR(compraNormalizada.valor_unit || 0),
+      custo_unitario: parseNumeroBR(compraNormalizada.valor_unit || 0),
+      preco_venda: '',
       ativo: true,
       criado_em: new Date(),
       quantidade: compraNormalizada.quantidade || 0,
@@ -267,7 +273,10 @@ function adicionarCompraAoEstoque(compraId) {
       parcelas: compraNormalizada.parcelas || 1,
       data_vencimento: compraNormalizada.data_vencimento || '',
       vida_util_mes: compraNormalizada.vida_util_mes || '',
-      observacao: compraNormalizada.observacao || ''
+      observacao: compraNormalizada.observacao || '',
+      origem_tipo: 'COMPRA',
+      origem_id: compraId,
+      op_id: ''
     };
 
     insert(ABA_ESTOQUE, itemEstoqueCriado, ESTOQUE_SCHEMA);

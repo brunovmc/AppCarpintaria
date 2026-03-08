@@ -550,6 +550,8 @@
     const tipos = tiposValidacao.length > 0
       ? tiposValidacao
       : uniqueSorted(itens.map(i => i.tipo));
+    const tiposSemProduto = tipos
+      .filter(t => String(t || '').trim().toUpperCase() !== 'PRODUTO');
     const categorias = uniqueSorted(itens.map(i => i.categoria));
     const unidades = uniqueSorted(itens.map(i => i.unidade));
 
@@ -561,11 +563,11 @@
     const catAtual = selCategoria ? selCategoria.value : '';
     const unidadeAtual = selUnidade ? selUnidade.value : '';
 
-    preencherSelect(selTipo, tipos, 'Tipo (todos)');
+    preencherSelect(selTipo, tiposSemProduto, 'Tipo (todos)');
     preencherSelect(selUnidade, unidades, 'Unidade (todas)');
     preencherSelect(selCategoria, categorias, 'Categoria (todas)');
 
-    if (selTipo && tipos.includes(tipoAtual)) selTipo.value = tipoAtual;
+    if (selTipo && tiposSemProduto.includes(tipoAtual)) selTipo.value = tipoAtual;
     if (selCategoria && categorias.includes(catAtual)) selCategoria.value = catAtual;
     if (selUnidade && unidades.includes(unidadeAtual)) selUnidade.value = unidadeAtual;
 

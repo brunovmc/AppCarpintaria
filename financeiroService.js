@@ -1092,7 +1092,7 @@ function obterResumoDashboardFinanceiro(referenciaYm, forcarRecarregar) {
   const valorEstoquePorTipo = {};
   estoque.forEach(item => {
     const quantidade = parseNumeroBR(item.quantidade);
-    const valorUnit = parseNumeroBR(item.valor_unit);
+    const valorUnit = parseNumeroBR(item.custo_unitario || item.valor_unit);
     const valor = round2Financeiro(Math.max(0, quantidade * valorUnit));
     valorEstoqueTotal = round2Financeiro(valorEstoqueTotal + valor);
 

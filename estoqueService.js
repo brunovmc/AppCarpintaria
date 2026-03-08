@@ -8,6 +8,8 @@ const ESTOQUE_SCHEMA = [
   'item',
   'unidade',
   'valor_unit',
+  'custo_unitario',
+  'preco_venda',
   'ativo',
   'criado_em',
   'quantidade',
@@ -24,7 +26,10 @@ const ESTOQUE_SCHEMA = [
   'forma_pagamento',
   'parcelas',
   'vida_util_mes',
-  'observacao'
+  'observacao',
+  'origem_tipo',
+  'origem_id',
+  'op_id'
 ];
 
 function validarPagoPorEstoque(pagoPor) {
@@ -62,6 +67,26 @@ function categoriaValidaParaTipoEstoque(tipo, categoria) {
 function normalizarPayloadMadeiraEstoque(payload) {
   const dados = { ...(payload || {}) };
   const tipo = String(dados.tipo || '').trim().toUpperCase();
+  const custoBase = (dados.custo_unitario !== undefined && dados.custo_unitario !== null && String(dados.custo_unitario).trim() !== '')
+    ? dados.custo_unitario
+    : dados.valor_unit;
+  const custoUnitario = parseNumeroBR(custoBase);
+  if (custoUnitario < 0) {
+    throw new Error('Custo unitario nao pode ser negativo.');
+  }
+  const precoBruto = String(dados.preco_venda ?? '').trim();
+  const precoVenda = precoBruto === '' ? '' : parseNumeroBR(precoBruto);
+  if (precoVenda !== '' && precoVenda < 0) {
+    throw new Error('Preco de venda nao pode ser negativo.');
+  }
+
+  dados.custo_unitario = custoUnitario;
+  dados.preco_venda = precoVenda;
+  // Compatibilidade com partes do app que ainda usam valor_unit.
+  dados.valor_unit = custoUnitario;
+  dados.origem_tipo = String(dados.origem_tipo || '').trim();
+  dados.origem_id = String(dados.origem_id || '').trim();
+  dados.op_id = String(dados.op_id || '').trim();
   dados.pago_por = validarPagoPorEstoque(dados.pago_por);
   dados.data_pagamento = normalizarDataFinanceiro(dados.data_pagamento, false, 'Data de pagamento');
   const formaPagamento = validarFormaPagamentoFinanceiro(dados.forma_pagamento, false);
@@ -148,6 +173,9 @@ function listarEstoque(forcarRecarregar) {
     .filter(i => String(i.ativo).toLowerCase() === 'true')
     .map(i => ({
       ...i,
+      custo_unitario: parseNumeroBR(i.custo_unitario || i.valor_unit),
+      preco_venda: String(i.preco_venda || '').trim() === '' ? '' : parseNumeroBR(i.preco_venda),
+      valor_unit: parseNumeroBR(i.custo_unitario || i.valor_unit),
       criado_em: formatarDataEstoqueSeguro(i.criado_em, 'yyyy-MM-dd HH:mm'),
       comprado_em: formatarDataEstoqueSeguro(i.comprado_em, 'yyyy-MM-dd'),
       data_pagamento: formatarDataEstoqueSeguro(i.data_pagamento, 'yyyy-MM-dd')
@@ -213,12 +241,17 @@ function obterItemEstoque(id) {
     comprimento_cm: item.comprimento_cm || '',
     largura_cm: item.largura_cm || '',
     espessura_cm: item.espessura_cm || '',
-    valor_unit: item.valor_unit || '',
+    valor_unit: parseNumeroBR(item.custo_unitario || item.valor_unit),
+    custo_unitario: parseNumeroBR(item.custo_unitario || item.valor_unit),
+    preco_venda: String(item.preco_venda || '').trim() === '' ? '' : parseNumeroBR(item.preco_venda),
     fornecedor: item.fornecedor || '',
     pago_por: item.pago_por || '',
     forma_pagamento: item.forma_pagamento || '',
     parcelas: item.parcelas || '',
     observacao: item.observacao || '',
+    origem_tipo: item.origem_tipo || '',
+    origem_id: item.origem_id || '',
+    op_id: item.op_id || '',
 
     potencia: item.potencia || '',
     voltagem: item.voltagem || '',

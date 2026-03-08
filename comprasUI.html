@@ -359,7 +359,8 @@
       const { tipo } = el();
       if (!tipo) return;
 
-      const clean = limparVazios(lista);
+      const clean = limparVazios(lista)
+        .filter(v => String(v || '').trim().toUpperCase() !== 'PRODUTO');
 
       tipo.innerHTML = '<option value="">Selecione</option>';
       clean.forEach(v => {
@@ -630,7 +631,8 @@
       const { filtroTipoRapido, filtroTipo } = el();
       if (!filtroTipoRapido) return;
 
-      const tipos = normalizarTipos(lista);
+      const tipos = normalizarTipos(lista)
+        .filter(t => String(t || '').trim().toUpperCase() !== 'PRODUTO');
       filtroTipoRapido.innerHTML = '';
 
       const criarBotao = (label, tipo) => {

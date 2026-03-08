@@ -394,6 +394,75 @@
         .listarVinculosMateriaisProducao(id);
     }
 
+    function carregarSaidasLotes(id, forcar = false) {
+      const item = ProducaoStore.getById(id);
+      if (item && item.saidasLotes && !forcar) {
+        return;
+      }
+
+      google.script.run
+        .withSuccessHandler(lista => {
+          ProducaoStore.update(id, {
+            saidasLotes: Array.isArray(lista) ? lista : []
+          });
+          renderListaAtual();
+        })
+        .withFailureHandler(err => {
+          const msg = err?.message || 'Erro ao carregar saidas da OP';
+          mostrarToast(msg, 'erro');
+        })
+        .listarSaidasLotesProducao(id);
+    }
+
+    function atualizarCustoLoteSaida(producaoId, loteId, custoUnitarioInput) {
+      const prodId = String(producaoId || '').trim();
+      const lotId = String(loteId || '').trim();
+      const custo = Number(String(custoUnitarioInput || '').replace(',', '.'));
+
+      if (!prodId || !lotId) {
+        mostrarToast('Lote de saida invalido', 'erro');
+        return;
+      }
+      if (!isFinite(custo) || custo < 0) {
+        mostrarToast('Custo unitario invalido', 'erro');
+        return;
+      }
+
+      mostrarToast('Atualizando custo da saida...');
+      google.script.run
+        .withFailureHandler(err => {
+          const msg = err?.message || 'Erro ao atualizar custo da saida';
+          mostrarToast(msg, 'erro');
+        })
+        .withSuccessHandler(resp => {
+          if (resp?.saidasLotes) {
+            ProducaoStore.update(prodId, { saidasLotes: resp.saidasLotes });
+          } else if (resp?.loteAtualizado) {
+            const item = ProducaoStore.getById(prodId) || {};
+            const lotes = Array.isArray(item.saidasLotes) ? [...item.saidasLotes] : [];
+            const idx = lotes.findIndex(l => String(l.id || '').trim() === String(resp.loteAtualizado.id || '').trim());
+            if (idx >= 0) {
+              lotes[idx] = resp.loteAtualizado;
+            } else {
+              lotes.unshift(resp.loteAtualizado);
+            }
+            ProducaoStore.update(prodId, { saidasLotes: lotes });
+          }
+          if (resp?.estoqueAtualizado && window.EstoqueStore) {
+            EstoqueStore.update(resp.estoqueAtualizado.ID, {
+              custo_unitario: resp.estoqueAtualizado.custo_unitario,
+              valor_unit: resp.estoqueAtualizado.valor_unit
+            });
+          }
+          if (window.EstoqueController?.syncFromBackend) {
+            EstoqueController.syncFromBackend();
+          }
+          renderListaAtual();
+          mostrarToast('Custo da saida atualizado');
+        })
+        .atualizarCustoLoteSaidaProducao(prodId, lotId, custo);
+    }
+
     function vincularItemEstoque(producaoId, vinculoId, estoqueId) {
       const prodId = String(producaoId || '').trim();
       const vinId = String(vinculoId || '').trim();
@@ -548,8 +617,12 @@
           if (resp?.producaoAtualizada) {
             ProducaoStore.update(payload.producaoId, resp.producaoAtualizada);
           }
+          if (resp?.saidasLotes) {
+            ProducaoStore.update(payload.producaoId, { saidasLotes: resp.saidasLotes });
+          }
           carregarMateriaisPrevistos(payload.producaoId, true);
           carregarVinculosMateriais(payload.producaoId, true);
+          carregarSaidasLotes(payload.producaoId, true);
           ProducaoUI.fecharModalConsumo();
           mostrarToast('Estoque atualizado');
         })
@@ -801,6 +874,8 @@
       marcarEtapa,
       carregarMateriaisPrevistos,
       carregarVinculosMateriais,
+      carregarSaidasLotes,
+      atualizarCustoLoteSaida,
       confirmarPendenciasVinculo,
       limparEdicao,
       iniciarEdicaoEtapa,

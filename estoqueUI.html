@@ -34,7 +34,8 @@
         forma_pagamento: document.getElementById('forma_pagamento'),
         parcelas_wrap: document.getElementById('parcelas_wrap'),
         parcelas: document.getElementById('parcelas'),
-        valor_unit: document.getElementById('valor_unit'),
+        custo_unitario: document.getElementById('custo_unitario'),
+        preco_venda: document.getElementById('preco_venda'),
         observacao: document.getElementById('observacao'),
 
         comprimento_cm: document.getElementById('comprimento_cm'),
@@ -231,7 +232,8 @@
       if (f.forma_pagamento) f.forma_pagamento.value = data.forma_pagamento || '';
       if (f.parcelas) f.parcelas.value = data.parcelas || '1';
 
-      if (f.valor_unit) f.valor_unit.value = data.valor_unit || '';
+      if (f.custo_unitario) f.custo_unitario.value = data.custo_unitario ?? data.valor_unit ?? '';
+      if (f.preco_venda) f.preco_venda.value = data.preco_venda ?? '';
       if (f.observacao) f.observacao.value = data.observacao || '';
 
       if (f.comprimento_cm) f.comprimento_cm.value = data.comprimento_cm || '';
@@ -262,7 +264,8 @@
         f.data_pagamento,
         f.forma_pagamento,
         f.parcelas,
-        f.valor_unit,
+        f.custo_unitario,
+        f.preco_venda,
         f.observacao,
         f.comprimento_cm,
         f.largura_cm,
@@ -502,7 +505,8 @@
         <p><b>Data de pagamento:</b> ${i.data_pagamento || '-'}</p>
         <p><b>Forma de pagamento:</b> ${i.forma_pagamento || '-'}</p>
         <p><b>Parcelas:</b> ${Number(i.parcelas || 1)}</p>
-        <p><b>Valor unitario:</b> R$ ${Number(i.valor_unit || 0).toFixed(2)}</p>
+        <p><b>Custo unitario:</b> R$ ${Number(i.custo_unitario ?? i.valor_unit ?? 0).toFixed(2)}</p>
+        <p><b>Preco de venda:</b> ${String(i.preco_venda ?? '').trim() === '' ? '-' : `R$ ${Number(i.preco_venda || 0).toFixed(2)}`}</p>
         <p><b>Observacao:</b> ${i.observacao || '-'}</p>
 
         ${isMadeira ? `

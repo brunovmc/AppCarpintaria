@@ -32,11 +32,11 @@ function atualizarCachesManualmente() {
   const referenciaAtual = Utilities.formatDate(
     atualizadoEm,
     Session.getScriptTimeZone(),
-    'yyyy-MM'
+    "yyyy-MM",
   );
 
   function executar(nome, fn) {
-    if (typeof fn !== 'function') {
+    if (typeof fn !== "function") {
       return { ok: false, erro: `Funcao indisponivel: ${nome}` };
     }
     try {
@@ -51,29 +51,41 @@ function atualizarCachesManualmente() {
     atualizado_em: atualizadoEm,
     referencia_dashboard: referenciaAtual,
     caches: {
-      validacoes: executar('recarregarCacheValidacoes', recarregarCacheValidacoes),
-      estoque: executar('recarregarCacheEstoque', recarregarCacheEstoque),
-      compras: executar('recarregarCacheCompras', recarregarCacheCompras),
-      despesas_gerais: executar('recarregarCacheDespesasGerais', recarregarCacheDespesasGerais),
-      pagamentos: executar('recarregarCachePagamentos', recarregarCachePagamentos)
-    }
+      validacoes: executar(
+        "recarregarCacheValidacoes",
+        recarregarCacheValidacoes,
+      ),
+      estoque: executar("recarregarCacheEstoque", recarregarCacheEstoque),
+      compras: executar("recarregarCacheCompras", recarregarCacheCompras),
+      despesas_gerais: executar(
+        "recarregarCacheDespesasGerais",
+        recarregarCacheDespesasGerais,
+      ),
+      pagamentos: executar(
+        "recarregarCachePagamentos",
+        recarregarCachePagamentos,
+      ),
+    },
   };
 
-  const limparDashboard = executar('limparCacheDashboardFinanceiro', limparCacheDashboardFinanceiro);
-  const dashboard = executar('obterResumoDashboardFinanceiro', () =>
-    obterResumoDashboardFinanceiro(referenciaAtual, true)
+  const limparDashboard = executar(
+    "limparCacheDashboardFinanceiro",
+    limparCacheDashboardFinanceiro,
+  );
+  const dashboard = executar("obterResumoDashboardFinanceiro", () =>
+    obterResumoDashboardFinanceiro(referenciaAtual, true),
   );
 
   resultado.caches.dashboard = {
     limpeza: limparDashboard,
     recarregado: {
       ok: !dashboard?.erro,
-      referencia: dashboard?.referencia || referenciaAtual
-    }
+      referencia: dashboard?.referencia || referenciaAtual,
+    },
   };
 
-  resultado.ok = Object.values(resultado.caches).every(item => {
-    if (!item || typeof item !== 'object') return false;
+  resultado.ok = Object.values(resultado.caches).every((item) => {
+    if (!item || typeof item !== "object") return false;
     if (item.limpeza && item.recarregado) {
       const okLimpeza = item.limpeza?.ok !== false;
       const okRecarregado = item.recarregado?.ok !== false;
