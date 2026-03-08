@@ -30,6 +30,10 @@
         categoria: document.getElementById('categoria'),
         fornecedor: document.getElementById('fornecedor'),
         pago_por: document.getElementById('pago_por'),
+        data_pagamento: document.getElementById('data_pagamento'),
+        forma_pagamento: document.getElementById('forma_pagamento'),
+        parcelas_wrap: document.getElementById('parcelas_wrap'),
+        parcelas: document.getElementById('parcelas'),
         valor_unit: document.getElementById('valor_unit'),
         observacao: document.getElementById('observacao'),
 
@@ -64,6 +68,19 @@
       if (s === '') return 0;
       const n = Number(s.replace(',', '.'));
       return isNaN(n) ? 0 : n;
+    }
+
+    function normalizarFormaPagamento(valor) {
+      return String(valor || '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .trim()
+        .toUpperCase();
+    }
+
+    function formaExigeParcelas(valor) {
+      const forma = normalizarFormaPagamento(valor);
+      return forma === 'CREDITO' || forma === 'PIX PARCELADO' || forma === 'DINHEIRO';
     }
 
     function normalizarMapaCategoriasPorTipo(mapa) {
@@ -210,6 +227,9 @@
       if (f.categoria) f.categoria.value = data.categoria || '';
       if (f.fornecedor) f.fornecedor.value = data.fornecedor || '';
       if (f.pago_por) f.pago_por.value = data.pago_por || '';
+      if (f.data_pagamento) f.data_pagamento.value = data.data_pagamento || '';
+      if (f.forma_pagamento) f.forma_pagamento.value = data.forma_pagamento || '';
+      if (f.parcelas) f.parcelas.value = data.parcelas || '1';
 
       if (f.valor_unit) f.valor_unit.value = data.valor_unit || '';
       if (f.observacao) f.observacao.value = data.observacao || '';
@@ -225,6 +245,7 @@
 
       if (f.formTitulo) f.formTitulo.innerText = 'Editar Item';
       handleTipoChange();
+      handleFormaPagamentoChange();
     }
 
     function resetFormulario() {
@@ -238,6 +259,9 @@
         f.categoria,
         f.fornecedor,
         f.pago_por,
+        f.data_pagamento,
+        f.forma_pagamento,
+        f.parcelas,
         f.valor_unit,
         f.observacao,
         f.comprimento_cm,
@@ -253,6 +277,7 @@
       if (f.madeiraFields) f.madeiraFields.classList.add('hidden');
       if (f.quantidade) f.quantidade.readOnly = false;
       renderCategoriasDoTipo('', '');
+      handleFormaPagamentoChange();
       if (f.formTitulo) f.formTitulo.innerText = 'Novo Item';
     }
 
@@ -291,6 +316,18 @@
       if (!isMadeira && madeiraFields) {
         const inputs = madeiraFields.querySelectorAll('input');
         inputs.forEach(i => (i.value = ''));
+      }
+    }
+
+    function handleFormaPagamentoChange() {
+      const { forma_pagamento, parcelas_wrap, parcelas } = el();
+      if (!forma_pagamento || !parcelas_wrap || !parcelas) return;
+      const exibirParcelas = formaExigeParcelas(forma_pagamento.value);
+      parcelas_wrap.classList.toggle('hidden', !exibirParcelas);
+      if (!exibirParcelas) {
+        parcelas.value = '1';
+      } else if (!String(parcelas.value || '').trim() || Number(parcelas.value) < 1) {
+        parcelas.value = '1';
       }
     }
 
@@ -372,6 +409,24 @@
       pago_por.value = match ? match.value : '';
     }
 
+    function renderFormasPagamento(lista) {
+      const { forma_pagamento } = el();
+      if (!forma_pagamento || forma_pagamento.tagName !== 'SELECT') return;
+
+      const clean = limparVazios(lista);
+      const atual = String(forma_pagamento.value || '').trim();
+      forma_pagamento.innerHTML = '<option value="">Selecione</option>';
+      clean.forEach(v => {
+        const o = document.createElement('option');
+        o.value = v;
+        o.textContent = v;
+        forma_pagamento.appendChild(o);
+      });
+      const match = [...forma_pagamento.options].find(o => String(o.value || '').trim().toUpperCase() === atual.toUpperCase());
+      forma_pagamento.value = match ? match.value : '';
+      handleFormaPagamentoChange();
+    }
+
     /* =========================
        SELECTS DO PAINEL DE FILTRO
     ========================== */
@@ -444,6 +499,9 @@
       return `
         <p><b>Fornecedor:</b> ${i.fornecedor || '-'}</p>
         <p><b>Pago por:</b> ${i.pago_por || '-'}</p>
+        <p><b>Data de pagamento:</b> ${i.data_pagamento || '-'}</p>
+        <p><b>Forma de pagamento:</b> ${i.forma_pagamento || '-'}</p>
+        <p><b>Parcelas:</b> ${Number(i.parcelas || 1)}</p>
         <p><b>Valor unitario:</b> R$ ${Number(i.valor_unit || 0).toFixed(2)}</p>
         <p><b>Observacao:</b> ${i.observacao || '-'}</p>
 
@@ -694,6 +752,7 @@
       renderCategorias,
       renderFornecedores,
       renderPagosPor,
+      renderFormasPagamento,
 
       renderFiltroTipos,
       renderFiltroCategorias,
@@ -702,7 +761,8 @@
 
       setOpcoesAdicao,
       resetarAdicaoDestino,
-      atualizarQuantidadeMadeira
+      atualizarQuantidadeMadeira,
+      handleFormaPagamentoChange
     };
 
   })();

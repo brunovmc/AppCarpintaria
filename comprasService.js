@@ -20,8 +20,10 @@ const COMPRAS_SCHEMA = [
   'potencia',
   'voltagem',
   'comprado_em',
+  'data_pagamento',
   'data_vencimento',
-  'forma_pagamento_padrao',
+  'forma_pagamento',
+  'parcelas',
   'vida_util_mes',
   'observacao',
   'adicionado_estoque',
@@ -97,8 +99,11 @@ function validarPagoPorCompra(pagoPor) {
 
 function normalizarCamposFinanceirosCompra(payload) {
   const dados = { ...(payload || {}) };
+  dados.data_pagamento = normalizarDataFinanceiro(dados.data_pagamento, false, 'Data de pagamento');
   dados.data_vencimento = normalizarDataFinanceiro(dados.data_vencimento, false, 'Data de vencimento');
-  dados.forma_pagamento_padrao = validarFormaPagamentoFinanceiro(dados.forma_pagamento_padrao, false);
+  const formaPagamento = validarFormaPagamentoFinanceiro(dados.forma_pagamento, false);
+  dados.forma_pagamento = formaPagamento;
+  dados.parcelas = normalizarParcelasFinanceiro(dados.parcelas, formaPagamento);
   return dados;
 }
 
@@ -161,6 +166,7 @@ function listarCompras(forcarRecarregar) {
       ...i,
       criado_em: formatarDataCompraSeguro(i.criado_em, 'yyyy-MM-dd HH:mm'),
       comprado_em: formatarDataCompraSeguro(i.comprado_em, 'yyyy-MM-dd'),
+      data_pagamento: formatarDataCompraSeguro(i.data_pagamento, 'yyyy-MM-dd'),
       data_vencimento: formatarDataCompraSeguro(i.data_vencimento, 'yyyy-MM-dd')
     }));
 
@@ -256,6 +262,9 @@ function adicionarCompraAoEstoque(compraId) {
       potencia: compraNormalizada.potencia || '',
       voltagem: compraNormalizada.voltagem || '',
       comprado_em: compraNormalizada.comprado_em || '',
+      data_pagamento: compraNormalizada.data_pagamento || '',
+      forma_pagamento: compraNormalizada.forma_pagamento || '',
+      parcelas: compraNormalizada.parcelas || 1,
       data_vencimento: compraNormalizada.data_vencimento || '',
       vida_util_mes: compraNormalizada.vida_util_mes || '',
       observacao: compraNormalizada.observacao || ''

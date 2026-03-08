@@ -26,7 +26,8 @@ const DESPESAS_GERAIS_SCHEMA = [
   'data_competencia',
   'data_vencimento',
   'data_pagamento',
-  'forma_pagamento_padrao',
+  'forma_pagamento',
+  'parcelas',
   'fixo',
   'origem_fixo_id',
   'observacao'
@@ -224,6 +225,42 @@ function validarFormaPagamentoFinanceiro(formaPagamento, obrigatoria) {
   return match;
 }
 
+function normalizarFormaPagamentoFinanceiro(formaPagamento, obrigatoria) {
+  return validarFormaPagamentoFinanceiro(formaPagamento, obrigatoria);
+}
+
+function normalizarTextoSemAcentoFinanceiro(valor) {
+  return String(valor || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toUpperCase();
+}
+
+function formaAceitaParcelasFinanceiro(formaPagamento) {
+  const forma = normalizarTextoSemAcentoFinanceiro(formaPagamento);
+  return forma === 'CREDITO' || forma === 'PIX PARCELADO' || forma === 'DINHEIRO';
+}
+
+function normalizarParcelasFinanceiro(parcelas, formaPagamento) {
+  const aceitaParcelas = formaAceitaParcelasFinanceiro(formaPagamento);
+  const bruto = String(parcelas ?? '').trim();
+  if (!bruto) {
+    return 1;
+  }
+
+  const numero = Number(bruto.replace(',', '.'));
+  const inteiro = Number.isFinite(numero) ? Math.floor(numero) : NaN;
+  if (!Number.isFinite(inteiro) || inteiro < 1) {
+    throw new Error('Parcelas deve ser um numero inteiro maior ou igual a 1.');
+  }
+
+  if (!aceitaParcelas) {
+    return 1;
+  }
+  return inteiro;
+}
+
 function validarCategoriaDespesaFinanceiro(categoria, obrigatoria) {
   const valor = String(categoria || '').trim();
   if (!valor) {
@@ -264,6 +301,32 @@ function validarPagoPorFinanceiro(pagoPor, obrigatorio) {
     throw new Error('Pago por invalido.');
   }
   return match;
+}
+
+function aplicarRateioPagoPorFinanceiro(acumulador, pagoPor, valor) {
+  const alvo = acumulador || { bruno: 0, zizu: 0 };
+  const valorSeguro = round2Financeiro(parseNumeroBR(valor));
+  if (valorSeguro <= 0) return alvo;
+
+  const pagoPorNormalizado = normalizarTextoSemAcentoFinanceiro(pagoPor);
+  if (pagoPorNormalizado === 'AMBOS') {
+    const metade = round2Financeiro(valorSeguro / 2);
+    alvo.bruno = round2Financeiro(alvo.bruno + metade);
+    alvo.zizu = round2Financeiro(alvo.zizu + metade);
+    return alvo;
+  }
+
+  if (pagoPorNormalizado === 'BRUNO') {
+    alvo.bruno = round2Financeiro(alvo.bruno + valorSeguro);
+    return alvo;
+  }
+
+  if (pagoPorNormalizado === 'ZIZU') {
+    alvo.zizu = round2Financeiro(alvo.zizu + valorSeguro);
+    return alvo;
+  }
+
+  return alvo;
 }
 
 function limparCacheDespesasGerais() {
@@ -491,7 +554,8 @@ function normalizarPayloadDespesaGeral(payload) {
   );
   const dataVencimento = normalizarDataFinanceiro(dados.data_vencimento, false, 'Data de vencimento');
   const dataPagamento = normalizarDataFinanceiro(dados.data_pagamento, false, 'Data de pagamento');
-  const formaPadrao = validarFormaPagamentoFinanceiro(dados.forma_pagamento_padrao, false);
+  const formaPagamento = normalizarFormaPagamentoFinanceiro(dados.forma_pagamento, false);
+  const parcelas = normalizarParcelasFinanceiro(dados.parcelas, formaPagamento);
   const fixo = parseBooleanFinanceiro(dados.fixo);
 
   return {
@@ -503,7 +567,8 @@ function normalizarPayloadDespesaGeral(payload) {
     data_competencia: dataCompetencia,
     data_vencimento: dataVencimento,
     data_pagamento: dataPagamento,
-    forma_pagamento_padrao: formaPadrao,
+    forma_pagamento: formaPagamento,
+    parcelas,
     fixo,
     observacao: String(dados.observacao || '').trim()
   };
@@ -600,7 +665,8 @@ function gerarRecorrenciaDespesasFixasFinanceiro() {
           data_competencia: formatarDataYmdFinanceiro(proximaCompetencia),
           data_vencimento: proximoVencimento ? formatarDataYmdFinanceiro(proximoVencimento) : '',
           data_pagamento: '',
-          forma_pagamento_padrao: String(atual.item.forma_pagamento_padrao || '').trim(),
+          forma_pagamento: String(atual.item.forma_pagamento || '').trim(),
+          parcelas: normalizarParcelasFinanceiro(atual.item.parcelas, atual.item.forma_pagamento),
           fixo: true,
           origem_fixo_id: rootId,
           observacao: String(atual.item.observacao || '').trim()
@@ -929,6 +995,8 @@ function obterResumoDashboardFinanceiro(referenciaYm, forcarRecarregar) {
   const porFornecedor = {};
   const porMesPagamento = {};
   let gastoPagoMes = 0;
+  const contadoresMes = { bruno: 0, zizu: 0 };
+  const origensComPagamentoNoMes = {};
 
   pagamentosValidos.forEach(p => {
     const valor = round2Financeiro(parseNumeroBR(p.valor_pago));
@@ -963,7 +1031,36 @@ function obterResumoDashboardFinanceiro(referenciaYm, forcarRecarregar) {
       porTipo[tipo] = round2Financeiro((porTipo[tipo] || 0) + valor);
       porCategoria[categoria] = round2Financeiro((porCategoria[categoria] || 0) + valor);
       porFornecedor[fornecedor] = round2Financeiro((porFornecedor[fornecedor] || 0) + valor);
+      aplicarRateioPagoPorFinanceiro(contadoresMes, itemOrigem?.pago_por, valor);
+      const chaveOrigem = `${tipoOrigem}|${String(p.origem_id || '').trim()}`;
+      origensComPagamentoNoMes[chaveOrigem] = true;
     }
+  });
+
+  // Evita dupla contagem: se a origem teve pagamento no mes, conta apenas pagamento.
+  // Se nao teve pagamento no mes, conta o lancamento do mes.
+  compras.forEach(item => {
+    const dataLancamento = parseDataFinanceiro(item.comprado_em);
+    if (!dataLancamento || dataLancamento < inicio || dataLancamento >= fim) return;
+    const chaveOrigem = `${ORIGEM_TIPO_COMPRA}|${String(item.ID || '').trim()}`;
+    if (origensComPagamentoNoMes[chaveOrigem]) return;
+    aplicarRateioPagoPorFinanceiro(
+      contadoresMes,
+      item.pago_por,
+      getTotalPrevistoCompraFinanceiro(item)
+    );
+  });
+
+  despesas.forEach(item => {
+    const dataLancamento = parseDataFinanceiro(item.data_competencia);
+    if (!dataLancamento || dataLancamento < inicio || dataLancamento >= fim) return;
+    const chaveOrigem = `${ORIGEM_TIPO_DESPESA}|${String(item.ID || '').trim()}`;
+    if (origensComPagamentoNoMes[chaveOrigem]) return;
+    aplicarRateioPagoPorFinanceiro(
+      contadoresMes,
+      item.pago_por,
+      getTotalPrevistoDespesaFinanceiro(item)
+    );
   });
 
   const hoje = inicioDoDiaFinanceiro(new Date());
@@ -1021,7 +1118,9 @@ function obterResumoDashboardFinanceiro(referenciaYm, forcarRecarregar) {
       vencido_total: vencidoTotal,
       avencer_7_dias: aVencer7Dias,
       valor_estoque_total: round2Financeiro(valorEstoqueTotal),
-      quantidade_itens_estoque: estoque.length
+      quantidade_itens_estoque: estoque.length,
+      contador_bruno_mes: round2Financeiro(contadoresMes.bruno),
+      contador_zizu_mes: round2Financeiro(contadoresMes.zizu)
     },
     agregados: {
       gasto_por_tipo: ordenarAgregadoFinanceiro(porTipo, 10),

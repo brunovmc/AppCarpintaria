@@ -9,6 +9,19 @@
 
     let destinosProducao = [];
 
+    function normalizarTextoSemAcento(valor) {
+      return String(valor || '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .trim()
+        .toUpperCase();
+    }
+
+    function formaExigeParcelas(formaPagamento) {
+      const forma = normalizarTextoSemAcento(formaPagamento);
+      return forma === 'CREDITO' || forma === 'PIX PARCELADO' || forma === 'DINHEIRO';
+    }
+
     function setSalvando(ativo) {
       salvando = !!ativo;
       const btn = document.getElementById('btnSalvarEstoque');
@@ -50,6 +63,7 @@
           validacoes.categoriasPorTipo ||= {};
           validacoes.fornecedores ||= [];
           validacoes.pagosPor ||= [];
+          validacoes.formasPagamento ||= [];
 
           if (typeof window !== 'undefined') {
             window.AppValidacoesCache = {
@@ -57,7 +71,8 @@
               tipos: validacoes.tipos,
               categorias: validacoes.categorias,
               categoriasPorTipo: validacoes.categoriasPorTipo,
-              pagosPor: validacoes.pagosPor
+              pagosPor: validacoes.pagosPor,
+              formasPagamento: validacoes.formasPagamento
             };
           }
 
@@ -66,6 +81,7 @@
           EstoqueUI.renderCategorias?.(validacoes.categorias, validacoes.categoriasPorTipo);
           EstoqueUI.renderFornecedores?.(validacoes.fornecedores);
           EstoqueUI.renderPagosPor?.(validacoes.pagosPor);
+          EstoqueUI.renderFormasPagamento?.(validacoes.formasPagamento);
 
           EstoqueUI.renderFiltroTipos?.(validacoes.tipos);
           EstoqueUI.renderFiltroCategorias?.(validacoes.categorias);
@@ -122,8 +138,18 @@
 
       const tipo = get('tipo');
       const categoria = get('categoria');
+      const dataPagamento = String(get('data_pagamento') || '').trim();
+      const formaPagamento = String(get('forma_pagamento') || '').trim();
+      const parcelasBruto = parseNumeroInput(get('parcelas'));
+      const parcelas = formaExigeParcelas(formaPagamento)
+        ? Math.floor(Number(parcelasBruto || 0))
+        : 1;
       if (!categoriaValidaParaTipo(tipo, categoria)) {
         mostrarToast('Categoria invalida para o tipo selecionado', 'erro');
+        return;
+      }
+      if (formaExigeParcelas(formaPagamento) && (!isFinite(parcelas) || parcelas < 1)) {
+        mostrarToast('Parcelas deve ser um numero inteiro maior ou igual a 1', 'erro');
         return;
       }
 
@@ -152,6 +178,9 @@
         categoria,
         fornecedor: get('fornecedor'),
         pago_por: get('pago_por'),
+        data_pagamento: dataPagamento,
+        forma_pagamento: formaPagamento,
+        parcelas,
         valor_unit: parseNumeroInput(get('valor_unit')) || 0,
         observacao: get('observacao'),
         comprimento_cm,

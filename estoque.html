@@ -48,12 +48,27 @@
 
   <div class="campo-ajuda-wrap">
     <span class="campo-ajuda-tag">Fornecedor</span>
-    <input id="fornecedor">
+    <select id="fornecedor"></select>
   </div>
 
   <div class="campo-ajuda-wrap">
     <span class="campo-ajuda-tag">Pago por</span>
     <select id="pago_por"></select>
+  </div>
+
+  <div class="campo-ajuda-wrap">
+    <span class="campo-ajuda-tag">Data de pagamento</span>
+    <input id="data_pagamento" type="date">
+  </div>
+
+  <div class="campo-ajuda-wrap">
+    <span class="campo-ajuda-tag">Forma de pagamento</span>
+    <select id="forma_pagamento" onchange="EstoqueUI.handleFormaPagamentoChange()"></select>
+  </div>
+
+  <div id="parcelas_wrap" class="campo-ajuda-wrap hidden">
+    <span class="campo-ajuda-tag">Parcelas</span>
+    <input id="parcelas" type="number" min="1" step="1" value="1">
   </div>
 
   <div class="campo-ajuda-wrap">

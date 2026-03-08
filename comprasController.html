@@ -19,6 +19,19 @@
       return `${yyyy}-${mm}-${dd}`;
     }
 
+    function normalizarTextoSemAcento(valor) {
+      return String(valor || '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .trim()
+        .toUpperCase();
+    }
+
+    function formaExigeParcelas(formaPagamento) {
+      const forma = normalizarTextoSemAcento(formaPagamento);
+      return forma === 'CREDITO' || forma === 'PIX PARCELADO' || forma === 'DINHEIRO';
+    }
+
     function setSalvando(ativo) {
       salvando = !!ativo;
       const btn = document.getElementById('btnSalvarCompra');
@@ -120,8 +133,13 @@
       const tipo = get('compraTipo');
       const compradoEm = String(get('compraCompradoEm') || '').trim();
       const categoria = get('compraCategoria');
+      const dataPagamento = String(get('compraDataPagamento') || '').trim();
       const dataVencimento = String(get('compraDataVencimento') || '').trim();
-      const formaPagamentoPadrao = String(get('compraFormaPagamentoPadrao') || '').trim();
+      const formaPagamento = String(get('compraFormaPagamento') || '').trim();
+      const parcelasBruto = parseNumeroInput(get('compraParcelas'));
+      const parcelas = formaExigeParcelas(formaPagamento)
+        ? Math.floor(Number(parcelasBruto || 0))
+        : 1;
 
       if (!compradoEm) {
         mostrarToast('Campo "Comprado em" e obrigatorio', 'erro');
@@ -156,6 +174,10 @@
         mostrarToast('Quantidade deve ser maior que zero', 'erro');
         return;
       }
+      if (formaExigeParcelas(formaPagamento) && (!isFinite(parcelas) || parcelas < 1)) {
+        mostrarToast('Parcelas deve ser um numero inteiro maior ou igual a 1', 'erro');
+        return;
+      }
 
       const dados = {
         tipo,
@@ -173,8 +195,10 @@
         potencia: get('compraPotencia'),
         voltagem: get('compraVoltagem'),
         comprado_em: compradoEm,
+        data_pagamento: dataPagamento,
         data_vencimento: dataVencimento,
-        forma_pagamento_padrao: formaPagamentoPadrao,
+        forma_pagamento: formaPagamento,
+        parcelas,
         vida_util_mes: parseNumeroInput(get('compraVidaUtilMes')) || ''
       };
 

@@ -80,8 +80,13 @@
     </div>
 
     <div class="campo-ajuda-wrap">
-      <span class="campo-ajuda-tag">Forma pagamento padrao</span>
-      <select id="despesaFormaPadrao"></select>
+      <span class="campo-ajuda-tag">Forma de pagamento</span>
+      <select id="despesaFormaPagamento" onchange="DashboardController.handleDespesaFormaPagamentoChange()"></select>
+    </div>
+
+    <div id="despesaParcelasWrap" class="campo-ajuda-wrap hidden">
+      <span class="campo-ajuda-tag">Parcelas</span>
+      <input id="despesaParcelas" type="number" min="1" step="1" value="1">
     </div>
 
     <div class="campo-ajuda-wrap">

@@ -31,7 +31,9 @@
         despesaDataCompetencia: document.getElementById('despesaDataCompetencia'),
         despesaDataVencimento: document.getElementById('despesaDataVencimento'),
         despesaDataPagamento: document.getElementById('despesaDataPagamento'),
-        despesaFormaPadrao: document.getElementById('despesaFormaPadrao'),
+        despesaFormaPagamento: document.getElementById('despesaFormaPagamento'),
+        despesaParcelasWrap: document.getElementById('despesaParcelasWrap'),
+        despesaParcelas: document.getElementById('despesaParcelas'),
         despesaFixo: document.getElementById('despesaFixo'),
         despesaObservacao: document.getElementById('despesaObservacao'),
 
@@ -76,6 +78,19 @@
       const n = Number(valor || 0);
       const seguro = isNaN(n) ? 0 : n;
       return `R$ ${seguro.toFixed(2)}`;
+    }
+
+    function normalizarFormaPagamento(valor) {
+      return String(valor || '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .trim()
+        .toUpperCase();
+    }
+
+    function formaExigeParcelas(valor) {
+      const forma = normalizarFormaPagamento(valor);
+      return forma === 'CREDITO' || forma === 'PIX PARCELADO' || forma === 'DINHEIRO';
     }
 
     function escapeHtml(valor) {
@@ -125,8 +140,9 @@
           renderSelect(f.despesaCategoria, validacoes.categoriasDespesas);
           renderSelect(f.despesaFornecedor, validacoes.fornecedores);
           renderSelect(f.despesaPagoPor, validacoes.pagosPor);
-          renderSelect(f.despesaFormaPadrao, validacoes.formasPagamento);
+          renderSelect(f.despesaFormaPagamento, validacoes.formasPagamento);
           renderSelect(f.pagDespesaForma, validacoes.formasPagamento);
+          handleDespesaFormaPagamentoChange();
 
           if (typeof onDone === 'function') onDone();
         })
@@ -189,15 +205,11 @@
       `).join('');
     }
 
-    function renderCards(cards, referencia) {
+    function renderCards(cards) {
       const f = el();
       if (!f.cards) return;
       const c = cards || {};
       f.cards.innerHTML = `
-        <div class="dash-card">
-          <div class="dash-card-label">Referencia</div>
-          <div class="dash-card-valor">${escapeHtml(referencia || '-')}</div>
-        </div>
         <div class="dash-card">
           <div class="dash-card-label">Pago no mes</div>
           <div class="dash-card-valor">${formatarMoeda(c.gasto_pago_mes || 0)}</div>
@@ -222,6 +234,14 @@
           <div class="dash-card-label">Itens ativos em estoque</div>
           <div class="dash-card-valor">${Number(c.quantidade_itens_estoque || 0)}</div>
         </div>
+        <div class="dash-card">
+          <div class="dash-card-label">BRUNO (lancado + pago)</div>
+          <div class="dash-card-valor">${formatarMoeda(c.contador_bruno_mes || 0)}</div>
+        </div>
+        <div class="dash-card">
+          <div class="dash-card-label">ZIZU (lancado + pago)</div>
+          <div class="dash-card-valor">${formatarMoeda(c.contador_zizu_mes || 0)}</div>
+        </div>
       `;
     }
 
@@ -231,7 +251,7 @@
 
       google.script.run
         .withSuccessHandler(resumo => {
-          renderCards(resumo?.cards || {}, resumo?.referencia || referencia);
+          renderCards(resumo?.cards || {});
           renderListaAgregada(f.gastoPorTipo, resumo?.agregados?.gasto_por_tipo);
           renderListaAgregada(f.gastoPorCategoria, resumo?.agregados?.gasto_por_categoria);
           renderListaAgregada(f.gastoPorFornecedor, resumo?.agregados?.gasto_por_fornecedor);
@@ -259,10 +279,12 @@
       if (f.despesaDataCompetencia) f.despesaDataCompetencia.value = getHojeISO();
       if (f.despesaDataVencimento) f.despesaDataVencimento.value = '';
       if (f.despesaDataPagamento) f.despesaDataPagamento.value = '';
-      if (f.despesaFormaPadrao) f.despesaFormaPadrao.value = '';
+      if (f.despesaFormaPagamento) f.despesaFormaPagamento.value = '';
+      if (f.despesaParcelas) f.despesaParcelas.value = '1';
       if (f.despesaFixo) f.despesaFixo.checked = false;
       if (f.despesaObservacao) f.despesaObservacao.value = '';
       despesaEditandoId = null;
+      handleDespesaFormaPagamentoChange();
       setModoFormularioDespesa(false);
     }
 
@@ -289,9 +311,11 @@
       if (f.despesaDataCompetencia) f.despesaDataCompetencia.value = item.data_competencia || '';
       if (f.despesaDataVencimento) f.despesaDataVencimento.value = item.data_vencimento || '';
       if (f.despesaDataPagamento) f.despesaDataPagamento.value = item.data_pagamento || '';
-      if (f.despesaFormaPadrao) f.despesaFormaPadrao.value = item.forma_pagamento_padrao || '';
+      if (f.despesaFormaPagamento) f.despesaFormaPagamento.value = item.forma_pagamento || item.forma_pagamento_padrao || '';
+      if (f.despesaParcelas) f.despesaParcelas.value = item.parcelas || '1';
       if (f.despesaFixo) f.despesaFixo.checked = parseBooleanInput(item.fixo);
       if (f.despesaObservacao) f.despesaObservacao.value = item.observacao || '';
+      handleDespesaFormaPagamentoChange();
     }
 
     function abrirFormularioDespesa() {
@@ -359,6 +383,15 @@
         mostrarToast('Valor total invalido', 'erro');
         return;
       }
+      const formaPagamento = String(f.despesaFormaPagamento?.value || '').trim();
+      const parcelasBruto = parseNumeroInput(f.despesaParcelas?.value);
+      const parcelas = formaExigeParcelas(formaPagamento)
+        ? Math.floor(Number(parcelasBruto || 0))
+        : 1;
+      if (formaExigeParcelas(formaPagamento) && (!isFinite(parcelas) || parcelas < 1)) {
+        mostrarToast('Parcelas deve ser um numero inteiro maior ou igual a 1', 'erro');
+        return;
+      }
 
       const payload = {
         descricao,
@@ -369,7 +402,8 @@
         data_competencia: String(f.despesaDataCompetencia?.value || '').trim(),
         data_vencimento: String(f.despesaDataVencimento?.value || '').trim(),
         data_pagamento: String(f.despesaDataPagamento?.value || '').trim(),
-        forma_pagamento_padrao: String(f.despesaFormaPadrao?.value || '').trim(),
+        forma_pagamento: formaPagamento,
+        parcelas,
         fixo: !!f.despesaFixo?.checked,
         observacao: String(f.despesaObservacao?.value || '').trim()
       };
@@ -425,7 +459,7 @@
               ${escapeHtml(d.categoria || 'SEM_CATEGORIA')} | ${escapeHtml(d.fornecedor || 'SEM_FORNECEDOR')} | Pago por: ${escapeHtml(d.pago_por || '-')}<br>
               Previsto: ${formatarMoeda(d.total_previsto || 0)} | Pago: ${formatarMoeda(d.total_pago || 0)} | Pendente: ${formatarMoeda(d.total_pendente || 0)}<br>
               Status: ${escapeHtml(d.status_pagamento || 'PENDENTE')} | Vencimento: ${escapeHtml(d.data_vencimento || '-')}<br>
-              Pagamento: ${escapeHtml(d.data_pagamento || '-')} | Fixo: ${fixo ? 'SIM' : 'NAO'}
+              Pagamento: ${escapeHtml(d.data_pagamento || '-')} | Forma: ${escapeHtml(d.forma_pagamento || '-')} | Parcelas: ${Number(d.parcelas || 1)} | Fixo: ${fixo ? 'SIM' : 'NAO'}
             </div>
             <div class="acoes">
               <button onclick="DashboardController.editarDespesa('${escapeHtml(d.ID)}')">Editar</button>
@@ -495,10 +529,22 @@
       }
       if (f.pagDespesaData) f.pagDespesaData.value = item.data_pagamento || getHojeISO();
       if (f.pagDespesaValor) f.pagDespesaValor.value = pendente.toFixed(2);
-      if (f.pagDespesaForma) f.pagDespesaForma.value = item.forma_pagamento_padrao || '';
+      if (f.pagDespesaForma) f.pagDespesaForma.value = item.forma_pagamento || item.forma_pagamento_padrao || '';
       if (f.pagDespesaObservacao) f.pagDespesaObservacao.value = '';
       if (f.modalPagamentoDespesa) f.modalPagamentoDespesa.classList.remove('hidden');
       setSalvandoPagamentoDespesa(false);
+    }
+
+    function handleDespesaFormaPagamentoChange() {
+      const f = el();
+      if (!f.despesaFormaPagamento || !f.despesaParcelasWrap || !f.despesaParcelas) return;
+      const exibir = formaExigeParcelas(f.despesaFormaPagamento.value);
+      f.despesaParcelasWrap.classList.toggle('hidden', !exibir);
+      if (!exibir) {
+        f.despesaParcelas.value = '1';
+      } else if (!String(f.despesaParcelas.value || '').trim() || Number(f.despesaParcelas.value) < 1) {
+        f.despesaParcelas.value = '1';
+      }
     }
 
     function confirmarPagamentoDespesa() {
@@ -566,7 +612,8 @@
       excluirDespesa,
       registrarPagamentoDespesa,
       confirmarPagamentoDespesa,
-      cancelarPagamentoDespesa
+      cancelarPagamentoDespesa,
+      handleDespesaFormaPagamentoChange
     };
   })();
 </script>

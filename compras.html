@@ -48,7 +48,7 @@
 
   <div class="campo-ajuda-wrap">
     <span class="campo-ajuda-tag">Fornecedor</span>
-    <input id="compraFornecedor">
+    <select id="compraFornecedor"></select>
   </div>
 
   <div class="campo-ajuda-wrap">
@@ -72,13 +72,23 @@
   </div>
 
   <div class="campo-ajuda-wrap">
+    <span class="campo-ajuda-tag">Data de pagamento</span>
+    <input id="compraDataPagamento" type="date">
+  </div>
+
+  <div class="campo-ajuda-wrap">
     <span class="campo-ajuda-tag">Vencimento</span>
     <input id="compraDataVencimento" type="date">
   </div>
 
   <div class="campo-ajuda-wrap">
-    <span class="campo-ajuda-tag">Forma pagamento padrao</span>
-    <select id="compraFormaPagamentoPadrao"></select>
+    <span class="campo-ajuda-tag">Forma de pagamento</span>
+    <select id="compraFormaPagamento" onchange="ComprasUI.handleFormaPagamentoChange()"></select>
+  </div>
+
+  <div id="compraParcelasWrap" class="campo-ajuda-wrap hidden">
+    <span class="campo-ajuda-tag">Parcelas</span>
+    <input id="compraParcelas" type="number" min="1" step="1" value="1">
   </div>
 
   <div id="compraEquipamentoFields" class="hidden">

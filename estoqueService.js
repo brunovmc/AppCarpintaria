@@ -20,6 +20,9 @@ const ESTOQUE_SCHEMA = [
   'potencia',
   'voltagem',
   'comprado_em',
+  'data_pagamento',
+  'forma_pagamento',
+  'parcelas',
   'vida_util_mes',
   'observacao'
 ];
@@ -60,6 +63,10 @@ function normalizarPayloadMadeiraEstoque(payload) {
   const dados = { ...(payload || {}) };
   const tipo = String(dados.tipo || '').trim().toUpperCase();
   dados.pago_por = validarPagoPorEstoque(dados.pago_por);
+  dados.data_pagamento = normalizarDataFinanceiro(dados.data_pagamento, false, 'Data de pagamento');
+  const formaPagamento = validarFormaPagamentoFinanceiro(dados.forma_pagamento, false);
+  dados.forma_pagamento = formaPagamento;
+  dados.parcelas = normalizarParcelasFinanceiro(dados.parcelas, formaPagamento);
 
   if (!categoriaValidaParaTipoEstoque(tipo, dados.categoria)) {
     throw new Error('Categoria invalida para o tipo selecionado.');
@@ -81,6 +88,20 @@ function normalizarPayloadMadeiraEstoque(payload) {
   dados.quantidade = Number(((comprimento * largura * espessura) / 1000000).toFixed(2));
   dados.unidade = 'M3';
   return dados;
+}
+
+function formatarDataEstoqueSeguro(valor, formato) {
+  if (!valor) return '';
+  let d = null;
+  if (typeof parseDataFinanceiro === 'function') {
+    d = parseDataFinanceiro(valor);
+  }
+  if (!d) {
+    const fallback = new Date(valor);
+    d = isNaN(fallback.getTime()) ? null : fallback;
+  }
+  if (!d) return '';
+  return Utilities.formatDate(d, Session.getScriptTimeZone(), formato);
 }
 
 
@@ -127,12 +148,9 @@ function listarEstoque(forcarRecarregar) {
     .filter(i => String(i.ativo).toLowerCase() === 'true')
     .map(i => ({
       ...i,
-      criado_em: i.criado_em
-        ? Utilities.formatDate(new Date(i.criado_em), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm')
-        : '',
-      comprado_em: i.comprado_em
-        ? Utilities.formatDate(new Date(i.comprado_em), Session.getScriptTimeZone(), 'yyyy-MM-dd')
-        : ''
+      criado_em: formatarDataEstoqueSeguro(i.criado_em, 'yyyy-MM-dd HH:mm'),
+      comprado_em: formatarDataEstoqueSeguro(i.comprado_em, 'yyyy-MM-dd'),
+      data_pagamento: formatarDataEstoqueSeguro(i.data_pagamento, 'yyyy-MM-dd')
     }));
   salvarCacheListaEstoque(lista);
   return lista;
@@ -198,6 +216,8 @@ function obterItemEstoque(id) {
     valor_unit: item.valor_unit || '',
     fornecedor: item.fornecedor || '',
     pago_por: item.pago_por || '',
+    forma_pagamento: item.forma_pagamento || '',
+    parcelas: item.parcelas || '',
     observacao: item.observacao || '',
 
     potencia: item.potencia || '',
@@ -205,19 +225,14 @@ function obterItemEstoque(id) {
     vida_util_mes: item.vida_util_mes || '',
 
     criado_em: item.criado_em
-      ? Utilities.formatDate(
-          new Date(item.criado_em),
-          Session.getScriptTimeZone(),
-          'yyyy-MM-dd HH:mm'
-        )
+      ? formatarDataEstoqueSeguro(item.criado_em, 'yyyy-MM-dd HH:mm')
       : '',
 
     comprado_em: item.comprado_em
-      ? Utilities.formatDate(
-          new Date(item.comprado_em),
-          Session.getScriptTimeZone(),
-          'yyyy-MM-dd'
-        )
+      ? formatarDataEstoqueSeguro(item.comprado_em, 'yyyy-MM-dd')
+      : '',
+    data_pagamento: item.data_pagamento
+      ? formatarDataEstoqueSeguro(item.data_pagamento, 'yyyy-MM-dd')
       : ''
   };
 }

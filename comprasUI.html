@@ -39,8 +39,11 @@
         potencia: document.getElementById('compraPotencia'),
         voltagem: document.getElementById('compraVoltagem'),
         comprado_em: document.getElementById('compraCompradoEm'),
+        data_pagamento: document.getElementById('compraDataPagamento'),
         data_vencimento: document.getElementById('compraDataVencimento'),
-        forma_pagamento_padrao: document.getElementById('compraFormaPagamentoPadrao'),
+        forma_pagamento: document.getElementById('compraFormaPagamento'),
+        parcelas_wrap: document.getElementById('compraParcelasWrap'),
+        parcelas: document.getElementById('compraParcelas'),
         vida_util_mes: document.getElementById('compraVidaUtilMes'),
 
         equipamentoFields: document.getElementById('compraEquipamentoFields'),
@@ -86,6 +89,19 @@
       const mm = String(d.getMonth() + 1).padStart(2, '0');
       const dd = String(d.getDate()).padStart(2, '0');
       return `${yyyy}-${mm}-${dd}`;
+    }
+
+    function normalizarFormaPagamento(valor) {
+      return String(valor || '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .trim()
+        .toUpperCase();
+    }
+
+    function formaExigeParcelas(valor) {
+      const forma = normalizarFormaPagamento(valor);
+      return forma === 'CREDITO' || forma === 'PIX PARCELADO' || forma === 'DINHEIRO';
     }
 
     function compraJaAdicionadaAoEstoque(item) {
@@ -241,12 +257,15 @@
       if (f.potencia) f.potencia.value = data.potencia || '';
       if (f.voltagem) f.voltagem.value = data.voltagem || '';
       if (f.comprado_em) f.comprado_em.value = data.comprado_em || '';
+      if (f.data_pagamento) f.data_pagamento.value = data.data_pagamento || '';
       if (f.data_vencimento) f.data_vencimento.value = data.data_vencimento || '';
-      if (f.forma_pagamento_padrao) f.forma_pagamento_padrao.value = data.forma_pagamento_padrao || '';
+      if (f.forma_pagamento) f.forma_pagamento.value = data.forma_pagamento || data.forma_pagamento_padrao || '';
+      if (f.parcelas) f.parcelas.value = data.parcelas || '1';
       if (f.vida_util_mes) f.vida_util_mes.value = data.vida_util_mes || '';
 
       definirTituloFormulario('Editar Compra');
       handleTipoChange();
+      handleFormaPagamentoChange();
     }
 
     function resetFormulario() {
@@ -268,8 +287,10 @@
         f.potencia,
         f.voltagem,
         f.comprado_em,
+        f.data_pagamento,
         f.data_vencimento,
-        f.forma_pagamento_padrao,
+        f.forma_pagamento,
+        f.parcelas,
         f.vida_util_mes
       ].forEach(i => i && (i.value = ''));
 
@@ -277,6 +298,7 @@
       if (f.madeiraFields) f.madeiraFields.classList.add('hidden');
       if (f.quantidade) f.quantidade.readOnly = false;
       renderCategoriasDoTipo('', '');
+      handleFormaPagamentoChange();
       definirTituloFormulario('Nova Compra');
     }
 
@@ -315,6 +337,18 @@
       if (!isMadeira && madeiraFields) {
         const inputs = madeiraFields.querySelectorAll('input');
         inputs.forEach(i => (i.value = ''));
+      }
+    }
+
+    function handleFormaPagamentoChange() {
+      const { forma_pagamento, parcelas_wrap, parcelas } = el();
+      if (!forma_pagamento || !parcelas_wrap || !parcelas) return;
+      const exibirParcelas = formaExigeParcelas(forma_pagamento.value);
+      parcelas_wrap.classList.toggle('hidden', !exibirParcelas);
+      if (!exibirParcelas) {
+        parcelas.value = '1';
+      } else if (!String(parcelas.value || '').trim() || Number(parcelas.value) < 1) {
+        parcelas.value = '1';
       }
     }
 
@@ -397,7 +431,7 @@
     }
 
     function renderFormasPagamento(lista) {
-      const { forma_pagamento_padrao, pagamentoForma } = el();
+      const { forma_pagamento, pagamentoForma } = el();
       const clean = limparVazios(lista);
 
       const preencher = selectEl => {
@@ -414,8 +448,9 @@
         selectEl.value = match ? match.value : '';
       };
 
-      preencher(forma_pagamento_padrao);
+      preencher(forma_pagamento);
       preencher(pagamentoForma);
+      handleFormaPagamentoChange();
     }
 
     function construirIndiceItens(lista) {
@@ -477,7 +512,10 @@
         <p><b>Status:</b> ${status}</p>
         <p><b>Financeiro:</b> ${pagamentoResumo}</p>
         <p><b>Comprado em:</b> ${i.comprado_em || '-'}</p>
+        <p><b>Data de pagamento:</b> ${i.data_pagamento || '-'}</p>
         <p><b>Vencimento:</b> ${i.data_vencimento || '-'}</p>
+        <p><b>Forma de pagamento:</b> ${i.forma_pagamento || '-'}</p>
+        <p><b>Parcelas:</b> ${Number(i.parcelas || 1)}</p>
         <p><b>Ultimo pagamento:</b> ${i.data_ultimo_pagamento || '-'}${i.forma_ultimo_pagamento ? ` (${i.forma_ultimo_pagamento})` : ''}</p>
         <p><b>Valor unitario:</b> R$ ${Number(i.valor_unit || 0).toFixed(2)}</p>
         <p><b>Observacao:</b> ${i.observacao || '-'}</p>
@@ -704,7 +742,7 @@
         const pendente = Number(item?.total_pendente || 0);
         f.pagamentoValor.value = pendente > 0 ? pendente.toFixed(2) : '';
       }
-      if (f.pagamentoForma) f.pagamentoForma.value = item?.forma_pagamento_padrao || '';
+      if (f.pagamentoForma) f.pagamentoForma.value = item?.forma_pagamento || item?.forma_pagamento_padrao || '';
       if (f.pagamentoObservacao) f.pagamentoObservacao.value = '';
 
       f.pagamentoModal.classList.remove('hidden');
@@ -749,6 +787,7 @@
       preencherFormulario,
       resetFormulario,
       handleTipoChange,
+      handleFormaPagamentoChange,
       renderLista,
 
       renderTipos,
