@@ -3,6 +3,7 @@
     let iniciado = false;
     let validacoes = {};
     let despesas = [];
+    let despesaEditandoId = null;
     let salvandoDespesa = false;
     let despesaPagamentoId = null;
     let salvandoPagamentoDespesa = false;
@@ -19,15 +20,19 @@
 
         listaDespesas: document.getElementById('listaDespesasGerais'),
         formDespesa: document.getElementById('formularioDespesaGeral'),
+        despesaFormTitulo: document.getElementById('despesaFormTitulo'),
         btnSalvarDespesa: document.getElementById('btnSalvarDespesaGeral'),
 
         despesaDescricao: document.getElementById('despesaDescricao'),
         despesaCategoria: document.getElementById('despesaCategoria'),
         despesaFornecedor: document.getElementById('despesaFornecedor'),
+        despesaPagoPor: document.getElementById('despesaPagoPor'),
         despesaValorTotal: document.getElementById('despesaValorTotal'),
         despesaDataCompetencia: document.getElementById('despesaDataCompetencia'),
         despesaDataVencimento: document.getElementById('despesaDataVencimento'),
+        despesaDataPagamento: document.getElementById('despesaDataPagamento'),
         despesaFormaPadrao: document.getElementById('despesaFormaPadrao'),
+        despesaFixo: document.getElementById('despesaFixo'),
         despesaObservacao: document.getElementById('despesaObservacao'),
 
         modalPagamentoDespesa: document.getElementById('modalPagamentoDespesa'),
@@ -60,6 +65,11 @@
       if (!s) return 0;
       const n = Number(s.replace(',', '.'));
       return isNaN(n) ? 0 : n;
+    }
+
+    function parseBooleanInput(valor) {
+      const s = String(valor ?? '').trim().toLowerCase();
+      return s === 'true' || s === '1' || s === 'sim' || s === 'yes';
     }
 
     function formatarMoeda(valor) {
@@ -106,13 +116,15 @@
       google.script.run
         .withSuccessHandler(data => {
           validacoes = data || {};
-          validacoes.categorias ||= [];
+          validacoes.categoriasDespesas ||= [];
           validacoes.fornecedores ||= [];
           validacoes.formasPagamento ||= [];
+          validacoes.pagosPor ||= [];
 
           const f = el();
-          renderSelect(f.despesaCategoria, validacoes.categorias);
+          renderSelect(f.despesaCategoria, validacoes.categoriasDespesas);
           renderSelect(f.despesaFornecedor, validacoes.fornecedores);
+          renderSelect(f.despesaPagoPor, validacoes.pagosPor);
           renderSelect(f.despesaFormaPadrao, validacoes.formasPagamento);
           renderSelect(f.pagDespesaForma, validacoes.formasPagamento);
 
@@ -242,11 +254,44 @@
       if (f.despesaDescricao) f.despesaDescricao.value = '';
       if (f.despesaCategoria) f.despesaCategoria.value = '';
       if (f.despesaFornecedor) f.despesaFornecedor.value = '';
+      if (f.despesaPagoPor) f.despesaPagoPor.value = '';
       if (f.despesaValorTotal) f.despesaValorTotal.value = '';
       if (f.despesaDataCompetencia) f.despesaDataCompetencia.value = getHojeISO();
       if (f.despesaDataVencimento) f.despesaDataVencimento.value = '';
+      if (f.despesaDataPagamento) f.despesaDataPagamento.value = '';
       if (f.despesaFormaPadrao) f.despesaFormaPadrao.value = '';
+      if (f.despesaFixo) f.despesaFixo.checked = false;
       if (f.despesaObservacao) f.despesaObservacao.value = '';
+      despesaEditandoId = null;
+      setModoFormularioDespesa(false);
+    }
+
+    function setModoFormularioDespesa(editando) {
+      const f = el();
+      const ehEdicao = !!editando;
+      if (f.despesaFormTitulo) {
+        f.despesaFormTitulo.textContent = ehEdicao ? 'Editar despesa' : 'Nova despesa';
+      }
+      if (f.btnSalvarDespesa && !salvandoDespesa) {
+        f.btnSalvarDespesa.textContent = ehEdicao ? 'Salvar alteracoes' : 'Salvar despesa';
+      }
+    }
+
+    function preencherFormularioDespesa(item) {
+      const f = el();
+      if (!item) return;
+
+      if (f.despesaDescricao) f.despesaDescricao.value = item.descricao || '';
+      if (f.despesaCategoria) f.despesaCategoria.value = item.categoria || '';
+      if (f.despesaFornecedor) f.despesaFornecedor.value = item.fornecedor || '';
+      if (f.despesaPagoPor) f.despesaPagoPor.value = item.pago_por || '';
+      if (f.despesaValorTotal) f.despesaValorTotal.value = item.valor_total || '';
+      if (f.despesaDataCompetencia) f.despesaDataCompetencia.value = item.data_competencia || '';
+      if (f.despesaDataVencimento) f.despesaDataVencimento.value = item.data_vencimento || '';
+      if (f.despesaDataPagamento) f.despesaDataPagamento.value = item.data_pagamento || '';
+      if (f.despesaFormaPadrao) f.despesaFormaPadrao.value = item.forma_pagamento_padrao || '';
+      if (f.despesaFixo) f.despesaFixo.checked = parseBooleanInput(item.fixo);
+      if (f.despesaObservacao) f.despesaObservacao.value = item.observacao || '';
     }
 
     function abrirFormularioDespesa() {
@@ -255,6 +300,24 @@
       limparFormularioDespesa();
       f.formDespesa.classList.remove('hidden');
       f.formDespesa.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
+    function editarDespesa(id) {
+      const despesaId = String(id || '').trim();
+      const item = despesas.find(d => String(d.ID || '').trim() === despesaId);
+      if (!item) {
+        mostrarToast('Despesa nao encontrada', 'erro');
+        return;
+      }
+
+      despesaEditandoId = despesaId;
+      preencherFormularioDespesa(item);
+      setModoFormularioDespesa(true);
+      const f = el();
+      if (f.formDespesa) {
+        f.formDespesa.classList.remove('hidden');
+        f.formDespesa.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
     }
 
     function cancelarFormularioDespesa() {
@@ -269,7 +332,11 @@
       const f = el();
       if (f.btnSalvarDespesa) {
         f.btnSalvarDespesa.disabled = salvandoDespesa;
-        f.btnSalvarDespesa.textContent = salvandoDespesa ? 'Salvando...' : 'Salvar despesa';
+        if (salvandoDespesa) {
+          f.btnSalvarDespesa.textContent = 'Salvando...';
+        } else {
+          f.btnSalvarDespesa.textContent = despesaEditandoId ? 'Salvar alteracoes' : 'Salvar despesa';
+        }
       }
     }
 
@@ -278,9 +345,14 @@
       const f = el();
 
       const descricao = String(f.despesaDescricao?.value || '').trim();
+      const categoria = String(f.despesaCategoria?.value || '').trim();
       const valorTotal = parseNumeroInput(f.despesaValorTotal?.value);
       if (!descricao) {
         mostrarToast('Descricao da despesa e obrigatoria', 'erro');
+        return;
+      }
+      if (!categoria) {
+        mostrarToast('Categoria da despesa e obrigatoria', 'erro');
         return;
       }
       if (!isFinite(valorTotal) || valorTotal <= 0) {
@@ -290,17 +362,20 @@
 
       const payload = {
         descricao,
-        categoria: String(f.despesaCategoria?.value || '').trim(),
+        categoria,
         fornecedor: String(f.despesaFornecedor?.value || '').trim(),
+        pago_por: String(f.despesaPagoPor?.value || '').trim(),
         valor_total: valorTotal,
         data_competencia: String(f.despesaDataCompetencia?.value || '').trim(),
         data_vencimento: String(f.despesaDataVencimento?.value || '').trim(),
+        data_pagamento: String(f.despesaDataPagamento?.value || '').trim(),
         forma_pagamento_padrao: String(f.despesaFormaPadrao?.value || '').trim(),
+        fixo: !!f.despesaFixo?.checked,
         observacao: String(f.despesaObservacao?.value || '').trim()
       };
 
       setSalvandoDespesa(true);
-      google.script.run
+      const runner = google.script.run
         .withFailureHandler(err => {
           setSalvandoDespesa(false);
           mostrarToast(err?.message || 'Erro ao salvar despesa', 'erro');
@@ -310,8 +385,13 @@
           cancelarFormularioDespesa();
           mostrarToast('Despesa salva');
           atualizar();
-        })
-        .criarDespesaGeral(payload);
+        });
+
+      if (despesaEditandoId) {
+        runner.atualizarDespesaGeral(despesaEditandoId, payload);
+      } else {
+        runner.criarDespesaGeral(payload);
+      }
     }
 
     function carregarDespesas() {
@@ -337,15 +417,18 @@
       f.listaDespesas.innerHTML = despesas.map(d => {
         const pendente = Number(d.total_pendente || 0);
         const podePagar = pendente > 0.009;
+        const fixo = parseBooleanInput(d.fixo);
         return `
           <div class="card">
             <div class="card-resumo">
               <strong>${escapeHtml(d.descricao || '-')}</strong><br>
-              ${escapeHtml(d.categoria || 'SEM_CATEGORIA')} | ${escapeHtml(d.fornecedor || 'SEM_FORNECEDOR')}<br>
+              ${escapeHtml(d.categoria || 'SEM_CATEGORIA')} | ${escapeHtml(d.fornecedor || 'SEM_FORNECEDOR')} | Pago por: ${escapeHtml(d.pago_por || '-')}<br>
               Previsto: ${formatarMoeda(d.total_previsto || 0)} | Pago: ${formatarMoeda(d.total_pago || 0)} | Pendente: ${formatarMoeda(d.total_pendente || 0)}<br>
-              Status: ${escapeHtml(d.status_pagamento || 'PENDENTE')} | Vencimento: ${escapeHtml(d.data_vencimento || '-')}
+              Status: ${escapeHtml(d.status_pagamento || 'PENDENTE')} | Vencimento: ${escapeHtml(d.data_vencimento || '-')}<br>
+              Pagamento: ${escapeHtml(d.data_pagamento || '-')} | Fixo: ${fixo ? 'SIM' : 'NAO'}
             </div>
             <div class="acoes">
+              <button onclick="DashboardController.editarDespesa('${escapeHtml(d.ID)}')">Editar</button>
               ${podePagar ? `<button onclick="DashboardController.registrarPagamentoDespesa('${escapeHtml(d.ID)}')">Registrar pagamento</button>` : ''}
               <button onclick="DashboardController.excluirDespesa('${escapeHtml(d.ID)}')">Excluir</button>
             </div>
@@ -410,7 +493,7 @@
       if (f.pagDespesaTitulo) {
         f.pagDespesaTitulo.textContent = `Registrar pagamento: ${item.descricao || despesaId}`;
       }
-      if (f.pagDespesaData) f.pagDespesaData.value = getHojeISO();
+      if (f.pagDespesaData) f.pagDespesaData.value = item.data_pagamento || getHojeISO();
       if (f.pagDespesaValor) f.pagDespesaValor.value = pendente.toFixed(2);
       if (f.pagDespesaForma) f.pagDespesaForma.value = item.forma_pagamento_padrao || '';
       if (f.pagDespesaObservacao) f.pagDespesaObservacao.value = '';
@@ -478,6 +561,7 @@
       atualizar,
       abrirFormularioDespesa,
       cancelarFormularioDespesa,
+      editarDespesa,
       salvarDespesa,
       excluirDespesa,
       registrarPagamentoDespesa,

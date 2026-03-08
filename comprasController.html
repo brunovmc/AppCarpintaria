@@ -46,6 +46,7 @@
           validacoes.categorias ||= [];
           validacoes.categoriasPorTipo ||= {};
           validacoes.fornecedores ||= [];
+          validacoes.pagosPor ||= [];
           validacoes.formasPagamento ||= [];
 
           if (typeof window !== 'undefined') {
@@ -54,6 +55,7 @@
               tipos: validacoes.tipos,
               categorias: validacoes.categorias,
               categoriasPorTipo: validacoes.categoriasPorTipo,
+              pagosPor: validacoes.pagosPor,
               formasPagamento: validacoes.formasPagamento
             };
           }
@@ -62,6 +64,7 @@
           ComprasUI.renderUnidades?.(validacoes.unidades);
           ComprasUI.renderCategorias?.(validacoes.categorias, validacoes.categoriasPorTipo);
           ComprasUI.renderFornecedores?.(validacoes.fornecedores);
+          ComprasUI.renderPagosPor?.(validacoes.pagosPor);
           ComprasUI.renderFormasPagamento?.(validacoes.formasPagamento);
           ComprasUI.renderFiltroRapidoTipos?.(validacoes.tipos);
           if (typeof popularFiltrosDoPainelCompras === 'function') {
@@ -161,6 +164,7 @@
         unidade: tipo === 'MADEIRA' ? 'M3' : get('compraUnidade'),
         categoria,
         fornecedor: get('compraFornecedor'),
+        pago_por: get('compraPagoPor'),
         valor_unit: parseNumeroInput(get('compraValorUnit')) || 0,
         observacao: get('compraObservacao'),
         comprimento_cm,

@@ -8,6 +8,9 @@
  * C - CATEGORIA
  * D - FORNECEDOR
  * E - VALORKWH (uso futuro)
+ * F - DESPESAS
+ * G - FORMA_PAGAMENTO
+ * H - PAGO_POR
  * =========================
  */
 
@@ -73,7 +76,9 @@ function recarregarCacheValidacoes() {
     unidades: Array.isArray(dados?.unidades) ? dados.unidades.length : 0,
     categorias: Array.isArray(dados?.categorias) ? dados.categorias.length : 0,
     fornecedores: Array.isArray(dados?.fornecedores) ? dados.fornecedores.length : 0,
-    formas_pagamento: Array.isArray(dados?.formasPagamento) ? dados.formasPagamento.length : 0
+    categorias_despesas: Array.isArray(dados?.categoriasDespesas) ? dados.categoriasDespesas.length : 0,
+    formas_pagamento: Array.isArray(dados?.formasPagamento) ? dados.formasPagamento.length : 0,
+    pagos_por: Array.isArray(dados?.pagosPor) ? dados.pagosPor.length : 0
   };
 }
 
@@ -195,8 +200,10 @@ function obterValidacoes(forcarRecarregar) {
       tipos: [],
       unidades: [],
       categorias: [],
+      categoriasDespesas: [],
       fornecedores: [],
       formasPagamento: [],
+      pagosPor: [],
       valorKwhPorFornecedor: {},
       categoriasPorTipo
     };
@@ -209,8 +216,10 @@ function obterValidacoes(forcarRecarregar) {
       tipos: [],
       unidades: [],
       categorias: [],
+      categoriasDespesas: [],
       fornecedores: [],
       formasPagamento: [],
+      pagosPor: [],
       valorKwhPorFornecedor: {},
       categoriasPorTipo
     };
@@ -226,13 +235,17 @@ function obterValidacoes(forcarRecarregar) {
   const idxCategoria = indiceColunaValidacao(headers, 'CATEGORIA', 2);
   const idxFornecedor = indiceColunaValidacao(headers, 'FORNECEDOR', 3);
   const idxValorKwh = indiceColunaValidacao(headers, 'VALORKWH', 4);
-  const idxFormaPagamento = indiceColunaValidacao(headers, 'FORMA_PAGAMENTO', 5);
+  const idxDespesas = indiceColunaValidacao(headers, 'DESPESAS', 5);
+  const idxFormaPagamento = indiceColunaValidacao(headers, 'FORMA_PAGAMENTO', headers.length > 6 ? 6 : 5);
+  const idxPagoPor = indiceColunaValidacao(headers, 'PAGO_POR', 7);
 
   const tipos = new Set();
   const unidades = new Set();
   const categorias = new Set();
+  const categoriasDespesas = new Set();
   const fornecedores = new Set();
   const formasPagamento = new Set();
+  const pagosPor = new Set();
   const valorKwhPorFornecedor = {};
 
   dados.forEach(linha => {
@@ -241,7 +254,9 @@ function obterValidacoes(forcarRecarregar) {
     const categoria = linha[idxCategoria];
     const fornecedor = linha[idxFornecedor];
     const valorKwh = linha[idxValorKwh];
+    const categoriaDespesa = linha[idxDespesas];
     const formaPagamento = linha[idxFormaPagamento];
+    const pagoPor = linha[idxPagoPor];
 
     if (tipo && tipo.toString().trim() !== '') {
       tipos.add(tipo);
@@ -270,6 +285,14 @@ function obterValidacoes(forcarRecarregar) {
     if (formaPagamento && formaPagamento.toString().trim() !== '') {
       formasPagamento.add(formaPagamento);
     }
+
+    if (categoriaDespesa && categoriaDespesa.toString().trim() !== '') {
+      categoriasDespesas.add(categoriaDespesa);
+    }
+
+    if (pagoPor && pagoPor.toString().trim() !== '') {
+      pagosPor.add(pagoPor);
+    }
   });
 
   Object.keys(categoriasPorTipo).forEach(tipo => {
@@ -284,8 +307,10 @@ function obterValidacoes(forcarRecarregar) {
     tipos: [...tipos],
     unidades: [...unidades],
     categorias: [...categorias],
+    categoriasDespesas: [...categoriasDespesas],
     fornecedores: [...fornecedores],
     formasPagamento: [...formasPagamento],
+    pagosPor: [...pagosPor],
     valorKwhPorFornecedor,
     categoriasPorTipo
   };

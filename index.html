@@ -21,7 +21,7 @@
     </div>
 
     <!-- BUSCA + FILTRO (ESTOQUE) -->
-    <div id="topBarEstoque" class="top-bar">
+    <div id="topBarEstoque" class="top-bar hidden">
       <input id="buscaEstoque" type="text" placeholder="Buscar...">
       <button id="btnFiltro" type="button">Filtrar</button>
     </div>
@@ -78,11 +78,11 @@
     </div>
 
     <!-- ABAS -->
-    <div id="aba-dashboard" class="aba hidden">
+    <div id="aba-dashboard" class="aba">
       <?!= include('dashboard'); ?>
     </div>
 
-    <div id="aba-estoque" class="aba">
+    <div id="aba-estoque" class="aba hidden">
       <?!= include('estoque'); ?>
     </div>
 
@@ -123,12 +123,6 @@
     <?!= include('producaoUI'); ?>
     <?!= include('producaoController'); ?>
     <?!= include('dashboardController'); ?>
-
-    <script>
-      window.onload = () => {
-        EstoqueController.init();
-      };
-    </script>
 
   </body>
 </html>

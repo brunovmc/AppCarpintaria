@@ -19,12 +19,16 @@ const DESPESAS_GERAIS_SCHEMA = [
   'descricao',
   'categoria',
   'fornecedor',
+  'pago_por',
   'valor_total',
   'ativo',
   'criado_em',
   'data_competencia',
   'data_vencimento',
+  'data_pagamento',
   'forma_pagamento_padrao',
+  'fixo',
+  'origem_fixo_id',
   'observacao'
 ];
 
@@ -44,6 +48,25 @@ function round2Financeiro(valor) {
   const n = Number(valor || 0);
   if (!isFinite(n)) return 0;
   return Number(n.toFixed(2));
+}
+
+function parseBooleanFinanceiro(valor) {
+  const s = String(valor ?? '').trim().toLowerCase();
+  return s === 'true' || s === '1' || s === 'sim' || s === 'yes';
+}
+
+function adicionarMesesComAjusteFinanceiro(dataBase, quantidadeMeses) {
+  const base = parseDataFinanceiro(dataBase);
+  if (!base || !isFinite(quantidadeMeses)) return null;
+
+  const meses = Number(quantidadeMeses);
+  const anoBase = base.getFullYear();
+  const mesBase = base.getMonth();
+  const diaBase = base.getDate();
+  const alvo = new Date(anoBase, mesBase + meses, 1);
+  const ultimoDiaMesAlvo = new Date(alvo.getFullYear(), alvo.getMonth() + 1, 0).getDate();
+  const diaAjustado = Math.min(diaBase, ultimoDiaMesAlvo);
+  return new Date(alvo.getFullYear(), alvo.getMonth(), diaAjustado);
 }
 
 function formatarDataYmdFinanceiro(data) {
@@ -152,6 +175,34 @@ function getFormasPagamentoValidasFinanceiro() {
   return unicos;
 }
 
+function getCategoriasDespesasValidasFinanceiro() {
+  const validacoes = obterValidacoes();
+  const lista = Array.isArray(validacoes?.categoriasDespesas) ? validacoes.categoriasDespesas : [];
+  const unicos = [];
+  lista.forEach(v => {
+    const label = String(v || '').trim();
+    if (!label) return;
+    if (!unicos.some(x => x.toUpperCase() === label.toUpperCase())) {
+      unicos.push(label);
+    }
+  });
+  return unicos;
+}
+
+function getPagosPorValidosFinanceiro() {
+  const validacoes = obterValidacoes();
+  const lista = Array.isArray(validacoes?.pagosPor) ? validacoes.pagosPor : [];
+  const unicos = [];
+  lista.forEach(v => {
+    const label = String(v || '').trim();
+    if (!label) return;
+    if (!unicos.some(x => x.toUpperCase() === label.toUpperCase())) {
+      unicos.push(label);
+    }
+  });
+  return unicos;
+}
+
 function validarFormaPagamentoFinanceiro(formaPagamento, obrigatoria) {
   const valor = String(formaPagamento || '').trim();
   if (!valor) {
@@ -169,6 +220,48 @@ function validarFormaPagamentoFinanceiro(formaPagamento, obrigatoria) {
   const match = formasValidas.find(v => v.toUpperCase() === valor.toUpperCase());
   if (!match) {
     throw new Error('Forma de pagamento invalida.');
+  }
+  return match;
+}
+
+function validarCategoriaDespesaFinanceiro(categoria, obrigatoria) {
+  const valor = String(categoria || '').trim();
+  if (!valor) {
+    if (obrigatoria) {
+      throw new Error('Categoria da despesa e obrigatoria.');
+    }
+    return '';
+  }
+
+  const categoriasValidas = getCategoriasDespesasValidasFinanceiro();
+  if (categoriasValidas.length === 0) {
+    return valor;
+  }
+
+  const match = categoriasValidas.find(v => v.toUpperCase() === valor.toUpperCase());
+  if (!match) {
+    throw new Error('Categoria da despesa invalida.');
+  }
+  return match;
+}
+
+function validarPagoPorFinanceiro(pagoPor, obrigatorio) {
+  const valor = String(pagoPor || '').trim();
+  if (!valor) {
+    if (obrigatorio) {
+      throw new Error('Pago por e obrigatorio.');
+    }
+    return '';
+  }
+
+  const opcoes = getPagosPorValidosFinanceiro();
+  if (opcoes.length === 0) {
+    return valor;
+  }
+
+  const match = opcoes.find(v => v.toUpperCase() === valor.toUpperCase());
+  if (!match) {
+    throw new Error('Pago por invalido.');
   }
   return match;
 }
@@ -385,6 +478,7 @@ function normalizarPayloadDespesaGeral(payload) {
     throw new Error('Descricao da despesa e obrigatoria.');
   }
 
+  const categoria = validarCategoriaDespesaFinanceiro(dados.categoria, true);
   const valorTotal = round2Financeiro(parseNumeroBR(dados.valor_total));
   if (valorTotal <= 0) {
     throw new Error('Valor total da despesa deve ser maior que zero.');
@@ -396,18 +490,144 @@ function normalizarPayloadDespesaGeral(payload) {
     'Data de competencia'
   );
   const dataVencimento = normalizarDataFinanceiro(dados.data_vencimento, false, 'Data de vencimento');
+  const dataPagamento = normalizarDataFinanceiro(dados.data_pagamento, false, 'Data de pagamento');
   const formaPadrao = validarFormaPagamentoFinanceiro(dados.forma_pagamento_padrao, false);
+  const fixo = parseBooleanFinanceiro(dados.fixo);
 
   return {
     descricao,
-    categoria: String(dados.categoria || '').trim(),
+    categoria,
     fornecedor: String(dados.fornecedor || '').trim(),
+    pago_por: validarPagoPorFinanceiro(dados.pago_por, false),
     valor_total: valorTotal,
     data_competencia: dataCompetencia,
     data_vencimento: dataVencimento,
+    data_pagamento: dataPagamento,
     forma_pagamento_padrao: formaPadrao,
+    fixo,
     observacao: String(dados.observacao || '').trim()
   };
+}
+
+function gerarRecorrenciaDespesasFixasFinanceiro() {
+  const sheet = getSheet(ABA_DESPESAS_GERAIS);
+  if (!sheet) {
+    return { ok: true, criados: 0 };
+  }
+
+  ensureSchema(sheet, DESPESAS_GERAIS_SCHEMA);
+
+  const lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(5000);
+  } catch (error) {
+    return { ok: false, criados: 0, erro: error.message };
+  }
+
+  try {
+    const ativasFixas = rowsToObjects(sheet).filter(i => {
+      return String(i.ativo).toLowerCase() === 'true' && parseBooleanFinanceiro(i.fixo);
+    });
+    if (ativasFixas.length === 0) {
+      return { ok: true, criados: 0 };
+    }
+
+    const hoje = new Date();
+    const primeiroDiaMesAtual = new Date(hoje.getFullYear(), hoje.getMonth(), 1);
+    const mesAlvoData = primeiroDiaMesAtual;
+    const mesAlvoYm = gerarChaveMesFinanceiro(mesAlvoData);
+    if (!mesAlvoYm) {
+      return { ok: true, criados: 0 };
+    }
+
+    const grupos = {};
+    ativasFixas.forEach(item => {
+      const rootId = String(item.origem_fixo_id || item.ID || '').trim();
+      if (!rootId) return;
+
+      const dataCompetencia = parseDataFinanceiro(item.data_competencia)
+        || parseDataFinanceiro(item.data_vencimento)
+        || parseDataFinanceiro(item.criado_em);
+      if (!dataCompetencia) return;
+
+      const ym = gerarChaveMesFinanceiro(dataCompetencia);
+      if (!ym) return;
+
+      if (!grupos[rootId]) {
+        grupos[rootId] = [];
+      }
+      grupos[rootId].push({ item, dataCompetencia, ym });
+    });
+
+    let criados = 0;
+    Object.keys(grupos).forEach(rootId => {
+      const grupo = grupos[rootId];
+      if (!Array.isArray(grupo) || grupo.length === 0) return;
+
+      grupo.sort((a, b) => a.dataCompetencia.getTime() - b.dataCompetencia.getTime());
+      const porYm = {};
+      grupo.forEach(g => {
+        porYm[g.ym] = g;
+      });
+
+      let atual = grupo[grupo.length - 1];
+      let guard = 0;
+      while (atual && atual.ym < mesAlvoYm && guard < 60) {
+        guard += 1;
+        const proximaCompetencia = adicionarMesesComAjusteFinanceiro(atual.dataCompetencia, 1);
+        const proximoYm = gerarChaveMesFinanceiro(proximaCompetencia);
+        if (!proximaCompetencia || !proximoYm) break;
+
+        if (porYm[proximoYm]) {
+          atual = porYm[proximoYm];
+          continue;
+        }
+
+        const vencimentoBase = parseDataFinanceiro(atual.item.data_vencimento);
+        const proximoVencimento = vencimentoBase
+          ? adicionarMesesComAjusteFinanceiro(vencimentoBase, 1)
+          : null;
+
+        const novo = {
+          ID: gerarId('DES'),
+          descricao: String(atual.item.descricao || '').trim(),
+          categoria: String(atual.item.categoria || '').trim(),
+          fornecedor: String(atual.item.fornecedor || '').trim(),
+          pago_por: String(atual.item.pago_por || '').trim(),
+          valor_total: round2Financeiro(parseNumeroBR(atual.item.valor_total)),
+          ativo: true,
+          criado_em: new Date(),
+          data_competencia: formatarDataYmdFinanceiro(proximaCompetencia),
+          data_vencimento: proximoVencimento ? formatarDataYmdFinanceiro(proximoVencimento) : '',
+          data_pagamento: '',
+          forma_pagamento_padrao: String(atual.item.forma_pagamento_padrao || '').trim(),
+          fixo: true,
+          origem_fixo_id: rootId,
+          observacao: String(atual.item.observacao || '').trim()
+        };
+
+        const ok = insert(ABA_DESPESAS_GERAIS, novo, DESPESAS_GERAIS_SCHEMA);
+        if (!ok) break;
+
+        criados += 1;
+        const novoRef = {
+          item: { ...atual.item, ...novo },
+          dataCompetencia: proximaCompetencia,
+          ym: proximoYm
+        };
+        porYm[proximoYm] = novoRef;
+        atual = novoRef;
+      }
+    });
+
+    return { ok: true, criados };
+  } finally {
+    try {
+      lock.releaseLock();
+    } catch (error) {
+      // sem acao
+    }
+  }
 }
 
 function listarDespesasGerais(forcarRecarregar) {
@@ -424,12 +644,15 @@ function listarDespesasGerais(forcarRecarregar) {
     return [];
   }
 
+  gerarRecorrenciaDespesasFixasFinanceiro();
   const rows = rowsToObjects(sheet);
   const base = rows
     .filter(i => String(i.ativo).toLowerCase() === 'true')
     .map(i => ({
       ...i,
       valor_total: round2Financeiro(parseNumeroBR(i.valor_total)),
+      fixo: parseBooleanFinanceiro(i.fixo),
+      origem_fixo_id: String(i.origem_fixo_id || '').trim(),
       criado_em: i.criado_em
         ? formatarDataYmdHmFinanceiroSafe(i.criado_em)
         : '',
@@ -438,6 +661,9 @@ function listarDespesasGerais(forcarRecarregar) {
         : '',
       data_vencimento: i.data_vencimento
         ? formatarDataYmdFinanceiroSafe(i.data_vencimento)
+        : '',
+      data_pagamento: i.data_pagamento
+        ? formatarDataYmdFinanceiroSafe(i.data_pagamento)
         : ''
     }));
 
@@ -466,11 +692,13 @@ function recarregarCacheDespesasGerais() {
 
 function criarDespesaGeral(payload) {
   const dados = normalizarPayloadDespesaGeral(payload);
+  const novoId = gerarId('DES');
   const novo = {
     ...dados,
-    ID: gerarId('DES'),
+    ID: novoId,
     ativo: true,
-    criado_em: new Date()
+    criado_em: new Date(),
+    origem_fixo_id: dados.fixo ? novoId : ''
   };
 
   const ok = insert(ABA_DESPESAS_GERAIS, novo, DESPESAS_GERAIS_SCHEMA);
@@ -480,11 +708,32 @@ function criarDespesaGeral(payload) {
 
 function atualizarDespesaGeral(id, payload) {
   const dados = normalizarPayloadDespesaGeral(payload);
+  const despesaId = String(id || '').trim();
+  if (!despesaId) {
+    throw new Error('ID da despesa nao informado.');
+  }
+
+  const sheet = getSheet(ABA_DESPESAS_GERAIS);
+  if (!sheet) {
+    throw new Error('Aba DESPESAS_GERAIS nao encontrada.');
+  }
+
+  const atual = rowsToObjects(sheet).find(i => String(i.ID || '').trim() === despesaId);
+  if (!atual || String(atual.ativo).toLowerCase() !== 'true') {
+    throw new Error('Despesa geral nao encontrada ou inativa.');
+  }
+
+  const origemAtual = String(atual.origem_fixo_id || despesaId).trim();
+  const origemFixoId = dados.fixo ? (origemAtual || despesaId) : '';
+
   return updateById(
     ABA_DESPESAS_GERAIS,
     'ID',
-    id,
-    dados,
+    despesaId,
+    {
+      ...dados,
+      origem_fixo_id: origemFixoId
+    },
     DESPESAS_GERAIS_SCHEMA
   );
 }

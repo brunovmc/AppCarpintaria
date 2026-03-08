@@ -16,6 +16,7 @@ const COMPRAS_SCHEMA = [
   'espessura_cm',
   'categoria',
   'fornecedor',
+  'pago_por',
   'potencia',
   'voltagem',
   'comprado_em',
@@ -48,6 +49,7 @@ function categoriaValidaParaTipoCompra(tipo, categoria) {
 function normalizarPayloadMadeiraCompra(payload) {
   const dados = { ...(payload || {}) };
   const tipo = String(dados.tipo || '').trim().toUpperCase();
+  dados.pago_por = validarPagoPorCompra(dados.pago_por);
 
   if (!categoriaValidaParaTipoCompra(tipo, dados.categoria)) {
     throw new Error('Categoria invalida para o tipo selecionado.');
@@ -76,6 +78,21 @@ function normalizarPayloadMadeiraCompra(payload) {
   dados.quantidade = Number(((comprimento * largura * espessura) / 1000000).toFixed(2));
   dados.unidade = 'M3';
   return dados;
+}
+
+function validarPagoPorCompra(pagoPor) {
+  const valor = String(pagoPor || '').trim();
+  if (!valor) return '';
+
+  const validacoes = obterValidacoes();
+  const lista = Array.isArray(validacoes?.pagosPor) ? validacoes.pagosPor : [];
+  if (lista.length === 0) return valor;
+
+  const match = lista.find(v => String(v || '').trim().toUpperCase() === valor.toUpperCase());
+  if (!match) {
+    throw new Error('Pago por invalido.');
+  }
+  return match;
 }
 
 function normalizarCamposFinanceirosCompra(payload) {
@@ -235,6 +252,7 @@ function adicionarCompraAoEstoque(compraId) {
       espessura_cm: compraNormalizada.espessura_cm || '',
       categoria: compraNormalizada.categoria || '',
       fornecedor: compraNormalizada.fornecedor || '',
+      pago_por: compraNormalizada.pago_por || '',
       potencia: compraNormalizada.potencia || '',
       voltagem: compraNormalizada.voltagem || '',
       comprado_em: compraNormalizada.comprado_em || '',

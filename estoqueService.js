@@ -16,12 +16,28 @@ const ESTOQUE_SCHEMA = [
   'espessura_cm',
   'categoria',
   'fornecedor',
+  'pago_por',
   'potencia',
   'voltagem',
   'comprado_em',
   'vida_util_mes',
   'observacao'
 ];
+
+function validarPagoPorEstoque(pagoPor) {
+  const valor = String(pagoPor || '').trim();
+  if (!valor) return '';
+
+  const validacoes = obterValidacoes();
+  const lista = Array.isArray(validacoes?.pagosPor) ? validacoes.pagosPor : [];
+  if (lista.length === 0) return valor;
+
+  const match = lista.find(v => String(v || '').trim().toUpperCase() === valor.toUpperCase());
+  if (!match) {
+    throw new Error('Pago por invalido.');
+  }
+  return match;
+}
 
 function categoriaValidaParaTipoEstoque(tipo, categoria) {
   const t = String(tipo || '').trim().toUpperCase();
@@ -43,6 +59,7 @@ function categoriaValidaParaTipoEstoque(tipo, categoria) {
 function normalizarPayloadMadeiraEstoque(payload) {
   const dados = { ...(payload || {}) };
   const tipo = String(dados.tipo || '').trim().toUpperCase();
+  dados.pago_por = validarPagoPorEstoque(dados.pago_por);
 
   if (!categoriaValidaParaTipoEstoque(tipo, dados.categoria)) {
     throw new Error('Categoria invalida para o tipo selecionado.');
@@ -180,6 +197,7 @@ function obterItemEstoque(id) {
     espessura_cm: item.espessura_cm || '',
     valor_unit: item.valor_unit || '',
     fornecedor: item.fornecedor || '',
+    pago_por: item.pago_por || '',
     observacao: item.observacao || '',
 
     potencia: item.potencia || '',

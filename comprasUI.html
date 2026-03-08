@@ -28,6 +28,7 @@
         unidade: document.getElementById('compraUnidade'),
         categoria: document.getElementById('compraCategoria'),
         fornecedor: document.getElementById('compraFornecedor'),
+        pago_por: document.getElementById('compraPagoPor'),
         valor_unit: document.getElementById('compraValorUnit'),
         observacao: document.getElementById('compraObservacao'),
 
@@ -228,6 +229,7 @@
 
       if (f.categoria) f.categoria.value = data.categoria || '';
       if (f.fornecedor) f.fornecedor.value = data.fornecedor || '';
+      if (f.pago_por) f.pago_por.value = data.pago_por || '';
 
       if (f.valor_unit) f.valor_unit.value = data.valor_unit || '';
       if (f.observacao) f.observacao.value = data.observacao || '';
@@ -257,6 +259,7 @@
         f.unidade,
         f.categoria,
         f.fornecedor,
+        f.pago_por,
         f.valor_unit,
         f.observacao,
         f.comprimento_cm,
@@ -376,6 +379,23 @@
       }
     }
 
+    function renderPagosPor(lista) {
+      const { pago_por } = el();
+      if (!pago_por || pago_por.tagName !== 'SELECT') return;
+
+      const clean = limparVazios(lista);
+      const atual = String(pago_por.value || '').trim();
+      pago_por.innerHTML = '<option value="">Selecione</option>';
+      clean.forEach(v => {
+        const o = document.createElement('option');
+        o.value = v;
+        o.textContent = v;
+        pago_por.appendChild(o);
+      });
+      const match = [...pago_por.options].find(o => String(o.value || '').trim().toUpperCase() === atual.toUpperCase());
+      pago_por.value = match ? match.value : '';
+    }
+
     function renderFormasPagamento(lista) {
       const { forma_pagamento_padrao, pagamentoForma } = el();
       const clean = limparVazios(lista);
@@ -453,6 +473,7 @@
         : '';
       return `
         <p><b>Fornecedor:</b> ${i.fornecedor || '-'}</p>
+        <p><b>Pago por:</b> ${i.pago_por || '-'}</p>
         <p><b>Status:</b> ${status}</p>
         <p><b>Financeiro:</b> ${pagamentoResumo}</p>
         <p><b>Comprado em:</b> ${i.comprado_em || '-'}</p>
@@ -734,6 +755,7 @@
       renderUnidades,
       renderCategorias,
       renderFornecedores,
+      renderPagosPor,
       renderFormasPagamento,
       renderFiltroRapidoTipos,
       marcarTipoRapidoAtivo,

@@ -27,103 +27,60 @@ function deletarItemEstoqueAPI(id) {
   return deletarItemEstoque(id);
 }
 
-function sincronizarSchemaFinanceiro() {
-  const schemaCompras = [
-    'ID',
-    'tipo',
-    'item',
-    'unidade',
-    'valor_unit',
-    'ativo',
-    'criado_em',
-    'quantidade',
-    'comprimento_cm',
-    'largura_cm',
-    'espessura_cm',
-    'categoria',
-    'fornecedor',
-    'potencia',
-    'voltagem',
-    'comprado_em',
-    'data_vencimento',
-    'forma_pagamento_padrao',
-    'vida_util_mes',
-    'observacao',
-    'adicionado_estoque',
-    'estoque_id',
-    'origem_compra_id'
-  ];
+function atualizarCachesManualmente() {
+  const atualizadoEm = new Date();
+  const referenciaAtual = Utilities.formatDate(
+    atualizadoEm,
+    Session.getScriptTimeZone(),
+    'yyyy-MM'
+  );
 
-  const schemaDespesasGerais = [
-    'ID',
-    'descricao',
-    'categoria',
-    'fornecedor',
-    'valor_total',
-    'ativo',
-    'criado_em',
-    'data_competencia',
-    'data_vencimento',
-    'forma_pagamento_padrao',
-    'observacao'
-  ];
-
-  const schemaPagamentos = [
-    'ID',
-    'origem_tipo',
-    'origem_id',
-    'data_pagamento',
-    'valor_pago',
-    'forma_pagamento',
-    'observacao',
-    'ativo',
-    'criado_em'
-  ];
-
-  const schemaValidacao = [
-    'TIPO',
-    'UNIDADE',
-    'CATEGORIA',
-    'FORNECEDOR',
-    'VALORKWH',
-    'FORMA_PAGAMENTO'
-  ];
-
-  const ss = getDataSpreadsheet();
-
-  function garantirAbaComSchema(nomeAba, schema) {
-    let sheet = ss.getSheetByName(nomeAba);
-    if (!sheet) {
-      sheet = ss.insertSheet(nomeAba);
+  function executar(nome, fn) {
+    if (typeof fn !== 'function') {
+      return { ok: false, erro: `Funcao indisponivel: ${nome}` };
     }
-    ensureSchema(sheet, schema);
-
-    const totalColunas = sheet.getLastColumn();
-    const headers = totalColunas > 0
-      ? sheet.getRange(1, 1, 1, totalColunas).getValues()[0]
-      : [];
-
-    return {
-      aba: nomeAba,
-      colunas: totalColunas,
-      headers
-    };
+    try {
+      return fn();
+    } catch (error) {
+      return { ok: false, erro: error.message || String(error) };
+    }
   }
 
-  const resumo = [
-    garantirAbaComSchema('COMPRAS', schemaCompras),
-    garantirAbaComSchema('DESPESAS_GERAIS', schemaDespesasGerais),
-    garantirAbaComSchema('PAGAMENTOS', schemaPagamentos),
-    garantirAbaComSchema('VALIDACAO', schemaValidacao)
-  ];
-
-  return {
+  const resultado = {
     ok: true,
-    atualizado_em: new Date(),
-    abas: resumo
+    atualizado_em: atualizadoEm,
+    referencia_dashboard: referenciaAtual,
+    caches: {
+      validacoes: executar('recarregarCacheValidacoes', recarregarCacheValidacoes),
+      estoque: executar('recarregarCacheEstoque', recarregarCacheEstoque),
+      compras: executar('recarregarCacheCompras', recarregarCacheCompras),
+      despesas_gerais: executar('recarregarCacheDespesasGerais', recarregarCacheDespesasGerais),
+      pagamentos: executar('recarregarCachePagamentos', recarregarCachePagamentos)
+    }
   };
-}
 
-function sincronizarSchemaCompras() {
-  return sincronizarSchemaFinanceiro();
+  const limparDashboard = executar('limparCacheDashboardFinanceiro', limparCacheDashboardFinanceiro);
+  const dashboard = executar('obterResumoDashboardFinanceiro', () =>
+    obterResumoDashboardFinanceiro(referenciaAtual, true)
+  );
+
+  resultado.caches.dashboard = {
+    limpeza: limparDashboard,
+    recarregado: {
+      ok: !dashboard?.erro,
+      referencia: dashboard?.referencia || referenciaAtual
+    }
+  };
+
+  resultado.ok = Object.values(resultado.caches).every(item => {
+    if (!item || typeof item !== 'object') return false;
+    if (item.limpeza && item.recarregado) {
+      const okLimpeza = item.limpeza?.ok !== false;
+      const okRecarregado = item.recarregado?.ok !== false;
+      return okLimpeza && okRecarregado;
+    }
+    return item.ok !== false;
+  });
+
+  return resultado;
 }

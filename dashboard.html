@@ -10,11 +10,6 @@
 
 <div class="dash-grid">
   <div class="card">
-    <strong>Gasto pago por tipo</strong>
-    <div id="dashGastoPorTipo" class="dash-lista"></div>
-  </div>
-
-  <div class="card">
     <strong>Gasto pago por categoria</strong>
     <div id="dashGastoPorCategoria" class="dash-lista"></div>
   </div>
@@ -42,6 +37,8 @@
   </div>
 
   <div id="formularioDespesaGeral" class="hidden" style="margin-top: 12px;">
+    <strong id="despesaFormTitulo" class="dash-despesa-form-titulo">Nova despesa</strong>
+
     <div class="campo-ajuda-wrap">
       <span class="campo-ajuda-tag">Descricao</span>
       <input id="despesaDescricao">
@@ -55,6 +52,11 @@
     <div class="campo-ajuda-wrap">
       <span class="campo-ajuda-tag">Fornecedor</span>
       <select id="despesaFornecedor"></select>
+    </div>
+
+    <div class="campo-ajuda-wrap">
+      <span class="campo-ajuda-tag">Pago por</span>
+      <select id="despesaPagoPor"></select>
     </div>
 
     <div class="campo-ajuda-wrap">
@@ -73,8 +75,21 @@
     </div>
 
     <div class="campo-ajuda-wrap">
+      <span class="campo-ajuda-tag">Data de pagamento</span>
+      <input id="despesaDataPagamento" type="date">
+    </div>
+
+    <div class="campo-ajuda-wrap">
       <span class="campo-ajuda-tag">Forma pagamento padrao</span>
       <select id="despesaFormaPadrao"></select>
+    </div>
+
+    <div class="campo-ajuda-wrap">
+      <span class="campo-ajuda-tag">Fixo</span>
+      <label class="dash-fixo-toggle">
+        <input id="despesaFixo" type="checkbox">
+        <span>Despesa fixa mensal</span>
+      </label>
     </div>
 
     <div class="campo-ajuda-wrap">
