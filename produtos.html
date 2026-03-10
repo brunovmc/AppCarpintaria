@@ -1,6 +1,7 @@
 <div id="listaProdutos"></div>
 
-<div id="formularioProduto" class="form-modal" style="display:none; margin-top:32px;">
+<div id="formularioProduto" class="modal hidden">
+  <div class="modal-content form-modal-content">
   <h2 id="produtoFormTitulo">Novo Produto</h2>
 
   <div class="campo-ajuda-wrap">
@@ -41,4 +42,5 @@
 
   <button onclick="ProdutosController.salvar()">Salvar</button>
   <button onclick="ProdutosUI.fecharFormulario()">Cancelar</button>
+  </div>
 </div>

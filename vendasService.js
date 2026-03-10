@@ -16,8 +16,7 @@ const VENDAS_SCHEMA = [
   'data_venda',
   'forma_pagamento',
   'parcelas',
-  'plano_recebimento',
-  'data_entrega_prevista',
+  'parcelas_detalhe_json',
   'observacao',
   'estoque_baixado',
   'data_baixa_estoque',
@@ -35,15 +34,6 @@ function ehItemVendavelEstoque(item) {
 
 function validarRecebidoPorVenda(recebidoPor) {
   return validarPagoPorFinanceiro(recebidoPor, false);
-}
-
-function normalizarPlanoRecebimentoVenda(plano) {
-  const p = String(plano || '').trim().toUpperCase();
-  if (!p) return 'PADRAO';
-  if (p === 'PADRAO' || p === 'ENCOMENDA_50_50') {
-    return p;
-  }
-  throw new Error('Plano de recebimento invalido.');
 }
 
 function obterItemEstoqueVendavelPorId(estoqueId) {
@@ -86,14 +76,7 @@ function normalizarPayloadVenda(payload, vendaExistente) {
 
   const dataVenda = normalizarDataFinanceiro(dados.data_venda, true, 'Data de venda');
   const formaPagamento = validarFormaPagamentoFinanceiro(dados.forma_pagamento, false);
-  const planoRecebimento = normalizarPlanoRecebimentoVenda(dados.plano_recebimento);
-  const parcelasBase = normalizarParcelasFinanceiro(dados.parcelas, formaPagamento);
-  const parcelas = planoRecebimento === 'ENCOMENDA_50_50' ? 2 : parcelasBase;
-  const dataEntregaPrevista = normalizarDataFinanceiro(
-    dados.data_entrega_prevista,
-    false,
-    'Data de entrega prevista'
-  );
+  const parcelas = normalizarParcelasFinanceiro(dados.parcelas, formaPagamento);
   let valorTotal = round2Financeiro(parseNumeroBR(dados.valor_total_venda));
   if (valorTotal <= 0) {
     const precoBase = parseNumeroBR(estoqueItem.preco_venda || 0);
@@ -104,6 +87,12 @@ function normalizarPayloadVenda(payload, vendaExistente) {
   }
 
   const valorUnit = round2Financeiro(valorTotal / quantidade);
+  const parcelasDetalhe = normalizarParcelasDetalhePayloadFinanceiro(
+    dados.parcelas_detalhe ?? dados.parcelas_detalhe_json,
+    parcelas,
+    dataVenda || new Date(),
+    valorTotal
+  );
 
   return {
     estoque_id: estoqueId,
@@ -118,8 +107,7 @@ function normalizarPayloadVenda(payload, vendaExistente) {
     data_venda: dataVenda,
     forma_pagamento: formaPagamento,
     parcelas,
-    plano_recebimento: planoRecebimento,
-    data_entrega_prevista: dataEntregaPrevista,
+    parcelas_detalhe_json: serializarParcelasDetalheFinanceiro(parcelasDetalhe),
     observacao: String(dados.observacao || '').trim()
   };
 }
@@ -180,7 +168,6 @@ function listarVendas(forcarRecarregar) {
       estoque_baixado: String(i.estoque_baixado).toLowerCase() === 'true',
       criado_em: formatarDataVendaSeguro(i.criado_em, 'yyyy-MM-dd HH:mm'),
       data_venda: formatarDataVendaSeguro(i.data_venda, 'yyyy-MM-dd'),
-      data_entrega_prevista: formatarDataVendaSeguro(i.data_entrega_prevista, 'yyyy-MM-dd'),
       data_baixa_estoque: formatarDataVendaSeguro(i.data_baixa_estoque, 'yyyy-MM-dd')
     }));
 
@@ -188,12 +175,6 @@ function listarVendas(forcarRecarregar) {
     ? enriquecerVendasComResumoPagamento(base)
     : base;
   const lista = enriquecida
-    .map(v => ({
-      ...v,
-      parcelas_detalhe: (typeof listarParcelasFinanceirasOrigem === 'function')
-        ? listarParcelasFinanceirasOrigem(ORIGEM_TIPO_VENDA, v.ID)
-        : []
-    }))
     .sort((a, b) => {
       const da = parseDataFinanceiro(a.data_venda)?.getTime() || 0;
       const db = parseDataFinanceiro(b.data_venda)?.getTime() || 0;

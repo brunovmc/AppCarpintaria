@@ -1,6 +1,7 @@
 <div id="listaProducao"></div>
 
-<div id="formularioProducao" class="form-modal" style="display:none; margin-top:32px;">
+<div id="formularioProducao" class="modal hidden">
+  <div class="modal-content form-modal-content">
   <h2 id="producaoFormTitulo">Nova Producao</h2>
 
   <div class="campo-ajuda-wrap">
@@ -50,6 +51,7 @@
 
   <button onclick="ProducaoController.salvar()">Salvar</button>
   <button onclick="ProducaoUI.fecharFormulario()">Cancelar</button>
+  </div>
 </div>
 
 <div id="modalConsumoProducao" class="modal hidden">

@@ -3,7 +3,8 @@
 <div id="lista"></div>
 <div id="listaControlesEstoque" class="lista-controles"></div>
 
-<div id="formulario" class="form-modal" style="display:none; margin-top:32px;">
+<div id="formulario" class="modal hidden">
+  <div class="modal-content form-modal-content">
   <h2 id="formTitulo">Novo Item</h2>
 
   <div class="campo-ajuda-wrap">
@@ -107,4 +108,5 @@
 
   <button id="btnSalvarEstoque" onclick="EstoqueController.salvar()">Salvar</button>
   <button onclick="EstoqueUI.fecharFormulario()">Cancelar</button>
+  </div>
 </div>

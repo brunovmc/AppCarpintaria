@@ -36,7 +36,11 @@
     <button class="dashboard-btn-inline" onclick="DashboardController.abrirFormularioDespesa()">Nova despesa</button>
   </div>
 
-  <div id="formularioDespesaGeral" class="hidden" style="margin-top: 12px;">
+  <div id="listaDespesasGerais" style="margin-top: 12px;"></div>
+</div>
+
+<div id="formularioDespesaGeral" class="modal hidden">
+  <div class="modal-content form-modal-content">
     <strong id="despesaFormTitulo" class="dash-despesa-form-titulo">Nova despesa</strong>
 
     <div class="campo-ajuda-wrap">
@@ -61,7 +65,7 @@
 
     <div class="campo-ajuda-wrap">
       <span class="campo-ajuda-tag">Valor total (R$)</span>
-      <input id="despesaValorTotal" type="number" step="0.01" min="0">
+      <input id="despesaValorTotal" type="number" step="0.01" min="0" oninput="DashboardController.handleDespesaParcelasDetalheChange()">
     </div>
 
     <div class="campo-ajuda-wrap">
@@ -76,7 +80,7 @@
 
     <div class="campo-ajuda-wrap">
       <span class="campo-ajuda-tag">Data de pagamento</span>
-      <input id="despesaDataPagamento" type="date">
+      <input id="despesaDataPagamento" type="date" onchange="DashboardController.handleDespesaParcelasDetalheChange()">
     </div>
 
     <div class="campo-ajuda-wrap">
@@ -86,7 +90,12 @@
 
     <div id="despesaParcelasWrap" class="campo-ajuda-wrap hidden">
       <span class="campo-ajuda-tag">Parcelas</span>
-      <input id="despesaParcelas" type="number" min="1" step="1" value="1">
+      <input id="despesaParcelas" type="number" min="1" step="1" value="1" oninput="DashboardController.handleDespesaParcelasDetalheChange()">
+    </div>
+
+    <div id="despesaParcelasDetalheWrap" class="campo-ajuda-wrap hidden">
+      <span class="campo-ajuda-tag">Parcelas detalhadas</span>
+      <div id="despesaParcelasDetalheLista" class="parcelas-detalhe-list"></div>
     </div>
 
     <div class="campo-ajuda-wrap">
@@ -105,8 +114,6 @@
     <button id="btnSalvarDespesaGeral" onclick="DashboardController.salvarDespesa()">Salvar despesa</button>
     <button onclick="DashboardController.cancelarFormularioDespesa()">Cancelar</button>
   </div>
-
-  <div id="listaDespesasGerais" style="margin-top: 12px;"></div>
 </div>
 
 <div id="modalPagamentoDespesa" class="modal hidden">
@@ -123,6 +130,11 @@
       <input id="pagDespesaValor" type="number" step="0.01" min="0">
     </div>
 
+    <div id="pagDespesaParcelaWrap" class="campo-ajuda-wrap hidden">
+      <span class="campo-ajuda-tag">Parcela</span>
+      <select id="pagDespesaParcela"></select>
+    </div>
+
     <div class="campo-ajuda-wrap">
       <span class="campo-ajuda-tag">Forma de pagamento</span>
       <select id="pagDespesaForma"></select>
@@ -135,5 +147,17 @@
 
     <button id="btnConfirmarPagDespesa" onclick="DashboardController.confirmarPagamentoDespesa()">Confirmar pagamento</button>
     <button onclick="DashboardController.cancelarPagamentoDespesa()">Cancelar</button>
+  </div>
+</div>
+
+<div id="modalObservabilidadeCard" class="modal hidden">
+  <div class="modal-content dash-modal-observabilidade">
+    <div class="dash-obs-header">
+      <h3 id="obsCardTitulo">Composicao do card</h3>
+      <button class="dashboard-btn-inline dash-obs-fechar-topo" onclick="DashboardController.fecharObservabilidadeCard()">Fechar</button>
+    </div>
+    <div id="obsCardResumo" class="dash-obs-resumo"></div>
+    <div id="obsCardLista" class="dash-obs-lista"></div>
+    <button onclick="DashboardController.fecharObservabilidadeCard()">Fechar</button>
   </div>
 </div>

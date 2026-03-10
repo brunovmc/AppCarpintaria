@@ -182,6 +182,23 @@
         mostrarToast('Parcelas deve ser um numero inteiro maior ou igual a 1', 'erro');
         return;
       }
+      const parcelasDetalhe = formaExigeParcelas(formaPagamento)
+        ? (ComprasUI.lerParcelasDetalheCompra ? ComprasUI.lerParcelasDetalheCompra() : [])
+        : [];
+      if (formaExigeParcelas(formaPagamento)) {
+        if (!Array.isArray(parcelasDetalhe) || parcelasDetalhe.length !== parcelas) {
+          mostrarToast('Revise as parcelas detalhadas', 'erro');
+          return;
+        }
+        if (parcelasDetalhe.some(p => !String(p.data || '').trim())) {
+          mostrarToast('Preencha a data de todas as parcelas', 'erro');
+          return;
+        }
+        if (parcelasDetalhe.some(p => Number(p.valor || 0) <= 0)) {
+          mostrarToast('Valor de parcela deve ser maior que zero', 'erro');
+          return;
+        }
+      }
 
       const dados = {
         tipo,
@@ -203,6 +220,7 @@
         data_vencimento: dataVencimento,
         forma_pagamento: formaPagamento,
         parcelas,
+        parcelas_detalhe: parcelasDetalhe,
         vida_util_mes: parseNumeroInput(get('compraVidaUtilMes')) || ''
       };
 
@@ -276,7 +294,6 @@
 
     function finalizarUX() {
       ComprasUI.fecharFormulario();
-      window.scrollTo({ top: 0, behavior: 'smooth' });
     }
 
     function editar(id) {
@@ -413,7 +430,10 @@
       }
 
       pagamentoCompraId = id;
-      ComprasUI.abrirModalPagamentoCompra(item);
+      const abriu = ComprasUI.abrirModalPagamentoCompra(item);
+      if (!abriu) {
+        pagamentoCompraId = null;
+      }
     }
 
     function confirmarPagamentoCompra() {
@@ -431,6 +451,10 @@
       }
       if (!dados.forma_pagamento) {
         mostrarToast('Forma de pagamento e obrigatoria', 'erro');
+        return;
+      }
+      if (dados.parcelado && !dados.parcela_alvo_id) {
+        mostrarToast('Selecione a parcela pendente', 'erro');
         return;
       }
       if (!isFinite(valorPago) || valorPago <= 0) {
@@ -465,6 +489,7 @@
         .registrarPagamentoCompra(pagamentoCompraId, {
           data_pagamento: dados.data_pagamento,
           valor_pago: valorPago,
+          parcela_alvo_id: dados.parcela_alvo_id,
           forma_pagamento: dados.forma_pagamento,
           observacao: dados.observacao
         });

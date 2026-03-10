@@ -86,6 +86,9 @@ function invalidarCachesRelacionadosAba(sheetName) {
     if (typeof limparCacheDespesasGerais === 'function') {
       limparCacheDespesasGerais();
     }
+    if (typeof limparCacheVendas === 'function') {
+      limparCacheVendas();
+    }
   }
 
   if (aba === 'PARCELAS_FINANCEIRAS' && typeof limparCacheDashboardFinanceiro === 'function') {

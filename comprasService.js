@@ -24,6 +24,7 @@ const COMPRAS_SCHEMA = [
   'data_vencimento',
   'forma_pagamento',
   'parcelas',
+  'parcelas_detalhe_json',
   'vida_util_mes',
   'observacao',
   'adicionado_estoque',
@@ -108,6 +109,20 @@ function normalizarCamposFinanceirosCompra(payload) {
   const formaPagamento = validarFormaPagamentoFinanceiro(dados.forma_pagamento, false);
   dados.forma_pagamento = formaPagamento;
   dados.parcelas = normalizarParcelasFinanceiro(dados.parcelas, formaPagamento);
+  const totalPrevisto = round2Financeiro(
+    parseNumeroBR(dados.quantidade) * parseNumeroBR(dados.valor_unit)
+  );
+  if (totalPrevisto <= 0) {
+    throw new Error('Valor total da compra deve ser maior que zero.');
+  }
+  const parcelasDetalhe = normalizarParcelasDetalhePayloadFinanceiro(
+    dados.parcelas_detalhe ?? dados.parcelas_detalhe_json,
+    dados.parcelas,
+    dados.data_pagamento || dados.comprado_em || new Date(),
+    totalPrevisto
+  );
+  dados.parcelas_detalhe_json = serializarParcelasDetalheFinanceiro(parcelasDetalhe);
+  delete dados.parcelas_detalhe;
   return dados;
 }
 

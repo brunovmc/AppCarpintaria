@@ -3,7 +3,8 @@
 <div id="listaCompras"></div>
 <div id="listaControlesCompras" class="lista-controles"></div>
 
-<div id="formularioCompra" class="form-modal" style="display:none; margin-top:32px;">
+<div id="formularioCompra" class="modal hidden">
+  <div class="modal-content form-modal-content">
   <h2 id="compraFormTitulo">Nova Compra</h2>
 
   <div class="campo-ajuda-wrap">
@@ -18,7 +19,7 @@
 
   <div class="campo-ajuda-wrap">
     <span class="campo-ajuda-tag">Quantidade</span>
-    <input id="compraQuantidade" type="number">
+    <input id="compraQuantidade" type="number" oninput="ComprasUI.handleParcelasConfigChange()">
   </div>
 
   <div class="campo-ajuda-wrap">
@@ -58,7 +59,7 @@
 
   <div class="campo-ajuda-wrap">
     <span class="campo-ajuda-tag">Valor unitario (R$)</span>
-    <input id="compraValorUnit" type="number">
+    <input id="compraValorUnit" type="number" oninput="ComprasUI.handleParcelasConfigChange()">
   </div>
 
   <div class="campo-ajuda-wrap">
@@ -73,7 +74,7 @@
 
   <div class="campo-ajuda-wrap">
     <span class="campo-ajuda-tag">Data de pagamento</span>
-    <input id="compraDataPagamento" type="date">
+    <input id="compraDataPagamento" type="date" onchange="ComprasUI.handleParcelasConfigChange()">
   </div>
 
   <div class="campo-ajuda-wrap">
@@ -88,7 +89,12 @@
 
   <div id="compraParcelasWrap" class="campo-ajuda-wrap hidden">
     <span class="campo-ajuda-tag">Parcelas</span>
-    <input id="compraParcelas" type="number" min="1" step="1" value="1">
+    <input id="compraParcelas" type="number" min="1" step="1" value="1" oninput="ComprasUI.handleParcelasConfigChange()">
+  </div>
+
+  <div id="compraParcelasDetalheWrap" class="campo-ajuda-wrap hidden">
+    <span class="campo-ajuda-tag">Parcelas detalhadas</span>
+    <div id="compraParcelasDetalheLista" class="parcelas-detalhe-list"></div>
   </div>
 
   <div id="compraEquipamentoFields" class="hidden">
@@ -108,6 +114,7 @@
 
   <button id="btnSalvarCompra" onclick="ComprasController.salvar()">Salvar</button>
   <button onclick="ComprasUI.fecharFormulario()">Cancelar</button>
+  </div>
 </div>
 
 <div id="modalPagamentoCompra" class="modal hidden">
@@ -122,6 +129,11 @@
     <div class="campo-ajuda-wrap">
       <span class="campo-ajuda-tag">Valor pago (R$)</span>
       <input id="pagamentoCompraValor" type="number" step="0.01" min="0">
+    </div>
+
+    <div id="pagamentoCompraParcelaWrap" class="campo-ajuda-wrap hidden">
+      <span class="campo-ajuda-tag">Parcela</span>
+      <select id="pagamentoCompraParcela"></select>
     </div>
 
     <div class="campo-ajuda-wrap">

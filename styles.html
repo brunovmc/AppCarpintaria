@@ -175,6 +175,21 @@ textarea {
   padding: 10px;
 }
 
+.dash-card-click {
+  cursor: pointer;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.dash-card-click:hover {
+  border-color: #bbb;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.08);
+}
+
+.dash-card-click:focus-visible {
+  outline: 2px solid #4a79ff;
+  outline-offset: 1px;
+}
+
 .dash-card-label {
   font-size: 11px;
   color: #666;
@@ -229,6 +244,117 @@ textarea {
   font-size: 13px;
 }
 
+.dash-modal-observabilidade {
+  max-width: 760px;
+  max-height: calc(100vh - 32px);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.dash-obs-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.dash-obs-fechar-topo {
+  padding: 8px 12px;
+}
+
+.dash-obs-resumo {
+  margin-top: 8px;
+  padding: 8px;
+  border: 1px solid #efefef;
+  border-radius: 6px;
+  background: #fafafa;
+  font-size: 13px;
+  display: grid;
+  gap: 4px;
+}
+
+.dash-obs-lista {
+  margin-top: 10px;
+  overflow: auto;
+  border-top: 1px solid #efefef;
+  border-bottom: 1px solid #efefef;
+  padding: 4px 0;
+  flex: 1;
+  min-height: 120px;
+}
+
+.dash-obs-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 2px;
+  border-bottom: 1px solid #f1f1f1;
+}
+
+.dash-obs-item:last-child {
+  border-bottom: none;
+}
+
+.dash-obs-item-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.dash-obs-item-titulo {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.dash-obs-item-detalhe {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #666;
+  line-height: 1.4;
+}
+
+.dash-obs-item-right {
+  min-width: 170px;
+  text-align: right;
+}
+
+.dash-obs-item-valor {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.dash-obs-item-acoes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+  margin-top: 6px;
+}
+
+.dash-obs-item-acoes button {
+  width: auto;
+  margin: 0;
+  padding: 6px 8px;
+  font-size: 12px;
+}
+
+@media (max-width: 720px) {
+  .dash-obs-item {
+    flex-direction: column;
+  }
+
+  .dash-obs-item-right {
+    width: 100%;
+    min-width: 0;
+    text-align: left;
+  }
+
+  .dash-obs-item-acoes {
+    justify-content: flex-start;
+  }
+}
+
 .dash-despesa-header {
   display: flex;
   justify-content: space-between;
@@ -261,6 +387,29 @@ textarea {
   width: 18px;
   height: 18px;
   margin: 0;
+}
+
+.parcelas-detalhe-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.parcela-detalhe-linha {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.parcela-detalhe-num {
+  font-size: 12px;
+  min-width: 24px;
+  color: #666;
+}
+
+.parcela-detalhe-linha input {
+  margin-bottom: 0;
 }
 
 .tipo-filtro-linha {
@@ -666,6 +815,12 @@ textarea {
   padding: 16px;
   width: 100%;
   max-width: 520px;
+}
+
+.form-modal-content {
+  max-width: 920px;
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
 }
 
 /* Toast */

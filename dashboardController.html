@@ -7,6 +7,10 @@
     let salvandoDespesa = false;
     let despesaPagamentoId = null;
     let salvandoPagamentoDespesa = false;
+    let despesaPagamentoParcelado = false;
+    let cardObservabilidadeAberto = '';
+    let cardObservabilidadeItens = [];
+    let carregandoObservabilidade = false;
 
     function el() {
       return {
@@ -34,6 +38,8 @@
         despesaFormaPagamento: document.getElementById('despesaFormaPagamento'),
         despesaParcelasWrap: document.getElementById('despesaParcelasWrap'),
         despesaParcelas: document.getElementById('despesaParcelas'),
+        despesaParcelasDetalheWrap: document.getElementById('despesaParcelasDetalheWrap'),
+        despesaParcelasDetalheLista: document.getElementById('despesaParcelasDetalheLista'),
         despesaFixo: document.getElementById('despesaFixo'),
         despesaObservacao: document.getElementById('despesaObservacao'),
 
@@ -41,9 +47,16 @@
         pagDespesaTitulo: document.getElementById('pagDespesaTitulo'),
         pagDespesaData: document.getElementById('pagDespesaData'),
         pagDespesaValor: document.getElementById('pagDespesaValor'),
+        pagDespesaParcelaWrap: document.getElementById('pagDespesaParcelaWrap'),
+        pagDespesaParcela: document.getElementById('pagDespesaParcela'),
         pagDespesaForma: document.getElementById('pagDespesaForma'),
         pagDespesaObservacao: document.getElementById('pagDespesaObservacao'),
-        btnConfirmarPagDespesa: document.getElementById('btnConfirmarPagDespesa')
+        btnConfirmarPagDespesa: document.getElementById('btnConfirmarPagDespesa'),
+
+        modalObservabilidadeCard: document.getElementById('modalObservabilidadeCard'),
+        obsCardTitulo: document.getElementById('obsCardTitulo'),
+        obsCardResumo: document.getElementById('obsCardResumo'),
+        obsCardLista: document.getElementById('obsCardLista')
       };
     }
 
@@ -80,6 +93,12 @@
       return `R$ ${seguro.toFixed(2)}`;
     }
 
+    function formatarNumeroInteiro(valor) {
+      const n = Number(valor || 0);
+      const seguro = isNaN(n) ? 0 : n;
+      return `${Math.round(seguro)}`;
+    }
+
     function normalizarFormaPagamento(valor) {
       return String(valor || '')
         .normalize('NFD')
@@ -91,6 +110,75 @@
     function formaExigeParcelas(valor) {
       const forma = normalizarFormaPagamento(valor);
       return forma === 'CREDITO' || forma === 'PIX PARCELADO' || forma === 'DINHEIRO';
+    }
+
+    function getDataBaseParcelasDespesa() {
+      const f = el();
+      return String(f.despesaDataPagamento?.value || f.despesaDataCompetencia?.value || getHojeISO()).trim();
+    }
+
+    function gerarParcelasPadrao(valorTotal, parcelas, dataBase) {
+      const total = Number(valorTotal || 0);
+      const qtd = Math.max(1, Math.floor(Number(parcelas || 1)));
+      const inicioRaw = String(dataBase || getHojeISO()).trim();
+      const inicio = /^\d{4}-\d{2}-\d{2}$/.test(inicioRaw) ? new Date(`${inicioRaw}T00:00:00`) : new Date();
+      const base = qtd > 0 ? Number((total / qtd).toFixed(2)) : 0;
+      const lista = [];
+      for (let i = 0; i < qtd; i++) {
+        const d = new Date(inicio);
+        d.setMonth(d.getMonth() + i);
+        const yyyy = d.getFullYear();
+        const mm = String(d.getMonth() + 1).padStart(2, '0');
+        const dd = String(d.getDate()).padStart(2, '0');
+        const valor = i === qtd - 1
+          ? Number((total - (base * (qtd - 1))).toFixed(2))
+          : base;
+        lista.push({
+          numero: i + 1,
+          data: `${yyyy}-${mm}-${dd}`,
+          valor: Number(valor.toFixed(2))
+        });
+      }
+      return lista;
+    }
+
+    function lerParcelasDetalheDespesa() {
+      const f = el();
+      if (!f.despesaParcelasDetalheLista) return [];
+      const linhas = [...f.despesaParcelasDetalheLista.querySelectorAll('.parcela-detalhe-linha')];
+      return linhas.map((linha, idx) => ({
+        numero: idx + 1,
+        data: String(linha.querySelector('input[data-campo="data"]')?.value || '').trim(),
+        valor: parseNumeroInput(linha.querySelector('input[data-campo="valor"]')?.value || '')
+      }));
+    }
+
+    function renderParcelasDetalheDespesa(listaForcada) {
+      const f = el();
+      if (!f.despesaParcelasDetalheWrap || !f.despesaParcelasDetalheLista) return;
+
+      const exibir = formaExigeParcelas(String(f.despesaFormaPagamento?.value || '').trim());
+      if (!exibir) {
+        f.despesaParcelasDetalheWrap.classList.add('hidden');
+        f.despesaParcelasDetalheLista.innerHTML = '';
+        return;
+      }
+
+      const parcelas = Math.max(1, Math.floor(parseNumeroInput(f.despesaParcelas?.value) || 1));
+      const valorTotal = parseNumeroInput(f.despesaValorTotal?.value || 0);
+      const dataBase = getDataBaseParcelasDespesa();
+      const atuais = Array.isArray(listaForcada) ? listaForcada : lerParcelasDetalheDespesa();
+      const usarAtuais = atuais.length === parcelas && atuais.every(p => String(p.data || '').trim() !== '');
+      const lista = usarAtuais ? atuais : gerarParcelasPadrao(valorTotal, parcelas, dataBase);
+
+      f.despesaParcelasDetalheLista.innerHTML = lista.map((p, idx) => `
+        <div class="parcela-detalhe-linha">
+          <span class="parcela-detalhe-num">#${idx + 1}</span>
+          <input type="date" data-campo="data" value="${escapeHtml(p.data || '')}">
+          <input type="number" data-campo="valor" min="0" step="0.01" value="${Number(p.valor || 0).toFixed(2)}">
+        </div>
+      `).join('');
+      f.despesaParcelasDetalheWrap.classList.remove('hidden');
     }
 
     function escapeHtml(valor) {
@@ -209,40 +297,31 @@
       const f = el();
       if (!f.cards) return;
       const c = cards || {};
-      f.cards.innerHTML = `
-        <div class="dash-card">
-          <div class="dash-card-label">Pago no mes</div>
-          <div class="dash-card-valor">${formatarMoeda(c.gasto_pago_mes || 0)}</div>
+      const definicoes = [
+        { key: 'gasto_pago_mes', label: 'Pago no mes', valor: c.gasto_pago_mes || 0, moeda: true },
+        { key: 'compromisso_previsto_mes', label: 'Compromissos previstos (mes)', valor: c.compromisso_previsto_mes || 0, moeda: true },
+        { key: 'vendas_no_mes', label: 'Vendas no mes', valor: c.vendas_no_mes || 0, moeda: true },
+        { key: 'recebido_vendas_mes', label: 'Recebido de vendas (mes)', valor: c.recebido_vendas_mes || 0, moeda: true },
+        { key: 'pendente_total', label: 'Pendente total', valor: c.pendente_total || 0, moeda: true },
+        { key: 'vencido_total', label: 'Vencido', valor: c.vencido_total || 0, moeda: true },
+        { key: 'avencer_7_dias', label: 'A vencer (7 dias)', valor: c.avencer_7_dias || 0, moeda: true },
+        { key: 'valor_estoque_total', label: 'Valor em estoque', valor: c.valor_estoque_total || 0, moeda: true },
+        { key: 'contador_bruno_mes', label: 'BRUNO (pago no mes)', valor: c.contador_bruno_mes || 0, moeda: true },
+        { key: 'contador_zizu_mes', label: 'ZIZU (pago no mes)', valor: c.contador_zizu_mes || 0, moeda: true }
+      ];
+
+      f.cards.innerHTML = definicoes.map(def => `
+        <div
+          class="dash-card dash-card-click"
+          role="button"
+          tabindex="0"
+          onclick="DashboardController.abrirObservabilidadeCard('${escapeHtml(def.key)}')"
+          onkeydown="DashboardController.handleCardKeydown(event, '${escapeHtml(def.key)}')"
+        >
+          <div class="dash-card-label">${escapeHtml(def.label)}</div>
+          <div class="dash-card-valor">${def.moeda ? formatarMoeda(def.valor) : formatarNumeroInteiro(def.valor)}</div>
         </div>
-        <div class="dash-card">
-          <div class="dash-card-label">Pendente total</div>
-          <div class="dash-card-valor">${formatarMoeda(c.pendente_total || 0)}</div>
-        </div>
-        <div class="dash-card">
-          <div class="dash-card-label">Vencido</div>
-          <div class="dash-card-valor">${formatarMoeda(c.vencido_total || 0)}</div>
-        </div>
-        <div class="dash-card">
-          <div class="dash-card-label">A vencer (7 dias)</div>
-          <div class="dash-card-valor">${formatarMoeda(c.avencer_7_dias || 0)}</div>
-        </div>
-        <div class="dash-card">
-          <div class="dash-card-label">Valor em estoque</div>
-          <div class="dash-card-valor">${formatarMoeda(c.valor_estoque_total || 0)}</div>
-        </div>
-        <div class="dash-card">
-          <div class="dash-card-label">Itens ativos em estoque</div>
-          <div class="dash-card-valor">${Number(c.quantidade_itens_estoque || 0)}</div>
-        </div>
-        <div class="dash-card">
-          <div class="dash-card-label">BRUNO (lancado + pago)</div>
-          <div class="dash-card-valor">${formatarMoeda(c.contador_bruno_mes || 0)}</div>
-        </div>
-        <div class="dash-card">
-          <div class="dash-card-label">ZIZU (lancado + pago)</div>
-          <div class="dash-card-valor">${formatarMoeda(c.contador_zizu_mes || 0)}</div>
-        </div>
-      `;
+      `).join('');
     }
 
     function carregarResumo() {
@@ -269,6 +348,265 @@
       carregarDespesas();
     }
 
+    function handleCardKeydown(event, cardKey) {
+      const tecla = String(event?.key || '').toLowerCase();
+      if (tecla !== 'enter' && tecla !== ' ' && tecla !== 'spacebar') return;
+      if (event?.preventDefault) event.preventDefault();
+      abrirObservabilidadeCard(cardKey);
+    }
+
+    function renderObservabilidadeCard(payload, fallbackCardKey) {
+      const f = el();
+      if (!f.obsCardLista || !f.obsCardResumo || !f.obsCardTitulo) return;
+
+      const p = payload || {};
+      const cardLabel = String(p.card_label || fallbackCardKey || 'Card').trim() || 'Card';
+      const referencia = String(p.referencia || '').trim();
+      const campoValor = String(p.campo_valor || 'valor').trim() || 'valor';
+      const total = Number(p.total || 0);
+      const totalItens = Number(p.total_itens || 0);
+
+      const totalFmt = campoValor === 'quantidade_linhas'
+        ? formatarNumeroInteiro(total)
+        : formatarMoeda(total);
+
+      f.obsCardTitulo.textContent = cardLabel;
+      f.obsCardResumo.innerHTML = `
+        <div><strong>Total:</strong> ${escapeHtml(totalFmt)}</div>
+        <div><strong>Itens:</strong> ${formatarNumeroInteiro(totalItens)}</div>
+        <div><strong>Referencia:</strong> ${escapeHtml(referencia || '-')}</div>
+      `;
+
+      cardObservabilidadeItens = Array.isArray(p.itens) ? p.itens : [];
+      if (cardObservabilidadeItens.length === 0) {
+        f.obsCardLista.innerHTML = '<p class="dash-empty">Sem composicao para este card no periodo.</p>';
+        return;
+      }
+
+      f.obsCardLista.innerHTML = cardObservabilidadeItens.map((item, idx) => {
+        const ehContagem = !!item.eh_contagem || campoValor === 'quantidade_linhas';
+        const valorBruto = ehContagem ? Number(item[campoValor] || 0) : Number(item.valor || 0);
+        const valorFmt = ehContagem ? formatarNumeroInteiro(valorBruto) : formatarMoeda(valorBruto);
+        const detalhes = [
+          String(item.detalhe || '').trim(),
+          String(item.data || '').trim() ? `Data: ${String(item.data || '').trim()}` : ''
+        ].filter(Boolean).join(' | ');
+
+        const podeEditar = !!item.pode_editar_origem && !!item.origem_id && !!item.origem_aba;
+        const podeExcluir = !!item.pode_excluir_origem && !!item.origem_id && !!item.origem_aba;
+        const podeRemoverPagamento = !!item.pode_remover_pagamento && !!item.pagamento_id;
+
+        return `
+          <div class="dash-obs-item">
+            <div class="dash-obs-item-main">
+              <div class="dash-obs-item-titulo">${escapeHtml(String(item.titulo || '-'))}</div>
+              <div class="dash-obs-item-detalhe">${escapeHtml(detalhes || '-')}</div>
+            </div>
+            <div class="dash-obs-item-right">
+              <div class="dash-obs-item-valor">${escapeHtml(valorFmt)}</div>
+              <div class="dash-obs-item-acoes">
+                ${podeEditar ? `<button onclick="DashboardController.editarOrigemObservabilidade(${idx})">Editar</button>` : ''}
+                ${podeExcluir ? `<button onclick="DashboardController.excluirOrigemObservabilidade(${idx})">Excluir</button>` : ''}
+                ${podeRemoverPagamento ? `<button onclick="DashboardController.removerPagamentoObservabilidade(${idx})">Remover pagamento</button>` : ''}
+              </div>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function abrirObservabilidadeCard(cardKey) {
+      if (carregandoObservabilidade) return;
+
+      const key = String(cardKey || '').trim();
+      if (!key) return;
+      cardObservabilidadeAberto = key;
+
+      const f = el();
+      if (!f.modalObservabilidadeCard || !f.obsCardLista || !f.obsCardResumo || !f.obsCardTitulo) return;
+
+      f.modalObservabilidadeCard.classList.remove('hidden');
+      f.obsCardTitulo.textContent = 'Composicao do card';
+      f.obsCardResumo.innerHTML = '<span>Carregando...</span>';
+      f.obsCardLista.innerHTML = '<p class="dash-empty">Carregando...</p>';
+
+      const referencia = String(f.mesReferencia?.value || getMesAtualISO()).trim() || getMesAtualISO();
+      carregandoObservabilidade = true;
+      google.script.run
+        .withSuccessHandler(payload => {
+          carregandoObservabilidade = false;
+          renderObservabilidadeCard(payload || {}, key);
+        })
+        .withFailureHandler(err => {
+          carregandoObservabilidade = false;
+          f.obsCardTitulo.textContent = 'Composicao do card';
+          f.obsCardResumo.innerHTML = '<span>Falha ao carregar.</span>';
+          f.obsCardLista.innerHTML = '<p class="dash-empty">Nao foi possivel carregar os dados deste card.</p>';
+          mostrarToast(err?.message || 'Erro ao carregar composicao do card', 'erro');
+        })
+        .obterComposicaoCardDashboardFinanceiro(referencia, key);
+    }
+
+    function fecharObservabilidadeCard() {
+      const f = el();
+      cardObservabilidadeAberto = '';
+      cardObservabilidadeItens = [];
+      carregandoObservabilidade = false;
+      if (f.modalObservabilidadeCard) f.modalObservabilidadeCard.classList.add('hidden');
+    }
+
+    function getItemObservabilidade(index) {
+      const idx = Number(index);
+      if (!isFinite(idx) || idx < 0) return null;
+      if (!Array.isArray(cardObservabilidadeItens)) return null;
+      return cardObservabilidadeItens[idx] || null;
+    }
+
+    function abrirAbaEExecutarAcao(aba, callback) {
+      const destino = String(aba || '').trim();
+      if (!destino || typeof callback !== 'function') return;
+      const maxTentativas = 12;
+      let tentativas = 0;
+
+      const tentar = () => {
+        const concluido = !!callback();
+        if (concluido) return;
+        tentativas += 1;
+        if (tentativas >= maxTentativas) {
+          mostrarToast('Nao foi possivel abrir a origem agora. Tente novamente.', 'erro');
+          return;
+        }
+        setTimeout(tentar, 140);
+      };
+
+      if (typeof trocarAba === 'function') {
+        trocarAba(destino);
+      }
+      setTimeout(tentar, 120);
+    }
+
+    function editarOrigemObservabilidade(index) {
+      const item = getItemObservabilidade(index);
+      if (!item) {
+        mostrarToast('Linha de composicao nao encontrada', 'erro');
+        return;
+      }
+
+      const aba = String(item.origem_aba || '').trim();
+      const id = String(item.origem_id || '').trim();
+      if (!aba || !id) {
+        mostrarToast('Origem desta linha nao esta disponivel', 'erro');
+        return;
+      }
+
+      fecharObservabilidadeCard();
+      abrirAbaEExecutarAcao(aba, () => {
+        if (aba === 'compras' && window.ComprasController?.editar) {
+          const existe = window.ComprasStore?.getById ? window.ComprasStore.getById(id) : null;
+          if (!existe) return false;
+          window.ComprasController.editar(id);
+          return true;
+        }
+        if (aba === 'dashboard' && window.DashboardController?.editarDespesa) {
+          const existe = Array.isArray(despesas)
+            ? despesas.some(d => String(d.ID || '').trim() === id)
+            : false;
+          if (!existe) return false;
+          window.DashboardController.editarDespesa(id);
+          return true;
+        }
+        if (aba === 'vendas' && window.VendasController?.editar) {
+          const existe = window.VendasStore?.getById ? window.VendasStore.getById(id) : null;
+          if (!existe) return false;
+          window.VendasController.editar(id);
+          return true;
+        }
+        if (aba === 'estoque' && window.EstoqueController?.editar) {
+          const existe = window.EstoqueStore?.getById ? window.EstoqueStore.getById(id) : null;
+          if (!existe) return false;
+          window.EstoqueController.editar(id);
+          return true;
+        }
+        return false;
+      });
+    }
+
+    function excluirOrigemObservabilidade(index) {
+      const item = getItemObservabilidade(index);
+      if (!item) {
+        mostrarToast('Linha de composicao nao encontrada', 'erro');
+        return;
+      }
+
+      const aba = String(item.origem_aba || '').trim();
+      const id = String(item.origem_id || '').trim();
+      if (!aba || !id) {
+        mostrarToast('Origem desta linha nao esta disponivel', 'erro');
+        return;
+      }
+
+      fecharObservabilidadeCard();
+      abrirAbaEExecutarAcao(aba, () => {
+        if (aba === 'compras' && window.ComprasController?.excluir) {
+          const existe = window.ComprasStore?.getById ? window.ComprasStore.getById(id) : null;
+          if (!existe) return false;
+          window.ComprasController.excluir(id);
+          return true;
+        }
+        if (aba === 'dashboard' && window.DashboardController?.excluirDespesa) {
+          const existe = Array.isArray(despesas)
+            ? despesas.some(d => String(d.ID || '').trim() === id)
+            : false;
+          if (!existe) return false;
+          window.DashboardController.excluirDespesa(id);
+          return true;
+        }
+        if (aba === 'vendas' && window.VendasController?.excluir) {
+          const existe = window.VendasStore?.getById ? window.VendasStore.getById(id) : null;
+          if (!existe) return false;
+          window.VendasController.excluir(id);
+          return true;
+        }
+        if (aba === 'estoque' && window.EstoqueController?.excluir) {
+          const existe = window.EstoqueStore?.getById ? window.EstoqueStore.getById(id) : null;
+          if (!existe) return false;
+          window.EstoqueController.excluir(id);
+          return true;
+        }
+        return false;
+      });
+    }
+
+    function removerPagamentoObservabilidade(index) {
+      const item = getItemObservabilidade(index);
+      if (!item) {
+        mostrarToast('Linha de composicao nao encontrada', 'erro');
+        return;
+      }
+      const pagamentoId = String(item.pagamento_id || '').trim();
+      if (!pagamentoId) {
+        mostrarToast('Pagamento nao encontrado para esta linha', 'erro');
+        return;
+      }
+      if (!confirm('Deseja remover este pagamento?')) return;
+
+      const cardAtual = String(cardObservabilidadeAberto || '').trim();
+      google.script.run
+        .withFailureHandler(err => {
+          mostrarToast(err?.message || 'Erro ao remover pagamento', 'erro');
+        })
+        .withSuccessHandler(ok => {
+          if (!ok) {
+            mostrarToast('Nao foi possivel remover o pagamento', 'erro');
+            return;
+          }
+          mostrarToast('Pagamento removido');
+          atualizar();
+          if (cardAtual) abrirObservabilidadeCard(cardAtual);
+        })
+        .removerPagamento(pagamentoId);
+    }
+
     function limparFormularioDespesa() {
       const f = el();
       if (f.despesaDescricao) f.despesaDescricao.value = '';
@@ -281,6 +619,8 @@
       if (f.despesaDataPagamento) f.despesaDataPagamento.value = '';
       if (f.despesaFormaPagamento) f.despesaFormaPagamento.value = '';
       if (f.despesaParcelas) f.despesaParcelas.value = '1';
+      if (f.despesaParcelasDetalheLista) f.despesaParcelasDetalheLista.innerHTML = '';
+      if (f.despesaParcelasDetalheWrap) f.despesaParcelasDetalheWrap.classList.add('hidden');
       if (f.despesaFixo) f.despesaFixo.checked = false;
       if (f.despesaObservacao) f.despesaObservacao.value = '';
       despesaEditandoId = null;
@@ -316,6 +656,15 @@
       if (f.despesaFixo) f.despesaFixo.checked = parseBooleanInput(item.fixo);
       if (f.despesaObservacao) f.despesaObservacao.value = item.observacao || '';
       handleDespesaFormaPagamentoChange();
+      renderParcelasDetalheDespesa(
+        Array.isArray(item.parcelas_detalhe)
+          ? item.parcelas_detalhe.map((p, idx) => ({
+            numero: idx + 1,
+            data: String(p.data_prevista || p.data || '').trim(),
+            valor: Number(p.valor_previsto ?? p.valor ?? 0)
+          }))
+          : []
+      );
     }
 
     function abrirFormularioDespesa() {
@@ -323,7 +672,6 @@
       if (!f.formDespesa) return;
       limparFormularioDespesa();
       f.formDespesa.classList.remove('hidden');
-      f.formDespesa.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
 
     function editarDespesa(id) {
@@ -340,7 +688,6 @@
       const f = el();
       if (f.formDespesa) {
         f.formDespesa.classList.remove('hidden');
-        f.formDespesa.scrollIntoView({ behavior: 'smooth', block: 'start' });
       }
     }
 
@@ -392,6 +739,25 @@
         mostrarToast('Parcelas deve ser um numero inteiro maior ou igual a 1', 'erro');
         return;
       }
+      const parcelasDetalhe = formaExigeParcelas(formaPagamento)
+        ? lerParcelasDetalheDespesa()
+        : gerarParcelasPadrao(valorTotal, 1, getDataBaseParcelasDespesa());
+      if (formaExigeParcelas(formaPagamento)) {
+        if (parcelasDetalhe.length !== parcelas) {
+          mostrarToast('Revise as parcelas detalhadas', 'erro');
+          return;
+        }
+        const algumaDataInvalida = parcelasDetalhe.some(p => !String(p.data || '').trim());
+        if (algumaDataInvalida) {
+          mostrarToast('Preencha a data de todas as parcelas', 'erro');
+          return;
+        }
+        const algumValorInvalido = parcelasDetalhe.some(p => Number(p.valor || 0) <= 0);
+        if (algumValorInvalido) {
+          mostrarToast('Valor de parcela deve ser maior que zero', 'erro');
+          return;
+        }
+      }
 
       const payload = {
         descricao,
@@ -404,6 +770,7 @@
         data_pagamento: String(f.despesaDataPagamento?.value || '').trim(),
         forma_pagamento: formaPagamento,
         parcelas,
+        parcelas_detalhe: parcelasDetalhe,
         fixo: !!f.despesaFixo?.checked,
         observacao: String(f.despesaObservacao?.value || '').trim()
       };
@@ -490,7 +857,7 @@
     function setSalvandoPagamentoDespesa(ativo) {
       salvandoPagamentoDespesa = !!ativo;
       const f = el();
-      [f.pagDespesaData, f.pagDespesaValor, f.pagDespesaForma, f.pagDespesaObservacao, f.btnConfirmarPagDespesa]
+      [f.pagDespesaData, f.pagDespesaValor, f.pagDespesaParcela, f.pagDespesaForma, f.pagDespesaObservacao, f.btnConfirmarPagDespesa]
         .forEach(input => {
           if (input) input.disabled = salvandoPagamentoDespesa;
         });
@@ -528,7 +895,49 @@
         f.pagDespesaTitulo.textContent = `Registrar pagamento: ${item.descricao || despesaId}`;
       }
       if (f.pagDespesaData) f.pagDespesaData.value = item.data_pagamento || getHojeISO();
-      if (f.pagDespesaValor) f.pagDespesaValor.value = pendente.toFixed(2);
+
+      const parcelas = Array.isArray(item?.parcelas_detalhe) ? item.parcelas_detalhe : [];
+      const totalParcelas = Math.max(1, Math.floor(parseNumeroInput(item?.parcelas || 1) || 1));
+      despesaPagamentoParcelado = totalParcelas > 1;
+      const proximaParcela = parcelas.find(p => Number(p?.valor_pendente || 0) > 0.009) || null;
+
+      if (f.pagDespesaParcelaWrap && f.pagDespesaParcela) {
+        if (despesaPagamentoParcelado) {
+          if (!proximaParcela?.ID) {
+            despesaPagamentoId = null;
+            mostrarToast('Nao ha parcela pendente para esta despesa', 'erro');
+            return;
+          }
+          const numero = Number(proximaParcela.parcela_numero || 0);
+          const total = Number(proximaParcela.parcelas_total || 0);
+          const data = String(proximaParcela.data_prevista || '-').trim() || '-';
+          const valorPend = Number(proximaParcela.valor_pendente || 0);
+
+          f.pagDespesaParcela.innerHTML = '';
+          const op = document.createElement('option');
+          op.value = String(proximaParcela.ID || '').trim();
+          op.textContent = `Parcela ${numero}/${total} - ${data} - ${formatarMoeda(valorPend)}`;
+          f.pagDespesaParcela.appendChild(op);
+          f.pagDespesaParcela.value = op.value;
+          f.pagDespesaParcelaWrap.classList.remove('hidden');
+
+          if (f.pagDespesaValor) {
+            f.pagDespesaValor.value = valorPend > 0 ? valorPend.toFixed(2) : '';
+            f.pagDespesaValor.readOnly = true;
+          }
+        } else {
+          f.pagDespesaParcela.innerHTML = '<option value="">Parcela unica</option>';
+          f.pagDespesaParcela.value = '';
+          f.pagDespesaParcelaWrap.classList.add('hidden');
+          if (f.pagDespesaValor) {
+            f.pagDespesaValor.value = pendente.toFixed(2);
+            f.pagDespesaValor.readOnly = false;
+          }
+        }
+      } else if (f.pagDespesaValor) {
+        f.pagDespesaValor.value = pendente.toFixed(2);
+      }
+
       if (f.pagDespesaForma) f.pagDespesaForma.value = item.forma_pagamento || item.forma_pagamento_padrao || '';
       if (f.pagDespesaObservacao) f.pagDespesaObservacao.value = '';
       if (f.modalPagamentoDespesa) f.modalPagamentoDespesa.classList.remove('hidden');
@@ -545,6 +954,11 @@
       } else if (!String(f.despesaParcelas.value || '').trim() || Number(f.despesaParcelas.value) < 1) {
         f.despesaParcelas.value = '1';
       }
+      renderParcelasDetalheDespesa();
+    }
+
+    function handleDespesaParcelasDetalheChange() {
+      renderParcelasDetalheDespesa();
     }
 
     function confirmarPagamentoDespesa() {
@@ -568,6 +982,10 @@
         mostrarToast('Forma de pagamento e obrigatoria', 'erro');
         return;
       }
+      if (despesaPagamentoParcelado && !String(f.pagDespesaParcela?.value || '').trim()) {
+        mostrarToast('Selecione a parcela pendente', 'erro');
+        return;
+      }
       if (!isFinite(valorPago) || valorPago <= 0) {
         mostrarToast('Valor pago invalido', 'erro');
         return;
@@ -588,6 +1006,7 @@
         .registrarPagamentoDespesaGeral(despesaPagamentoId, {
           data_pagamento: dataPagamento,
           valor_pago: valorPago,
+          parcela_alvo_id: despesaPagamentoParcelado ? String(f.pagDespesaParcela?.value || '').trim() : '',
           forma_pagamento: formaPagamento,
           observacao
         });
@@ -595,8 +1014,12 @@
 
     function cancelarPagamentoDespesa() {
       despesaPagamentoId = null;
+      despesaPagamentoParcelado = false;
       setSalvandoPagamentoDespesa(false);
       const f = el();
+      if (f.pagDespesaValor) f.pagDespesaValor.readOnly = false;
+      if (f.pagDespesaParcelaWrap) f.pagDespesaParcelaWrap.classList.add('hidden');
+      if (f.pagDespesaParcela) f.pagDespesaParcela.innerHTML = '<option value="">Selecione</option>';
       if (f.modalPagamentoDespesa) {
         f.modalPagamentoDespesa.classList.add('hidden');
       }
@@ -605,6 +1028,12 @@
     return {
       init,
       atualizar,
+      handleCardKeydown,
+      abrirObservabilidadeCard,
+      fecharObservabilidadeCard,
+      editarOrigemObservabilidade,
+      excluirOrigemObservabilidade,
+      removerPagamentoObservabilidade,
       abrirFormularioDespesa,
       cancelarFormularioDespesa,
       editarDespesa,
@@ -613,7 +1042,8 @@
       registrarPagamentoDespesa,
       confirmarPagamentoDespesa,
       cancelarPagamentoDespesa,
-      handleDespesaFormaPagamentoChange
+      handleDespesaFormaPagamentoChange,
+      handleDespesaParcelasDetalheChange
     };
   })();
 </script>

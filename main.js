@@ -97,3 +97,82 @@ function atualizarCachesManualmente() {
 
   return resultado;
 }
+
+function prepararAbasFinanceiroVendas() {
+  const ss = getDataSpreadsheet();
+
+  function removerColunasPorHeader(sheet, headersParaRemover) {
+    if (!sheet || !Array.isArray(headersParaRemover) || headersParaRemover.length === 0) {
+      return { removidas: [] };
+    }
+    const lastCol = sheet.getLastColumn();
+    if (lastCol <= 0) return { removidas: [] };
+
+    const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+    const alvoUpper = headersParaRemover
+      .map((h) => String(h || "").trim().toUpperCase())
+      .filter((h) => h);
+    const colunas = [];
+
+    headers.forEach((h, idx) => {
+      const label = String(h || "").trim().toUpperCase();
+      if (alvoUpper.includes(label)) {
+        colunas.push({ col: idx + 1, header: String(h || "").trim() });
+      }
+    });
+
+    colunas
+      .sort((a, b) => b.col - a.col)
+      .forEach((item) => sheet.deleteColumn(item.col));
+
+    return { removidas: colunas.map((item) => item.header) };
+  }
+
+  function garantirAbaComSchema(nomeAba, schema, opcoes) {
+    if (!Array.isArray(schema) || schema.length === 0) {
+      return { ok: false, aba: nomeAba, erro: "Schema invalido." };
+    }
+    const opts = opcoes || {};
+    let sheet = ss.getSheetByName(nomeAba);
+    if (!sheet) {
+      sheet = ss.insertSheet(nomeAba);
+    }
+
+    const remocao = removerColunasPorHeader(sheet, opts.remover_headers || []);
+    ensureSchema(sheet, schema);
+
+    const headersAtuais = sheet
+      .getRange(1, 1, 1, sheet.getLastColumn())
+      .getValues()[0]
+      .map((h) => String(h || "").trim());
+
+    return {
+      ok: true,
+      aba: nomeAba,
+      colunas: headersAtuais.length,
+      headers_atuais: headersAtuais,
+      headers_esperados: schema,
+      headers_removidos: remocao.removidas,
+    };
+  }
+
+  const resultado = {
+    ok: true,
+    executado_em: new Date(),
+    abas: {
+      compras: garantirAbaComSchema("COMPRAS", COMPRAS_SCHEMA),
+      despesas_gerais: garantirAbaComSchema("DESPESAS_GERAIS", DESPESAS_GERAIS_SCHEMA),
+      vendas: garantirAbaComSchema("VENDAS", VENDAS_SCHEMA, {
+        remover_headers: ["plano_recebimento", "data_entrega_prevista"],
+      }),
+      pagamentos: garantirAbaComSchema("PAGAMENTOS", PAGAMENTOS_SCHEMA),
+      parcelas_financeiras: garantirAbaComSchema(
+        "PARCELAS_FINANCEIRAS",
+        PARCELAS_FINANCEIRAS_SCHEMA,
+      ),
+    },
+  };
+
+  resultado.ok = Object.values(resultado.abas).every((item) => item?.ok !== false);
+  return resultado;
+}

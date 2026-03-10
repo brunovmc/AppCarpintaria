@@ -19,9 +19,8 @@
         formaPagamento: document.getElementById('vendaFormaPagamento'),
         parcelasWrap: document.getElementById('vendaParcelasWrap'),
         parcelas: document.getElementById('vendaParcelas'),
-        plano: document.getElementById('vendaPlano'),
-        dataEntregaWrap: document.getElementById('vendaDataEntregaWrap'),
-        dataEntrega: document.getElementById('vendaDataEntrega'),
+        parcelasDetalheWrap: document.getElementById('vendaParcelasDetalheWrap'),
+        parcelasDetalheLista: document.getElementById('vendaParcelasDetalheLista'),
         observacao: document.getElementById('vendaObservacao'),
         formTitulo: document.getElementById('vendaFormTitulo'),
 
@@ -29,6 +28,8 @@
         recebimentoTitulo: document.getElementById('recebimentoVendaTitulo'),
         recebimentoData: document.getElementById('recebimentoVendaData'),
         recebimentoValor: document.getElementById('recebimentoVendaValor'),
+        recebimentoParcelaWrap: document.getElementById('recebimentoVendaParcelaWrap'),
+        recebimentoParcela: document.getElementById('recebimentoVendaParcela'),
         recebimentoForma: document.getElementById('recebimentoVendaForma'),
         recebimentoObs: document.getElementById('recebimentoVendaObservacao'),
         btnConfirmarRecebimento: document.getElementById('btnConfirmarRecebimentoVenda')
@@ -54,6 +55,74 @@
       if (!s) return 0;
       const n = Number(s.replace(',', '.'));
       return isNaN(n) ? 0 : n;
+    }
+
+    function getDataBaseParcelasVenda() {
+      const { dataVenda } = el();
+      return String(dataVenda?.value || getHojeISO()).trim();
+    }
+
+    function gerarParcelasPadrao(valorTotal, parcelas, dataBase) {
+      const total = Number(valorTotal || 0);
+      const qtd = Math.max(1, Math.floor(Number(parcelas || 1)));
+      const inicioRaw = String(dataBase || getHojeISO()).trim();
+      const inicio = /^\d{4}-\d{2}-\d{2}$/.test(inicioRaw) ? new Date(`${inicioRaw}T00:00:00`) : new Date();
+      const base = qtd > 0 ? Number((total / qtd).toFixed(2)) : 0;
+      const lista = [];
+      for (let i = 0; i < qtd; i++) {
+        const d = new Date(inicio);
+        d.setMonth(d.getMonth() + i);
+        const yyyy = d.getFullYear();
+        const mm = String(d.getMonth() + 1).padStart(2, '0');
+        const dd = String(d.getDate()).padStart(2, '0');
+        const valor = i === qtd - 1
+          ? Number((total - (base * (qtd - 1))).toFixed(2))
+          : base;
+        lista.push({
+          numero: i + 1,
+          data: `${yyyy}-${mm}-${dd}`,
+          valor: Number(valor.toFixed(2))
+        });
+      }
+      return lista;
+    }
+
+    function lerParcelasDetalheVenda() {
+      const { parcelasDetalheLista } = el();
+      if (!parcelasDetalheLista) return [];
+      const linhas = [...parcelasDetalheLista.querySelectorAll('.parcela-detalhe-linha')];
+      return linhas.map((linha, idx) => ({
+        numero: idx + 1,
+        data: String(linha.querySelector('input[data-campo="data"]')?.value || '').trim(),
+        valor: parseNumeroInput(linha.querySelector('input[data-campo="valor"]')?.value || '')
+      }));
+    }
+
+    function renderParcelasDetalheVenda(listaForcada) {
+      const f = el();
+      if (!f.parcelasDetalheWrap || !f.parcelasDetalheLista) return;
+      const exibir = formaExigeParcelas(f.formaPagamento?.value || '');
+      if (!exibir) {
+        f.parcelasDetalheWrap.classList.add('hidden');
+        f.parcelasDetalheLista.innerHTML = '';
+        return;
+      }
+
+      const parcelas = Math.max(1, Math.floor(parseNumeroInput(f.parcelas?.value || 1) || 1));
+      const valorTotal = parseNumeroInput(f.valorTotal?.value || 0);
+      const dataBase = getDataBaseParcelasVenda();
+      const atuais = Array.isArray(listaForcada) ? listaForcada : lerParcelasDetalheVenda();
+      const usarAtuais = atuais.length === parcelas && atuais.every(p => String(p.data || '').trim() !== '');
+      const lista = usarAtuais ? atuais : gerarParcelasPadrao(valorTotal, parcelas, dataBase);
+
+      f.parcelasDetalheLista.innerHTML = lista.map((p, idx) => `
+        <div class="parcela-detalhe-linha">
+          <span class="parcela-detalhe-num">#${idx + 1}</span>
+          <input type="date" data-campo="data" value="${String(p.data || '')}">
+          <input type="number" data-campo="valor" min="0" step="0.01" value="${Number(p.valor || 0).toFixed(2)}">
+        </div>
+      `).join('');
+      f.parcelasDetalheWrap.classList.remove('hidden');
     }
 
     function formatarMoeda(valor) {
@@ -147,6 +216,7 @@
         f.valorTotal.value = (qtd * preco).toFixed(2);
       }
       handleQuantidadeOuTotalChange();
+      handleParcelasConfigChange();
     }
 
     function handleQuantidadeOuTotalChange() {
@@ -159,17 +229,12 @@
       } else {
         f.valorUnit.value = '';
       }
+      handleParcelasConfigChange();
     }
 
     function handleFormaPagamentoChange() {
       const f = el();
       if (!f.formaPagamento || !f.parcelasWrap || !f.parcelas) return;
-      const planoEncomenda = String(f.plano?.value || '').toUpperCase() === 'ENCOMENDA_50_50';
-      if (planoEncomenda) {
-        f.parcelasWrap.classList.add('hidden');
-        f.parcelas.value = '2';
-        return;
-      }
       const exibirParcelas = formaExigeParcelas(f.formaPagamento.value);
       f.parcelasWrap.classList.toggle('hidden', !exibirParcelas);
       if (!exibirParcelas) {
@@ -177,17 +242,11 @@
       } else if (!String(f.parcelas.value || '').trim() || Number(f.parcelas.value) < 1) {
         f.parcelas.value = '1';
       }
+      renderParcelasDetalheVenda();
     }
 
-    function handlePlanoChange() {
-      const f = el();
-      const plano = String(f.plano?.value || '').toUpperCase();
-      const encomenda = plano === 'ENCOMENDA_50_50';
-      if (f.dataEntregaWrap) f.dataEntregaWrap.classList.toggle('hidden', !encomenda);
-      if (encomenda && f.parcelas) {
-        f.parcelas.value = '2';
-      }
-      handleFormaPagamentoChange();
+    function handleParcelasConfigChange() {
+      renderParcelasDetalheVenda();
     }
 
     function abrirFormularioNovo() {
@@ -198,16 +257,13 @@
     function mostrarFormulario() {
       const f = el();
       if (!f.formulario) return;
-      f.formulario.style.display = 'block';
-      requestAnimationFrame(() => {
-        f.formulario.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      });
+      f.formulario.classList.remove('hidden');
     }
 
     function fecharFormulario() {
       const f = el();
       if (!f.formulario) return;
-      f.formulario.style.display = 'none';
+      f.formulario.classList.add('hidden');
       resetFormulario();
       if (window.VendasController?.limparEdicao) {
         VendasController.limparEdicao();
@@ -224,11 +280,18 @@
       if (f.dataVenda) f.dataVenda.value = data.data_venda || '';
       if (f.formaPagamento) f.formaPagamento.value = data.forma_pagamento || '';
       if (f.parcelas) f.parcelas.value = data.parcelas || '1';
-      if (f.plano) f.plano.value = data.plano_recebimento || 'PADRAO';
-      if (f.dataEntrega) f.dataEntrega.value = data.data_entrega_prevista || '';
       if (f.observacao) f.observacao.value = data.observacao || '';
       if (f.formTitulo) f.formTitulo.innerText = 'Editar Venda';
-      handlePlanoChange();
+      handleFormaPagamentoChange();
+      renderParcelasDetalheVenda(
+        Array.isArray(data.parcelas_detalhe)
+          ? data.parcelas_detalhe.map((p, idx) => ({
+            numero: idx + 1,
+            data: String(p.data_prevista || p.data || '').trim(),
+            valor: Number(p.valor_previsto ?? p.valor ?? 0)
+          }))
+          : []
+      );
       handleQuantidadeOuTotalChange();
     }
 
@@ -243,14 +306,13 @@
         f.dataVenda,
         f.formaPagamento,
         f.parcelas,
-        f.plano,
-        f.dataEntrega,
         f.observacao
       ].forEach(i => i && (i.value = ''));
       if (f.formTitulo) f.formTitulo.innerText = 'Nova Venda';
       if (f.dataVenda) f.dataVenda.value = getHojeISO();
-      if (f.plano) f.plano.value = 'PADRAO';
-      handlePlanoChange();
+      if (f.parcelasDetalheLista) f.parcelasDetalheLista.innerHTML = '';
+      if (f.parcelasDetalheWrap) f.parcelasDetalheWrap.classList.add('hidden');
+      handleFormaPagamentoChange();
     }
 
     function renderParcelasDetalhe(parcelas) {
@@ -277,7 +339,7 @@
         <p><b>Recebido por:</b> ${v.recebido_por || '-'}</p>
         <p><b>Data de venda:</b> ${v.data_venda || '-'}</p>
         <p><b>Forma:</b> ${v.forma_pagamento || '-'}</p>
-        <p><b>Parcelas:</b> ${Number(v.parcelas || 1)} | Plano: ${v.plano_recebimento || 'PADRAO'}</p>
+        <p><b>Parcelas:</b> ${Number(v.parcelas || 1)}</p>
         <p><b>Financeiro:</b> ${String(v.status_pagamento || 'PENDENTE').toUpperCase()} | Recebido ${formatarMoeda(v.total_pago || 0)} | Pendente ${formatarMoeda(v.total_pendente || 0)}</p>
         <p><b>Estoque baixado:</b> ${estoqueLabel}</p>
         <p><b>Observacao:</b> ${v.observacao || '-'}</p>
@@ -371,7 +433,7 @@
 
     function abrirModalRecebimento(venda) {
       const f = el();
-      if (!f.modalRecebimento) return;
+      if (!f.modalRecebimento) return false;
       if (f.recebimentoTitulo) {
         const nome = String(venda?.item || '').trim();
         f.recebimentoTitulo.textContent = nome
@@ -379,27 +441,77 @@
           : 'Registrar recebimento';
       }
       if (f.recebimentoData) f.recebimentoData.value = getHojeISO();
-      if (f.recebimentoValor) {
+      const parcelas = Array.isArray(venda?.parcelas_detalhe) ? venda.parcelas_detalhe : [];
+      const totalParcelas = Math.max(1, Math.floor(parseNumeroInput(venda?.parcelas || 1) || 1));
+      const parcelado = totalParcelas > 1;
+      const proximaParcela = parcelas.find(p => Number(p?.valor_pendente || 0) > 0.009) || null;
+
+      if (f.recebimentoParcelaWrap && f.recebimentoParcela) {
+        if (parcelado) {
+          if (!proximaParcela?.ID) {
+            if (typeof mostrarToast === 'function') {
+              mostrarToast('Nao ha parcela pendente para esta venda', 'erro');
+            }
+            return false;
+          }
+          const numero = Number(proximaParcela.parcela_numero || 0);
+          const total = Number(proximaParcela.parcelas_total || 0);
+          const data = String(proximaParcela.data_prevista || '-').trim() || '-';
+          const valorPend = Number(proximaParcela.valor_pendente || 0);
+
+          f.recebimentoParcela.innerHTML = '';
+          const op = document.createElement('option');
+          op.value = String(proximaParcela.ID || '').trim();
+          op.textContent = `Parcela ${numero}/${total} - ${data} - ${formatarMoeda(valorPend)}`;
+          f.recebimentoParcela.appendChild(op);
+          f.recebimentoParcela.value = op.value;
+          f.recebimentoParcelaWrap.classList.remove('hidden');
+
+          if (f.recebimentoValor) {
+            f.recebimentoValor.value = valorPend > 0 ? valorPend.toFixed(2) : '';
+            f.recebimentoValor.readOnly = true;
+          }
+        } else {
+          f.recebimentoParcela.innerHTML = '<option value="">Parcela unica</option>';
+          f.recebimentoParcela.value = '';
+          f.recebimentoParcelaWrap.classList.add('hidden');
+          if (f.recebimentoValor) {
+            const pendente = Number(venda?.total_pendente || 0);
+            f.recebimentoValor.value = pendente > 0 ? pendente.toFixed(2) : '';
+            f.recebimentoValor.readOnly = false;
+          }
+        }
+      } else if (f.recebimentoValor) {
         const pendente = Number(venda?.total_pendente || 0);
         f.recebimentoValor.value = pendente > 0 ? pendente.toFixed(2) : '';
       }
+
       if (f.recebimentoForma) f.recebimentoForma.value = venda?.forma_pagamento || '';
       if (f.recebimentoObs) f.recebimentoObs.value = '';
+      f.modalRecebimento.dataset.parcelado = parcelado ? 'true' : 'false';
       f.modalRecebimento.classList.remove('hidden');
+      return true;
     }
 
     function fecharModalRecebimento() {
       const f = el();
       if (!f.modalRecebimento) return;
       f.modalRecebimento.classList.add('hidden');
+      if (f.recebimentoValor) f.recebimentoValor.readOnly = false;
+      if (f.recebimentoParcelaWrap) f.recebimentoParcelaWrap.classList.add('hidden');
+      if (f.recebimentoParcela) f.recebimentoParcela.innerHTML = '<option value="">Selecione</option>';
+      f.modalRecebimento.dataset.parcelado = 'false';
       setModalRecebimentoProcessando(false);
     }
 
     function lerModalRecebimento() {
       const f = el();
+      const parcelado = String(f.modalRecebimento?.dataset?.parcelado || '').toLowerCase() === 'true';
       return {
         data_pagamento: String(f.recebimentoData?.value || '').trim(),
         valor_pago: String(f.recebimentoValor?.value || '').trim(),
+        parcela_alvo_id: parcelado ? String(f.recebimentoParcela?.value || '').trim() : '',
+        parcelado,
         forma_pagamento: String(f.recebimentoForma?.value || '').trim(),
         observacao: String(f.recebimentoObs?.value || '').trim()
       };
@@ -408,7 +520,7 @@
     function setModalRecebimentoProcessando(processando) {
       const f = el();
       const on = !!processando;
-      [f.recebimentoData, f.recebimentoValor, f.recebimentoForma, f.recebimentoObs, f.btnConfirmarRecebimento]
+      [f.recebimentoData, f.recebimentoValor, f.recebimentoParcela, f.recebimentoForma, f.recebimentoObs, f.btnConfirmarRecebimento]
         .forEach(input => {
           if (input) input.disabled = on;
         });
@@ -430,7 +542,8 @@
       handleEstoqueItemChange,
       handleQuantidadeOuTotalChange,
       handleFormaPagamentoChange,
-      handlePlanoChange,
+      handleParcelasConfigChange,
+      lerParcelasDetalheVenda,
       abrirModalRecebimento,
       fecharModalRecebimento,
       lerModalRecebimento,

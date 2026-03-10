@@ -196,19 +196,13 @@
     function mostrarFormulario() {
       const { formulario } = el();
       if (!formulario) return;
-
-      formulario.style.display = 'block';
-
-      requestAnimationFrame(() => {
-        formulario.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      });
+      formulario.classList.remove('hidden');
     }
 
     function fecharFormulario() {
       const { formulario } = el();
       if (!formulario) return;
-
-      formulario.style.display = 'none';
+      formulario.classList.add('hidden');
       resetFormulario();
 
       if (window.EstoqueController) {

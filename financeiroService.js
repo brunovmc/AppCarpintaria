@@ -16,6 +16,7 @@ const DASHBOARD_FINANCEIRO_CACHE_TTL_SEC = 120;
 const ORIGEM_TIPO_COMPRA = 'COMPRA';
 const ORIGEM_TIPO_DESPESA = 'DESPESA_GERAL';
 const ORIGEM_TIPO_VENDA = 'VENDA';
+const ORIGEM_TIPO_ESTOQUE = 'ESTOQUE';
 const NATUREZA_PAGAMENTO = 'PAGAMENTO';
 const NATUREZA_RECEBIMENTO = 'RECEBIMENTO';
 
@@ -33,6 +34,7 @@ const DESPESAS_GERAIS_SCHEMA = [
   'data_pagamento',
   'forma_pagamento',
   'parcelas',
+  'parcelas_detalhe_json',
   'fixo',
   'origem_fixo_id',
   'observacao'
@@ -42,6 +44,7 @@ const PAGAMENTOS_SCHEMA = [
   'ID',
   'origem_tipo',
   'origem_id',
+  'parcela_alvo_id',
   'natureza',
   'data_pagamento',
   'valor_pago',
@@ -284,6 +287,96 @@ function normalizarParcelasFinanceiro(parcelas, formaPagamento) {
   return inteiro;
 }
 
+function serializarParcelasDetalheFinanceiro(parcelasDetalhe) {
+  const lista = Array.isArray(parcelasDetalhe) ? parcelasDetalhe : [];
+  if (lista.length === 0) return '';
+  return JSON.stringify(
+    lista.map((p, idx) => ({
+      numero: Number(p.numero || idx + 1),
+      data: String(p.data || '').trim(),
+      valor: round2Financeiro(parseNumeroBR(p.valor))
+    }))
+  );
+}
+
+function desserializarParcelasDetalheFinanceiro(parcelasDetalheBruto) {
+  if (Array.isArray(parcelasDetalheBruto)) {
+    return parcelasDetalheBruto;
+  }
+  const raw = String(parcelasDetalheBruto || '').trim();
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (error) {
+    return [];
+  }
+}
+
+function gerarParcelasPadraoFinanceiro(totalPrevisto, parcelas, dataInicio) {
+  const total = round2Financeiro(parseNumeroBR(totalPrevisto));
+  const qtdParcelas = Math.max(1, Math.floor(parseNumeroBR(parcelas) || 1));
+  const inicio = parseDataFinanceiro(dataInicio);
+  if (!inicio) {
+    throw new Error('Data base invalida para gerar parcelas.');
+  }
+
+  const valorBase = round2Financeiro(total / qtdParcelas);
+  const plano = [];
+  for (let i = 1; i <= qtdParcelas; i++) {
+    const dataParcela = adicionarMesesComAjusteFinanceiro(inicio, i - 1);
+    const valor = i === qtdParcelas
+      ? round2Financeiro(total - (valorBase * (qtdParcelas - 1)))
+      : valorBase;
+    plano.push({
+      numero: i,
+      data: formatarDataYmdFinanceiro(dataParcela),
+      valor
+    });
+  }
+  return plano;
+}
+
+function normalizarParcelasDetalhePayloadFinanceiro(parcelasDetalheBruto, parcelas, dataInicio, totalPrevisto) {
+  const qtdParcelas = Math.max(1, Math.floor(parseNumeroBR(parcelas) || 1));
+  const total = round2Financeiro(parseNumeroBR(totalPrevisto));
+  const listaBruta = desserializarParcelasDetalheFinanceiro(parcelasDetalheBruto);
+
+  if (!Array.isArray(listaBruta) || listaBruta.length === 0) {
+    return gerarParcelasPadraoFinanceiro(total, qtdParcelas, dataInicio);
+  }
+
+  if (listaBruta.length !== qtdParcelas) {
+    throw new Error('Quantidade de parcelas detalhadas diferente do campo parcelas.');
+  }
+
+  const normalizadas = listaBruta.map((p, idx) => {
+    const dataBruta = String(p?.data || p?.data_prevista || '').trim();
+    const data = normalizarDataFinanceiro(dataBruta, true, `Data da parcela ${idx + 1}`);
+    const valor = round2Financeiro(parseNumeroBR(p?.valor ?? p?.valor_previsto));
+    if (valor <= 0) {
+      throw new Error(`Valor da parcela ${idx + 1} deve ser maior que zero.`);
+    }
+    return {
+      numero: idx + 1,
+      data,
+      valor
+    };
+  });
+
+  const soma = round2Financeiro(normalizadas.reduce((acc, p) => acc + p.valor, 0));
+  const diferenca = round2Financeiro(total - soma);
+  if (Math.abs(diferenca) > 0.02) {
+    throw new Error('Soma das parcelas deve ser igual ao valor total.');
+  }
+  if (Math.abs(diferenca) > 0 && normalizadas.length > 0) {
+    const ultimo = normalizadas[normalizadas.length - 1];
+    ultimo.valor = round2Financeiro(ultimo.valor + diferenca);
+  }
+
+  return normalizadas;
+}
+
 function validarCategoriaDespesaFinanceiro(categoria, obrigatoria) {
   const valor = String(categoria || '').trim();
   if (!valor) {
@@ -480,10 +573,71 @@ function mapearPagamentosPorOrigemFinanceiro(listaPagamentos) {
   return mapa;
 }
 
+function mapearParcelasPorOrigemFinanceiro() {
+  const mapa = {};
+  const sheet = getSheet(ABA_PARCELAS_FINANCEIRAS);
+  if (!sheet) return mapa;
+
+  rowsToObjects(sheet)
+    .filter(i => String(i.ativo).toLowerCase() === 'true')
+    .forEach(i => {
+      let tipo = '';
+      try {
+        tipo = normalizarOrigemTipoFinanceiro(i.origem_tipo);
+      } catch (error) {
+        return;
+      }
+
+      const origemId = String(i.origem_id || '').trim();
+      if (!origemId) return;
+      const chave = `${tipo}|${origemId}`;
+      if (!Array.isArray(mapa[chave])) mapa[chave] = [];
+
+      const valorPrevisto = round2Financeiro(parseNumeroBR(i.valor_previsto));
+      const valorPago = round2Financeiro(parseNumeroBR(i.valor_pago));
+      const pendente = round2Financeiro(Math.max(0, valorPrevisto - valorPago));
+      const statusRaw = String(i.status || '').trim().toUpperCase();
+      const status = statusRaw || (valorPago <= 0 ? 'PENDENTE' : (pendente <= 0.009 ? 'PAGO' : 'PARCIAL'));
+      mapa[chave].push({
+        ID: String(i.ID || '').trim(),
+        origem_tipo: tipo,
+        origem_id: origemId,
+        natureza: (() => {
+          try {
+            return normalizarNaturezaFinanceiro(i.natureza || getNaturezaOrigemFinanceiro(tipo));
+          } catch (error) {
+            return getNaturezaOrigemFinanceiro(tipo);
+          }
+        })(),
+        parcela_numero: Number(i.parcela_numero || 0),
+        parcelas_total: Number(i.parcelas_total || 0),
+        data_prevista: formatarDataYmdFinanceiroSafe(i.data_prevista),
+        valor_previsto: valorPrevisto,
+        valor_pago: valorPago,
+        valor_pendente: pendente,
+        status,
+        data_quitacao: formatarDataYmdFinanceiroSafe(i.data_quitacao),
+        pagamento_id: String(i.pagamento_id || '').trim()
+      });
+    });
+
+  Object.keys(mapa).forEach(chave => {
+    mapa[chave].sort((a, b) => {
+      const pa = Number(a.parcela_numero || 0);
+      const pb = Number(b.parcela_numero || 0);
+      if (pa !== pb) return pa - pb;
+      return String(a.ID || '').localeCompare(String(b.ID || ''));
+    });
+  });
+
+  return mapa;
+}
+
 function enriquecerListaComPagamentosFinanceiro(listaItens, origemTipo, getTotalPrevistoFn) {
   const tipo = normalizarOrigemTipoFinanceiro(origemTipo);
   const pagamentos = listarPagamentos();
   const mapa = mapearPagamentosPorOrigemFinanceiro(pagamentos);
+  const mapaParcelas = mapearParcelasPorOrigemFinanceiro();
 
   return (Array.isArray(listaItens) ? listaItens : []).map(item => {
     const id = String(item?.ID || '').trim();
@@ -503,7 +657,8 @@ function enriquecerListaComPagamentosFinanceiro(listaItens, origemTipo, getTotal
       status_pagamento: statusPagamento,
       quantidade_pagamentos: Number(resumo.quantidade_pagamentos || 0),
       data_ultimo_pagamento: resumo.data_ultimo_pagamento || '',
-      forma_ultimo_pagamento: resumo.forma_ultimo_pagamento || ''
+      forma_ultimo_pagamento: resumo.forma_ultimo_pagamento || '',
+      parcelas_detalhe: mapaParcelas[chave] || []
     };
   });
 }
@@ -551,6 +706,7 @@ function listarPagamentos(forcarRecarregar) {
     .filter(i => String(i.ativo).toLowerCase() === 'true')
     .map(i => ({
       ...i,
+      parcela_alvo_id: String(i.parcela_alvo_id || '').trim(),
       natureza: (() => {
         const bruto = String(i.natureza || '').trim();
         if (bruto) {
@@ -668,40 +824,30 @@ function limparParcelasFinanceirasOrigem(origemTipo, origemId) {
   return { ok: true, removidas: rows.length };
 }
 
-function calcularPlanoParcelasFinanceiro(totalPrevisto, parcelas, dataInicio, planoRecebimento, dataEntregaPrevista) {
-  const total = round2Financeiro(parseNumeroBR(totalPrevisto));
-  const qtdParcelasBase = Math.max(1, Math.floor(parseNumeroBR(parcelas) || 1));
-  const inicio = parseDataFinanceiro(dataInicio);
-  if (!inicio) {
-    throw new Error('Data inicial invalida para gerar parcelas.');
+function calcularPlanoParcelasFinanceiro(totalPrevisto, parcelas, dataInicio, parcelasDetalhe) {
+  const qtdParcelas = Math.max(1, Math.floor(parseNumeroBR(parcelas) || 1));
+  const listaDetalhe = Array.isArray(parcelasDetalhe) ? parcelasDetalhe : [];
+
+  if (listaDetalhe.length > 0) {
+    return normalizarParcelasDetalhePayloadFinanceiro(
+      listaDetalhe,
+      qtdParcelas,
+      dataInicio,
+      totalPrevisto
+    ).map(p => ({
+      numero: Number(p.numero || 0),
+      data: parseDataFinanceiro(p.data),
+      valor: round2Financeiro(p.valor),
+      total: qtdParcelas
+    }));
   }
 
-  const plano = String(planoRecebimento || '').trim().toUpperCase();
-  if (plano === 'ENCOMENDA_50_50') {
-    const entrega = parseDataFinanceiro(dataEntregaPrevista) || adicionarMesesComAjusteFinanceiro(inicio, 1);
-    const v1 = round2Financeiro(total / 2);
-    const v2 = round2Financeiro(total - v1);
-    return [
-      { numero: 1, data: inicio, valor: v1, total: 2 },
-      { numero: 2, data: entrega, valor: v2, total: 2 }
-    ];
-  }
-
-  const valorBase = round2Financeiro(total / qtdParcelasBase);
-  const planoParcelas = [];
-  for (let i = 1; i <= qtdParcelasBase; i++) {
-    const dataParcela = adicionarMesesComAjusteFinanceiro(inicio, i - 1);
-    const valor = i === qtdParcelasBase
-      ? round2Financeiro(total - (valorBase * (qtdParcelasBase - 1)))
-      : valorBase;
-    planoParcelas.push({
-      numero: i,
-      data: dataParcela,
-      valor,
-      total: qtdParcelasBase
-    });
-  }
-  return planoParcelas;
+  return gerarParcelasPadraoFinanceiro(totalPrevisto, qtdParcelas, dataInicio).map(p => ({
+    numero: Number(p.numero || 0),
+    data: parseDataFinanceiro(p.data),
+    valor: round2Financeiro(p.valor),
+    total: qtdParcelas
+  }));
 }
 
 function gerarParcelasFinanceirasOrigem(origemTipo, origemId) {
@@ -709,22 +855,26 @@ function gerarParcelasFinanceirasOrigem(origemTipo, origemId) {
   const item = origem.item || {};
   const parcelas = Math.max(1, Math.floor(parseNumeroBR(item.parcelas) || 1));
   const dataInicio = item.data_pagamento || item.data_venda || item.comprado_em || item.data_competencia || new Date();
-  const planoRecebimento = origem.tipo === ORIGEM_TIPO_VENDA
-    ? String(item.plano_recebimento || '').trim().toUpperCase()
-    : '';
-  const dataEntregaPrevista = origem.tipo === ORIGEM_TIPO_VENDA
-    ? String(item.data_entrega_prevista || '').trim()
-    : '';
+  const detalhesPersistidos = desserializarParcelasDetalheFinanceiro(item.parcelas_detalhe_json);
 
   limparParcelasFinanceirasOrigem(origem.tipo, origem.id);
 
-  const plano = calcularPlanoParcelasFinanceiro(
-    origem.total_previsto,
-    parcelas,
-    dataInicio,
-    planoRecebimento,
-    dataEntregaPrevista
-  );
+  let plano = [];
+  try {
+    plano = calcularPlanoParcelasFinanceiro(
+      origem.total_previsto,
+      parcelas,
+      dataInicio,
+      detalhesPersistidos
+    );
+  } catch (error) {
+    plano = calcularPlanoParcelasFinanceiro(
+      origem.total_previsto,
+      parcelas,
+      dataInicio,
+      []
+    );
+  }
 
   plano.forEach(p => {
     insert(ABA_PARCELAS_FINANCEIRAS, {
@@ -746,6 +896,61 @@ function gerarParcelasFinanceirasOrigem(origemTipo, origemId) {
   });
 
   return listarParcelasFinanceirasOrigem(origem.tipo, origem.id);
+}
+
+function getPrimeiraParcelaPendenteFinanceiro(parcelas) {
+  const lista = Array.isArray(parcelas) ? parcelas : [];
+  return lista.find(p => round2Financeiro(parseNumeroBR(p.valor_pendente)) > 0.009) || null;
+}
+
+function aplicarPagamentoParcelaAlvoFinanceiro(origemTipo, origemId, parcelaAlvoId, pagamentoId, valorPago, dataPagamento) {
+  const tipo = normalizarOrigemTipoFinanceiro(origemTipo);
+  const id = String(origemId || '').trim();
+  const parcelaId = String(parcelaAlvoId || '').trim();
+  if (!id || !parcelaId) {
+    throw new Error('Parcela alvo nao informada.');
+  }
+
+  const parcelas = listarParcelasFinanceirasOrigem(tipo, id);
+  const parcela = parcelas.find(p => String(p.ID || '').trim() === parcelaId);
+  if (!parcela) {
+    throw new Error('Parcela alvo nao encontrada para esta origem.');
+  }
+
+  const primeiraPendente = getPrimeiraParcelaPendenteFinanceiro(parcelas);
+  if (!primeiraPendente || String(primeiraPendente.ID || '').trim() !== parcelaId) {
+    throw new Error('Pagamento deve seguir a ordem das parcelas pendentes.');
+  }
+
+  const pendente = round2Financeiro(parseNumeroBR(parcela.valor_pendente));
+  const valor = round2Financeiro(parseNumeroBR(valorPago));
+  if (pendente <= 0.009) {
+    throw new Error('Parcela selecionada ja esta quitada.');
+  }
+  if (Math.abs(valor - pendente) > 0.009) {
+    throw new Error('Valor pago deve ser igual ao valor pendente da parcela selecionada.');
+  }
+
+  const novoPago = round2Financeiro(parseNumeroBR(parcela.valor_pago) + valor);
+  const quitada = novoPago + 0.009 >= round2Financeiro(parseNumeroBR(parcela.valor_previsto));
+  updateById(
+    ABA_PARCELAS_FINANCEIRAS,
+    'ID',
+    parcelaId,
+    {
+      valor_pago: novoPago,
+      status: quitada ? 'PAGO' : 'PARCIAL',
+      data_quitacao: String(dataPagamento || ''),
+      pagamento_id: String(pagamentoId || '').trim()
+    },
+    PARCELAS_FINANCEIRAS_SCHEMA
+  );
+
+  return {
+    valor_alocado: valor,
+    valor_excedente: 0,
+    parcela_id: parcelaId
+  };
 }
 
 function aplicarPagamentoEmParcelasFinanceiro(origemTipo, origemId, pagamentoId, valorPago, dataPagamento) {
@@ -849,6 +1054,12 @@ function normalizarPayloadDespesaGeral(payload) {
   const dataPagamento = normalizarDataFinanceiro(dados.data_pagamento, false, 'Data de pagamento');
   const formaPagamento = normalizarFormaPagamentoFinanceiro(dados.forma_pagamento, false);
   const parcelas = normalizarParcelasFinanceiro(dados.parcelas, formaPagamento);
+  const parcelasDetalhe = normalizarParcelasDetalhePayloadFinanceiro(
+    dados.parcelas_detalhe ?? dados.parcelas_detalhe_json,
+    parcelas,
+    dataPagamento || dataCompetencia || new Date(),
+    valorTotal
+  );
   const fixo = parseBooleanFinanceiro(dados.fixo);
 
   return {
@@ -862,6 +1073,7 @@ function normalizarPayloadDespesaGeral(payload) {
     data_pagamento: dataPagamento,
     forma_pagamento: formaPagamento,
     parcelas,
+    parcelas_detalhe_json: serializarParcelasDetalheFinanceiro(parcelasDetalhe),
     fixo,
     observacao: String(dados.observacao || '').trim()
   };
@@ -960,6 +1172,7 @@ function gerarRecorrenciaDespesasFixasFinanceiro() {
           data_pagamento: '',
           forma_pagamento: String(atual.item.forma_pagamento || '').trim(),
           parcelas: normalizarParcelasFinanceiro(atual.item.parcelas, atual.item.forma_pagamento),
+          parcelas_detalhe_json: '',
           fixo: true,
           origem_fixo_id: rootId,
           observacao: String(atual.item.observacao || '').trim()
@@ -1212,10 +1425,42 @@ function registrarPagamento(origemTipo, origemId, payload) {
     throw new Error('Pagamento maior que o valor pendente.');
   }
 
+  let parcelasOrigem = listarParcelasFinanceirasOrigem(origem.tipo, origem.id);
+  if (parcelasOrigem.length === 0) {
+    try {
+      gerarParcelasFinanceirasOrigem(origem.tipo, origem.id);
+      parcelasOrigem = listarParcelasFinanceirasOrigem(origem.tipo, origem.id);
+    } catch (error) {
+      parcelasOrigem = [];
+    }
+  }
+  const parcelasOrigemTotal = Math.max(1, Math.floor(parseNumeroBR(origem.item?.parcelas) || 1));
+  const parcelado = parcelasOrigemTotal > 1;
+  let parcelaAlvoId = String(dados.parcela_alvo_id || '').trim();
+  if (parcelado) {
+    const primeiraPendente = getPrimeiraParcelaPendenteFinanceiro(parcelasOrigem);
+    if (!primeiraPendente) {
+      throw new Error('Nao ha parcelas pendentes para registrar pagamento.');
+    }
+    if (!parcelaAlvoId) {
+      throw new Error('Selecione a parcela pendente para registrar o pagamento.');
+    }
+    if (String(primeiraPendente.ID || '').trim() !== parcelaAlvoId) {
+      throw new Error('Pagamento deve seguir a ordem das parcelas pendentes.');
+    }
+    const valorEsperado = round2Financeiro(parseNumeroBR(primeiraPendente.valor_pendente));
+    if (Math.abs(valorPago - valorEsperado) > 0.009) {
+      throw new Error('Valor pago deve ser igual ao valor pendente da parcela selecionada.');
+    }
+  } else {
+    parcelaAlvoId = '';
+  }
+
   const novo = {
     ID: gerarId('PGT'),
     origem_tipo: origem.tipo,
     origem_id: origem.id,
+    parcela_alvo_id: parcelaAlvoId,
     natureza: origem.natureza,
     data_pagamento: dataPagamento,
     valor_pago: valorPago,
@@ -1228,13 +1473,22 @@ function registrarPagamento(origemTipo, origemId, payload) {
   const ok = insert(ABA_PAGAMENTOS, novo, PAGAMENTOS_SCHEMA);
   if (!ok) return null;
 
-  const alocacaoParcelas = aplicarPagamentoEmParcelasFinanceiro(
-    origem.tipo,
-    origem.id,
-    novo.ID,
-    valorPago,
-    dataPagamento
-  );
+  const alocacaoParcelas = parcelaAlvoId
+    ? aplicarPagamentoParcelaAlvoFinanceiro(
+      origem.tipo,
+      origem.id,
+      parcelaAlvoId,
+      novo.ID,
+      valorPago,
+      dataPagamento
+    )
+    : aplicarPagamentoEmParcelasFinanceiro(
+      origem.tipo,
+      origem.id,
+      novo.ID,
+      valorPago,
+      dataPagamento
+    );
 
   return {
     ...novo,
@@ -1312,6 +1566,7 @@ function obterResumoDashboardFinanceiro(referenciaYm, forcarRecarregar) {
 
   const compras = (typeof listarCompras === 'function') ? listarCompras(!!forcarRecarregar) : [];
   const despesas = listarDespesasGerais(!!forcarRecarregar);
+  const vendas = (typeof listarVendas === 'function') ? listarVendas(!!forcarRecarregar) : [];
   const pagamentos = listarPagamentos(!!forcarRecarregar);
   const estoque = (typeof listarEstoque === 'function') ? listarEstoque(!!forcarRecarregar) : [];
 
@@ -1319,30 +1574,22 @@ function obterResumoDashboardFinanceiro(referenciaYm, forcarRecarregar) {
   compras.forEach(i => { comprasPorId[String(i.ID || '').trim()] = i; });
   const despesasPorId = {};
   despesas.forEach(i => { despesasPorId[String(i.ID || '').trim()] = i; });
+  const vendasPorId = {};
+  vendas.forEach(i => { vendasPorId[String(i.ID || '').trim()] = i; });
 
-  const pagamentosValidos = pagamentos.filter(p => {
+  const eventosFinanceirosValidos = pagamentos.filter(p => {
     let tipo = '';
     try {
       tipo = normalizarOrigemTipoFinanceiro(p.origem_tipo);
     } catch (error) {
       return false;
     }
-    let natureza = '';
-    try {
-      natureza = normalizarNaturezaFinanceiro(p.natureza || getNaturezaOrigemFinanceiro(tipo));
-    } catch (error) {
-      return false;
-    }
-    if (natureza !== NATUREZA_PAGAMENTO) {
-      return false;
-    }
     const origemId = String(p.origem_id || '').trim();
-    if (tipo === ORIGEM_TIPO_COMPRA) {
-      return !!comprasPorId[origemId];
-    }
-    if (tipo === ORIGEM_TIPO_DESPESA) {
-      return !!despesasPorId[origemId];
-    }
+    if (!origemId) return false;
+
+    if (tipo === ORIGEM_TIPO_COMPRA) return !!comprasPorId[origemId];
+    if (tipo === ORIGEM_TIPO_DESPESA) return !!despesasPorId[origemId];
+    if (tipo === ORIGEM_TIPO_VENDA) return !!vendasPorId[origemId];
     return false;
   });
 
@@ -1350,31 +1597,45 @@ function obterResumoDashboardFinanceiro(referenciaYm, forcarRecarregar) {
   const porCategoria = {};
   const porFornecedor = {};
   const porMesPagamento = {};
-  let gastoPagoMes = 0;
-  const contadoresMes = { bruno: 0, zizu: 0 };
-  const origensComPagamentoNoMes = {};
 
-  pagamentosValidos.forEach(p => {
+  let gastoPagoMes = 0;
+  let recebidoVendasMes = 0;
+  const contadoresMes = { bruno: 0, zizu: 0 };
+
+  eventosFinanceirosValidos.forEach(p => {
+    let tipoOrigem = '';
+    try {
+      tipoOrigem = normalizarOrigemTipoFinanceiro(p.origem_tipo);
+    } catch (error) {
+      return;
+    }
+    const natureza = (() => {
+      try {
+        return normalizarNaturezaFinanceiro(p.natureza || getNaturezaOrigemFinanceiro(tipoOrigem));
+      } catch (error) {
+        return '';
+      }
+    })();
+    if (!natureza) return;
+
     const valor = round2Financeiro(parseNumeroBR(p.valor_pago));
     const dataPag = parseDataFinanceiro(p.data_pagamento);
-    if (!dataPag) return;
+    if (!dataPag || valor <= 0) return;
 
-    const chaveMes = gerarChaveMesFinanceiro(dataPag);
-    porMesPagamento[chaveMes] = round2Financeiro((porMesPagamento[chaveMes] || 0) + valor);
+    if (natureza === NATUREZA_PAGAMENTO) {
+      const chaveMes = gerarChaveMesFinanceiro(dataPag);
+      porMesPagamento[chaveMes] = round2Financeiro((porMesPagamento[chaveMes] || 0) + valor);
+    }
 
-    if (dataPag >= inicio && dataPag < fim) {
+    if (dataPag < inicio || dataPag >= fim) return;
+
+    if (natureza === NATUREZA_PAGAMENTO) {
       gastoPagoMes = round2Financeiro(gastoPagoMes + valor);
 
-      let tipoOrigem = '';
-      try {
-        tipoOrigem = normalizarOrigemTipoFinanceiro(p.origem_tipo);
-      } catch (error) {
-        return;
-      }
       let itemOrigem = null;
       if (tipoOrigem === ORIGEM_TIPO_COMPRA) {
         itemOrigem = comprasPorId[String(p.origem_id || '').trim()];
-      } else {
+      } else if (tipoOrigem === ORIGEM_TIPO_DESPESA) {
         itemOrigem = despesasPorId[String(p.origem_id || '').trim()];
       }
 
@@ -1388,36 +1649,42 @@ function obterResumoDashboardFinanceiro(referenciaYm, forcarRecarregar) {
       porCategoria[categoria] = round2Financeiro((porCategoria[categoria] || 0) + valor);
       porFornecedor[fornecedor] = round2Financeiro((porFornecedor[fornecedor] || 0) + valor);
       aplicarRateioPagoPorFinanceiro(contadoresMes, itemOrigem?.pago_por, valor);
-      const chaveOrigem = `${tipoOrigem}|${String(p.origem_id || '').trim()}`;
-      origensComPagamentoNoMes[chaveOrigem] = true;
+      return;
+    }
+
+    if (natureza === NATUREZA_RECEBIMENTO && tipoOrigem === ORIGEM_TIPO_VENDA) {
+      recebidoVendasMes = round2Financeiro(recebidoVendasMes + valor);
     }
   });
 
-  // Evita dupla contagem: se a origem teve pagamento no mes, conta apenas pagamento.
-  // Se nao teve pagamento no mes, conta o lancamento do mes.
-  compras.forEach(item => {
-    const dataLancamento = parseDataFinanceiro(item.comprado_em);
-    if (!dataLancamento || dataLancamento < inicio || dataLancamento >= fim) return;
-    const chaveOrigem = `${ORIGEM_TIPO_COMPRA}|${String(item.ID || '').trim()}`;
-    if (origensComPagamentoNoMes[chaveOrigem]) return;
-    aplicarRateioPagoPorFinanceiro(
-      contadoresMes,
-      item.pago_por,
-      getTotalPrevistoCompraFinanceiro(item)
-    );
-  });
+  let compromissoPrevistoMes = 0;
+  const sheetParcelas = getSheet(ABA_PARCELAS_FINANCEIRAS);
+  if (sheetParcelas) {
+    rowsToObjects(sheetParcelas)
+      .filter(i => String(i.ativo).toLowerCase() === 'true')
+      .forEach(i => {
+        let natureza = '';
+        try {
+          natureza = normalizarNaturezaFinanceiro(i.natureza || getNaturezaOrigemFinanceiro(i.origem_tipo));
+        } catch (error) {
+          return;
+        }
+        if (natureza !== NATUREZA_PAGAMENTO) return;
+        const dataPrevista = parseDataFinanceiro(i.data_prevista);
+        if (!dataPrevista || dataPrevista < inicio || dataPrevista >= fim) return;
+        compromissoPrevistoMes = round2Financeiro(
+          compromissoPrevistoMes + round2Financeiro(parseNumeroBR(i.valor_previsto))
+        );
+      });
+  }
 
-  despesas.forEach(item => {
-    const dataLancamento = parseDataFinanceiro(item.data_competencia);
-    if (!dataLancamento || dataLancamento < inicio || dataLancamento >= fim) return;
-    const chaveOrigem = `${ORIGEM_TIPO_DESPESA}|${String(item.ID || '').trim()}`;
-    if (origensComPagamentoNoMes[chaveOrigem]) return;
-    aplicarRateioPagoPorFinanceiro(
-      contadoresMes,
-      item.pago_por,
-      getTotalPrevistoDespesaFinanceiro(item)
-    );
-  });
+  const vendasNoMes = round2Financeiro(
+    vendas.reduce((acc, item) => {
+      const dataVenda = parseDataFinanceiro(item.data_venda);
+      if (!dataVenda || dataVenda < inicio || dataVenda >= fim) return acc;
+      return acc + round2Financeiro(parseNumeroBR(item.valor_total_venda));
+    }, 0)
+  );
 
   const hoje = inicioDoDiaFinanceiro(new Date());
   const limite7 = new Date(hoje.getTime());
@@ -1470,11 +1737,13 @@ function obterResumoDashboardFinanceiro(referenciaYm, forcarRecarregar) {
     referencia: ref,
     cards: {
       gasto_pago_mes: gastoPagoMes,
+      compromisso_previsto_mes: compromissoPrevistoMes,
+      vendas_no_mes: vendasNoMes,
+      recebido_vendas_mes: recebidoVendasMes,
       pendente_total: pendenteTotal,
       vencido_total: vencidoTotal,
       avencer_7_dias: aVencer7Dias,
       valor_estoque_total: round2Financeiro(valorEstoqueTotal),
-      quantidade_itens_estoque: estoque.length,
       contador_bruno_mes: round2Financeiro(contadoresMes.bruno),
       contador_zizu_mes: round2Financeiro(contadoresMes.zizu)
     },
@@ -1489,4 +1758,478 @@ function obterResumoDashboardFinanceiro(referenciaYm, forcarRecarregar) {
 
   salvarCacheDashboardFinanceiro(resultado);
   return resultado;
+}
+
+function normalizarCardKeyDashboardFinanceiro(cardKey) {
+  const chave = String(cardKey || '').trim().toLowerCase();
+  const permitidos = {
+    gasto_pago_mes: true,
+    compromisso_previsto_mes: true,
+    vendas_no_mes: true,
+    recebido_vendas_mes: true,
+    pendente_total: true,
+    vencido_total: true,
+    avencer_7_dias: true,
+    valor_estoque_total: true,
+    contador_bruno_mes: true,
+    contador_zizu_mes: true
+  };
+  if (!permitidos[chave]) {
+    throw new Error('Card de dashboard invalido.');
+  }
+  return chave;
+}
+
+function getRotuloCardDashboardFinanceiro(cardKey) {
+  const mapa = {
+    gasto_pago_mes: 'Pago no mes',
+    compromisso_previsto_mes: 'Compromissos previstos (mes)',
+    vendas_no_mes: 'Vendas no mes',
+    recebido_vendas_mes: 'Recebido de vendas (mes)',
+    pendente_total: 'Pendente total',
+    vencido_total: 'Vencido',
+    avencer_7_dias: 'A vencer (7 dias)',
+    valor_estoque_total: 'Valor em estoque',
+    contador_bruno_mes: 'BRUNO (pago no mes)',
+    contador_zizu_mes: 'ZIZU (pago no mes)'
+  };
+  return mapa[String(cardKey || '').trim().toLowerCase()] || 'Card';
+}
+
+function getAbaOrigemDashboardFinanceiro(origemTipo) {
+  const tipo = String(origemTipo || '').trim().toUpperCase();
+  if (tipo === ORIGEM_TIPO_COMPRA) return 'compras';
+  if (tipo === ORIGEM_TIPO_DESPESA) return 'dashboard';
+  if (tipo === ORIGEM_TIPO_VENDA) return 'vendas';
+  if (tipo === ORIGEM_TIPO_ESTOQUE) return 'estoque';
+  return '';
+}
+
+function calcularRateioLinhaPagoPorFinanceiro(pagoPor, valor) {
+  const valorSeguro = round2Financeiro(parseNumeroBR(valor));
+  const resultado = { bruno: 0, zizu: 0 };
+  if (valorSeguro <= 0) return resultado;
+  const pagoPorNormalizado = normalizarTextoSemAcentoFinanceiro(pagoPor);
+  if (pagoPorNormalizado === 'AMBOS') {
+    const metade = round2Financeiro(valorSeguro / 2);
+    resultado.bruno = metade;
+    resultado.zizu = metade;
+    return resultado;
+  }
+  if (pagoPorNormalizado === 'BRUNO') {
+    resultado.bruno = valorSeguro;
+    return resultado;
+  }
+  if (pagoPorNormalizado === 'ZIZU') {
+    resultado.zizu = valorSeguro;
+    return resultado;
+  }
+  return resultado;
+}
+
+function ordenarComposicaoCardDashboardFinanceiro(itens, campoValor) {
+  const campo = String(campoValor || 'valor').trim() || 'valor';
+  const lista = Array.isArray(itens) ? itens : [];
+  lista.sort((a, b) => {
+    const da = parseDataFinanceiro(a?.data)?.getTime() || 0;
+    const db = parseDataFinanceiro(b?.data)?.getTime() || 0;
+    if (da !== db) return db - da;
+    const va = round2Financeiro(parseNumeroBR(a?.[campo] || 0));
+    const vb = round2Financeiro(parseNumeroBR(b?.[campo] || 0));
+    if (va !== vb) return vb - va;
+    return String(a?.titulo || '').localeCompare(String(b?.titulo || ''));
+  });
+  return lista;
+}
+
+function obterComposicaoCardDashboardFinanceiro(referenciaYm, cardKey, forcarRecarregar) {
+  const chave = normalizarCardKeyDashboardFinanceiro(cardKey);
+  const { ref, inicio, fim } = getIntervaloMesFinanceiro(referenciaYm);
+  const hoje = inicioDoDiaFinanceiro(new Date());
+  const limite7 = new Date(hoje.getTime());
+  limite7.setDate(limite7.getDate() + 7);
+
+  const compras = (typeof listarCompras === 'function') ? listarCompras(!!forcarRecarregar) : [];
+  const despesas = listarDespesasGerais(!!forcarRecarregar);
+  const vendas = (typeof listarVendas === 'function') ? listarVendas(!!forcarRecarregar) : [];
+  const pagamentos = listarPagamentos(!!forcarRecarregar);
+  const estoque = (typeof listarEstoque === 'function') ? listarEstoque(!!forcarRecarregar) : [];
+
+  const comprasPorId = {};
+  compras.forEach(i => { comprasPorId[String(i.ID || '').trim()] = i; });
+  const despesasPorId = {};
+  despesas.forEach(i => { despesasPorId[String(i.ID || '').trim()] = i; });
+  const vendasPorId = {};
+  vendas.forEach(i => { vendasPorId[String(i.ID || '').trim()] = i; });
+  const estoquePorId = {};
+  estoque.forEach(i => { estoquePorId[String(i.ID || '').trim()] = i; });
+
+  function obterMetaOrigem(origemTipo, origemId) {
+    const tipo = String(origemTipo || '').trim().toUpperCase();
+    const id = String(origemId || '').trim();
+    if (!id) return null;
+
+    if (tipo === ORIGEM_TIPO_COMPRA) {
+      const item = comprasPorId[id];
+      if (!item) return null;
+      return {
+        origem_tipo: tipo,
+        origem_id: id,
+        origem_aba: getAbaOrigemDashboardFinanceiro(tipo),
+        titulo: `Compra: ${String(item.item || id).trim()}`,
+        detalhe: `${String(item.tipo || 'SEM_TIPO').trim() || 'SEM_TIPO'} | ${String(item.categoria || 'SEM_CATEGORIA').trim() || 'SEM_CATEGORIA'}`,
+        pago_por: String(item.pago_por || '').trim(),
+        fornecedor: String(item.fornecedor || '').trim()
+      };
+    }
+
+    if (tipo === ORIGEM_TIPO_DESPESA) {
+      const item = despesasPorId[id];
+      if (!item) return null;
+      return {
+        origem_tipo: tipo,
+        origem_id: id,
+        origem_aba: getAbaOrigemDashboardFinanceiro(tipo),
+        titulo: `Despesa: ${String(item.descricao || id).trim()}`,
+        detalhe: `${String(item.categoria || 'SEM_CATEGORIA').trim() || 'SEM_CATEGORIA'} | ${String(item.fornecedor || 'SEM_FORNECEDOR').trim() || 'SEM_FORNECEDOR'}`,
+        pago_por: String(item.pago_por || '').trim(),
+        fornecedor: String(item.fornecedor || '').trim()
+      };
+    }
+
+    if (tipo === ORIGEM_TIPO_VENDA) {
+      const item = vendasPorId[id];
+      if (!item) return null;
+      return {
+        origem_tipo: tipo,
+        origem_id: id,
+        origem_aba: getAbaOrigemDashboardFinanceiro(tipo),
+        titulo: `Venda: ${String(item.item || id).trim()}`,
+        detalhe: `Qtd: ${round2Financeiro(parseNumeroBR(item.quantidade))} ${String(item.unidade || '').trim() || ''}`.trim(),
+        pago_por: String(item.recebido_por || '').trim(),
+        fornecedor: ''
+      };
+    }
+
+    if (tipo === ORIGEM_TIPO_ESTOQUE) {
+      const item = estoquePorId[id];
+      if (!item) return null;
+      return {
+        origem_tipo: tipo,
+        origem_id: id,
+        origem_aba: getAbaOrigemDashboardFinanceiro(tipo),
+        titulo: `Estoque: ${String(item.item || id).trim()}`,
+        detalhe: `${String(item.tipo || 'SEM_TIPO').trim() || 'SEM_TIPO'} | ${String(item.categoria || 'SEM_CATEGORIA').trim() || 'SEM_CATEGORIA'}`,
+        pago_por: String(item.pago_por || '').trim(),
+        fornecedor: String(item.fornecedor || '').trim()
+      };
+    }
+
+    return null;
+  }
+
+  const pagamentosValidos = pagamentos.filter(p => {
+    let tipo = '';
+    try {
+      tipo = normalizarOrigemTipoFinanceiro(p.origem_tipo);
+    } catch (error) {
+      return false;
+    }
+    const origemId = String(p.origem_id || '').trim();
+    if (!origemId) return false;
+    if (tipo === ORIGEM_TIPO_COMPRA) return !!comprasPorId[origemId];
+    if (tipo === ORIGEM_TIPO_DESPESA) return !!despesasPorId[origemId];
+    if (tipo === ORIGEM_TIPO_VENDA) return !!vendasPorId[origemId];
+    return false;
+  });
+
+  const parcelasAtivas = (() => {
+    const sheet = getSheet(ABA_PARCELAS_FINANCEIRAS);
+    if (!sheet) return [];
+    return rowsToObjects(sheet)
+      .filter(i => String(i.ativo).toLowerCase() === 'true')
+      .map(i => {
+        const tipo = String(i.origem_tipo || '').trim().toUpperCase();
+        const origemId = String(i.origem_id || '').trim();
+        const dataPrevista = formatarDataYmdFinanceiroSafe(i.data_prevista);
+        const valorPrevisto = round2Financeiro(parseNumeroBR(i.valor_previsto));
+        let natureza = '';
+        try {
+          natureza = normalizarNaturezaFinanceiro(i.natureza || getNaturezaOrigemFinanceiro(tipo));
+        } catch (error) {
+          natureza = '';
+        }
+        return {
+          ID: String(i.ID || '').trim(),
+          origem_tipo: tipo,
+          origem_id: origemId,
+          natureza,
+          data_prevista: dataPrevista,
+          valor_previsto: valorPrevisto,
+          parcela_numero: Number(i.parcela_numero || 0),
+          parcelas_total: Number(i.parcelas_total || 0)
+        };
+      })
+      .filter(i => {
+        if (!i.origem_id || i.valor_previsto <= 0) return false;
+        if (i.origem_tipo === ORIGEM_TIPO_COMPRA) return !!comprasPorId[i.origem_id];
+        if (i.origem_tipo === ORIGEM_TIPO_DESPESA) return !!despesasPorId[i.origem_id];
+        if (i.origem_tipo === ORIGEM_TIPO_VENDA) return !!vendasPorId[i.origem_id];
+        return false;
+      });
+  })();
+
+  let itens = [];
+  let campoValor = 'valor';
+
+  if (chave === 'gasto_pago_mes') {
+    itens = pagamentosValidos
+      .filter(p => {
+        const dataPag = parseDataFinanceiro(p.data_pagamento);
+        if (!dataPag || dataPag < inicio || dataPag >= fim) return false;
+        let natureza = '';
+        try {
+          natureza = normalizarNaturezaFinanceiro(p.natureza || getNaturezaOrigemFinanceiro(p.origem_tipo));
+        } catch (error) {
+          natureza = '';
+        }
+        return natureza === NATUREZA_PAGAMENTO;
+      })
+      .map(p => {
+        const tipo = String(p.origem_tipo || '').trim().toUpperCase();
+        const origemId = String(p.origem_id || '').trim();
+        const meta = obterMetaOrigem(tipo, origemId);
+        if (!meta) return null;
+        return {
+          linha_id: `PGT:${String(p.ID || '').trim()}`,
+          tipo_linha: 'pagamento',
+          titulo: meta.titulo,
+          detalhe: `${meta.detalhe} | Forma: ${String(p.forma_pagamento || '-').trim() || '-'}`,
+          data: formatarDataYmdFinanceiroSafe(p.data_pagamento),
+          valor: round2Financeiro(parseNumeroBR(p.valor_pago)),
+          origem_tipo: meta.origem_tipo,
+          origem_id: meta.origem_id,
+          origem_aba: meta.origem_aba,
+          pagamento_id: String(p.ID || '').trim(),
+          pode_editar_origem: true,
+          pode_excluir_origem: true,
+          pode_remover_pagamento: true,
+          eh_contagem: false
+        };
+      })
+      .filter(Boolean);
+  } else if (chave === 'compromisso_previsto_mes') {
+    itens = parcelasAtivas
+      .filter(parcela => {
+        if (parcela.natureza !== NATUREZA_PAGAMENTO) return false;
+        const dataPrev = parseDataFinanceiro(parcela.data_prevista);
+        return !!dataPrev && dataPrev >= inicio && dataPrev < fim;
+      })
+      .map(parcela => {
+        const meta = obterMetaOrigem(parcela.origem_tipo, parcela.origem_id);
+        if (!meta) return null;
+        return {
+          linha_id: `PAR:${String(parcela.ID || '').trim()}`,
+          tipo_linha: 'parcela_prevista',
+          titulo: meta.titulo,
+          detalhe: `${meta.detalhe} | Parcela ${Number(parcela.parcela_numero || 0)}/${Number(parcela.parcelas_total || 0)}`,
+          data: String(parcela.data_prevista || '').trim(),
+          valor: round2Financeiro(parcela.valor_previsto),
+          origem_tipo: meta.origem_tipo,
+          origem_id: meta.origem_id,
+          origem_aba: meta.origem_aba,
+          pagamento_id: '',
+          pode_editar_origem: true,
+          pode_excluir_origem: true,
+          pode_remover_pagamento: false,
+          eh_contagem: false
+        };
+      })
+      .filter(Boolean);
+  } else if (chave === 'vendas_no_mes') {
+    itens = vendas
+      .filter(v => {
+        const dataVenda = parseDataFinanceiro(v.data_venda);
+        return !!dataVenda && dataVenda >= inicio && dataVenda < fim;
+      })
+      .map(v => {
+        const id = String(v.ID || '').trim();
+        const meta = obterMetaOrigem(ORIGEM_TIPO_VENDA, id);
+        if (!meta) return null;
+        return {
+          linha_id: `VND:${id}`,
+          tipo_linha: 'origem',
+          titulo: meta.titulo,
+          detalhe: `${meta.detalhe} | Forma: ${String(v.forma_pagamento || '-').trim() || '-'}`,
+          data: formatarDataYmdFinanceiroSafe(v.data_venda),
+          valor: round2Financeiro(parseNumeroBR(v.valor_total_venda)),
+          origem_tipo: meta.origem_tipo,
+          origem_id: meta.origem_id,
+          origem_aba: meta.origem_aba,
+          pagamento_id: '',
+          pode_editar_origem: true,
+          pode_excluir_origem: true,
+          pode_remover_pagamento: false,
+          eh_contagem: false
+        };
+      })
+      .filter(Boolean);
+  } else if (chave === 'recebido_vendas_mes') {
+    itens = pagamentosValidos
+      .filter(p => {
+        const tipo = String(p.origem_tipo || '').trim().toUpperCase();
+        if (tipo !== ORIGEM_TIPO_VENDA) return false;
+        const dataPag = parseDataFinanceiro(p.data_pagamento);
+        if (!dataPag || dataPag < inicio || dataPag >= fim) return false;
+        let natureza = '';
+        try {
+          natureza = normalizarNaturezaFinanceiro(p.natureza || getNaturezaOrigemFinanceiro(tipo));
+        } catch (error) {
+          natureza = '';
+        }
+        return natureza === NATUREZA_RECEBIMENTO;
+      })
+      .map(p => {
+        const meta = obterMetaOrigem(ORIGEM_TIPO_VENDA, p.origem_id);
+        if (!meta) return null;
+        return {
+          linha_id: `PGT:${String(p.ID || '').trim()}`,
+          tipo_linha: 'pagamento',
+          titulo: meta.titulo,
+          detalhe: `${meta.detalhe} | Forma: ${String(p.forma_pagamento || '-').trim() || '-'}`,
+          data: formatarDataYmdFinanceiroSafe(p.data_pagamento),
+          valor: round2Financeiro(parseNumeroBR(p.valor_pago)),
+          origem_tipo: meta.origem_tipo,
+          origem_id: meta.origem_id,
+          origem_aba: meta.origem_aba,
+          pagamento_id: String(p.ID || '').trim(),
+          pode_editar_origem: true,
+          pode_excluir_origem: true,
+          pode_remover_pagamento: true,
+          eh_contagem: false
+        };
+      })
+      .filter(Boolean);
+  } else if (chave === 'pendente_total' || chave === 'vencido_total' || chave === 'avencer_7_dias') {
+    itens = [];
+    const origensPendentes = [];
+    compras.forEach(item => origensPendentes.push({ origem_tipo: ORIGEM_TIPO_COMPRA, item }));
+    despesas.forEach(item => origensPendentes.push({ origem_tipo: ORIGEM_TIPO_DESPESA, item }));
+
+    origensPendentes.forEach(entry => {
+      const item = entry.item || {};
+      const pendente = round2Financeiro(parseNumeroBR(item.total_pendente));
+      if (pendente <= 0) return;
+      const dataVenc = inicioDoDiaFinanceiro(item.data_vencimento);
+
+      if (chave === 'vencido_total') {
+        if (!dataVenc || dataVenc.getTime() >= hoje.getTime()) return;
+      } else if (chave === 'avencer_7_dias') {
+        if (!dataVenc || dataVenc.getTime() < hoje.getTime() || dataVenc.getTime() > limite7.getTime()) return;
+      }
+
+      const meta = obterMetaOrigem(entry.origem_tipo, item.ID);
+      if (!meta) return;
+      itens.push({
+        linha_id: `PEN:${entry.origem_tipo}:${String(item.ID || '').trim()}`,
+        tipo_linha: 'origem',
+        titulo: meta.titulo,
+        detalhe: `${meta.detalhe} | Status: ${String(item.status_pagamento || 'PENDENTE').trim() || 'PENDENTE'}`,
+        data: formatarDataYmdFinanceiroSafe(item.data_vencimento),
+        valor: pendente,
+        origem_tipo: meta.origem_tipo,
+        origem_id: meta.origem_id,
+        origem_aba: meta.origem_aba,
+        pagamento_id: '',
+        pode_editar_origem: true,
+        pode_excluir_origem: true,
+        pode_remover_pagamento: false,
+        eh_contagem: false
+      });
+    });
+  } else if (chave === 'valor_estoque_total') {
+    itens = estoque.map(item => {
+      const id = String(item.ID || '').trim();
+      const meta = obterMetaOrigem(ORIGEM_TIPO_ESTOQUE, id);
+      if (!meta) return null;
+      const quantidade = round2Financeiro(parseNumeroBR(item.quantidade));
+      const custo = round2Financeiro(parseNumeroBR(item.custo_unitario || item.valor_unit));
+      return {
+        linha_id: `EST:${id}`,
+        tipo_linha: 'estoque',
+        titulo: meta.titulo,
+        detalhe: `${meta.detalhe} | Qtd: ${quantidade} ${String(item.unidade || '').trim() || ''}`.trim(),
+        data: formatarDataYmdFinanceiroSafe(item.comprado_em),
+        valor: round2Financeiro(Math.max(0, quantidade * custo)),
+        origem_tipo: meta.origem_tipo,
+        origem_id: meta.origem_id,
+        origem_aba: meta.origem_aba,
+        pagamento_id: '',
+        pode_editar_origem: true,
+        pode_excluir_origem: true,
+        pode_remover_pagamento: false,
+        eh_contagem: false
+      };
+    }).filter(Boolean);
+  } else if (chave === 'contador_bruno_mes' || chave === 'contador_zizu_mes') {
+    const alvo = chave === 'contador_bruno_mes' ? 'bruno' : 'zizu';
+    itens = pagamentosValidos
+      .filter(p => {
+        const dataPag = parseDataFinanceiro(p.data_pagamento);
+        if (!dataPag || dataPag < inicio || dataPag >= fim) return false;
+        const tipo = String(p.origem_tipo || '').trim().toUpperCase();
+        if (tipo !== ORIGEM_TIPO_COMPRA && tipo !== ORIGEM_TIPO_DESPESA) return false;
+        let natureza = '';
+        try {
+          natureza = normalizarNaturezaFinanceiro(p.natureza || getNaturezaOrigemFinanceiro(tipo));
+        } catch (error) {
+          natureza = '';
+        }
+        return natureza === NATUREZA_PAGAMENTO;
+      })
+      .map(p => {
+        const meta = obterMetaOrigem(p.origem_tipo, p.origem_id);
+        if (!meta) return null;
+        const valorPago = round2Financeiro(parseNumeroBR(p.valor_pago));
+        const rateio = calcularRateioLinhaPagoPorFinanceiro(meta.pago_por, valorPago);
+        const valorLinha = round2Financeiro(rateio[alvo] || 0);
+        if (valorLinha <= 0) return null;
+        return {
+          linha_id: `PGT:${String(p.ID || '').trim()}:${alvo}`,
+          tipo_linha: 'rateio',
+          titulo: meta.titulo,
+          detalhe: `${meta.detalhe} | Pago por: ${meta.pago_por || '-'} | Valor original: ${valorPago.toFixed(2)}`,
+          data: formatarDataYmdFinanceiroSafe(p.data_pagamento),
+          valor: valorLinha,
+          origem_tipo: meta.origem_tipo,
+          origem_id: meta.origem_id,
+          origem_aba: meta.origem_aba,
+          pagamento_id: String(p.ID || '').trim(),
+          pode_editar_origem: true,
+          pode_excluir_origem: true,
+          pode_remover_pagamento: true,
+          eh_contagem: false
+        };
+      })
+      .filter(Boolean);
+  }
+
+  ordenarComposicaoCardDashboardFinanceiro(itens, campoValor);
+
+  const total = round2Financeiro(
+    itens.reduce((acc, item) => {
+      const valorItem = round2Financeiro(parseNumeroBR(item?.[campoValor] || 0));
+      return acc + valorItem;
+    }, 0)
+  );
+
+  return {
+    referencia: ref,
+    card_key: chave,
+    card_label: getRotuloCardDashboardFinanceiro(chave),
+    campo_valor: campoValor,
+    total,
+    total_itens: itens.length,
+    itens
+  };
 }

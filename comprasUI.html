@@ -44,6 +44,8 @@
         forma_pagamento: document.getElementById('compraFormaPagamento'),
         parcelas_wrap: document.getElementById('compraParcelasWrap'),
         parcelas: document.getElementById('compraParcelas'),
+        parcelas_detalhe_wrap: document.getElementById('compraParcelasDetalheWrap'),
+        parcelas_detalhe_lista: document.getElementById('compraParcelasDetalheLista'),
         vida_util_mes: document.getElementById('compraVidaUtilMes'),
 
         equipamentoFields: document.getElementById('compraEquipamentoFields'),
@@ -54,6 +56,8 @@
         pagamentoTitulo: document.getElementById('pagamentoCompraTitulo'),
         pagamentoData: document.getElementById('pagamentoCompraData'),
         pagamentoValor: document.getElementById('pagamentoCompraValor'),
+        pagamentoParcelaWrap: document.getElementById('pagamentoCompraParcelaWrap'),
+        pagamentoParcela: document.getElementById('pagamentoCompraParcela'),
         pagamentoForma: document.getElementById('pagamentoCompraForma'),
         pagamentoObservacao: document.getElementById('pagamentoCompraObservacao'),
         pagamentoConfirmar: document.getElementById('btnConfirmarPagamentoCompra'),
@@ -89,6 +93,81 @@
       const mm = String(d.getMonth() + 1).padStart(2, '0');
       const dd = String(d.getDate()).padStart(2, '0');
       return `${yyyy}-${mm}-${dd}`;
+    }
+
+    function getDataBaseParcelasCompra() {
+      const { data_pagamento, comprado_em } = el();
+      return String(data_pagamento?.value || comprado_em?.value || getHojeISO()).trim();
+    }
+
+    function getValorTotalCompraFormulario() {
+      const f = el();
+      const quantidade = parseNumeroInput(f.quantidade?.value || 0);
+      const valorUnit = parseNumeroInput(f.valor_unit?.value || 0);
+      return Number((quantidade * valorUnit).toFixed(2));
+    }
+
+    function gerarParcelasPadrao(valorTotal, parcelas, dataBase) {
+      const total = Number(valorTotal || 0);
+      const qtd = Math.max(1, Math.floor(Number(parcelas || 1)));
+      const inicioRaw = String(dataBase || getHojeISO()).trim();
+      const inicio = /^\d{4}-\d{2}-\d{2}$/.test(inicioRaw) ? new Date(`${inicioRaw}T00:00:00`) : new Date();
+      const base = qtd > 0 ? Number((total / qtd).toFixed(2)) : 0;
+      const lista = [];
+      for (let i = 0; i < qtd; i++) {
+        const d = new Date(inicio);
+        d.setMonth(d.getMonth() + i);
+        const yyyy = d.getFullYear();
+        const mm = String(d.getMonth() + 1).padStart(2, '0');
+        const dd = String(d.getDate()).padStart(2, '0');
+        const valor = i === qtd - 1
+          ? Number((total - (base * (qtd - 1))).toFixed(2))
+          : base;
+        lista.push({
+          numero: i + 1,
+          data: `${yyyy}-${mm}-${dd}`,
+          valor: Number(valor.toFixed(2))
+        });
+      }
+      return lista;
+    }
+
+    function lerParcelasDetalheCompra() {
+      const { parcelas_detalhe_lista } = el();
+      if (!parcelas_detalhe_lista) return [];
+      const linhas = [...parcelas_detalhe_lista.querySelectorAll('.parcela-detalhe-linha')];
+      return linhas.map((linha, idx) => ({
+        numero: idx + 1,
+        data: String(linha.querySelector('input[data-campo="data"]')?.value || '').trim(),
+        valor: parseNumeroInput(linha.querySelector('input[data-campo="valor"]')?.value || '')
+      }));
+    }
+
+    function renderParcelasDetalheCompra(listaForcada) {
+      const f = el();
+      if (!f.parcelas_detalhe_wrap || !f.parcelas_detalhe_lista) return;
+      const exibir = formaExigeParcelas(f.forma_pagamento?.value || '');
+      if (!exibir) {
+        f.parcelas_detalhe_wrap.classList.add('hidden');
+        f.parcelas_detalhe_lista.innerHTML = '';
+        return;
+      }
+
+      const parcelas = Math.max(1, Math.floor(parseNumeroInput(f.parcelas?.value || 1) || 1));
+      const valorTotal = getValorTotalCompraFormulario();
+      const dataBase = getDataBaseParcelasCompra();
+      const atuais = Array.isArray(listaForcada) ? listaForcada : lerParcelasDetalheCompra();
+      const usarAtuais = atuais.length === parcelas && atuais.every(p => String(p.data || '').trim() !== '');
+      const lista = usarAtuais ? atuais : gerarParcelasPadrao(valorTotal, parcelas, dataBase);
+
+      f.parcelas_detalhe_lista.innerHTML = lista.map((p, idx) => `
+        <div class="parcela-detalhe-linha">
+          <span class="parcela-detalhe-num">#${idx + 1}</span>
+          <input type="date" data-campo="data" value="${String(p.data || '')}">
+          <input type="number" data-campo="valor" min="0" step="0.01" value="${Number(p.valor || 0).toFixed(2)}">
+        </div>
+      `).join('');
+      f.parcelas_detalhe_wrap.classList.remove('hidden');
     }
 
     function normalizarFormaPagamento(valor) {
@@ -192,6 +271,7 @@
 
       const m3 = (comp * larg * espes) / 1000000;
       f.quantidade.value = m3.toFixed(2);
+      handleParcelasConfigChange();
     }
 
     /* =========================
@@ -208,19 +288,13 @@
     function mostrarFormulario() {
       const { formulario } = el();
       if (!formulario) return;
-
-      formulario.style.display = 'block';
-
-      requestAnimationFrame(() => {
-        formulario.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      });
+      formulario.classList.remove('hidden');
     }
 
     function fecharFormulario() {
       const { formulario } = el();
       if (!formulario) return;
-
-      formulario.style.display = 'none';
+      formulario.classList.add('hidden');
       resetFormulario();
 
       if (window.ComprasController) {
@@ -266,6 +340,15 @@
       definirTituloFormulario('Editar Compra');
       handleTipoChange();
       handleFormaPagamentoChange();
+      renderParcelasDetalheCompra(
+        Array.isArray(data.parcelas_detalhe)
+          ? data.parcelas_detalhe.map((p, idx) => ({
+            numero: idx + 1,
+            data: String(p.data_prevista || p.data || '').trim(),
+            valor: Number(p.valor_previsto ?? p.valor ?? 0)
+          }))
+          : []
+      );
     }
 
     function resetFormulario() {
@@ -297,6 +380,8 @@
       if (f.equipamentoFields) f.equipamentoFields.classList.add('hidden');
       if (f.madeiraFields) f.madeiraFields.classList.add('hidden');
       if (f.quantidade) f.quantidade.readOnly = false;
+      if (f.parcelas_detalhe_lista) f.parcelas_detalhe_lista.innerHTML = '';
+      if (f.parcelas_detalhe_wrap) f.parcelas_detalhe_wrap.classList.add('hidden');
       renderCategoriasDoTipo('', '');
       handleFormaPagamentoChange();
       definirTituloFormulario('Nova Compra');
@@ -338,6 +423,7 @@
         const inputs = madeiraFields.querySelectorAll('input');
         inputs.forEach(i => (i.value = ''));
       }
+      handleParcelasConfigChange();
     }
 
     function handleFormaPagamentoChange() {
@@ -350,6 +436,11 @@
       } else if (!String(parcelas.value || '').trim() || Number(parcelas.value) < 1) {
         parcelas.value = '1';
       }
+      renderParcelasDetalheCompra();
+    }
+
+    function handleParcelasConfigChange() {
+      renderParcelasDetalheCompra();
     }
 
     /* =========================
@@ -730,7 +821,7 @@
 
     function abrirModalPagamentoCompra(item) {
       const f = el();
-      if (!f.pagamentoModal) return;
+      if (!f.pagamentoModal) return false;
 
       if (f.pagamentoTitulo) {
         const nome = String(item?.item || '').trim();
@@ -740,20 +831,63 @@
       }
 
       if (f.pagamentoData) f.pagamentoData.value = getHojeISO();
-      if (f.pagamentoValor) {
+      const parcelas = Array.isArray(item?.parcelas_detalhe) ? item.parcelas_detalhe : [];
+      const totalParcelas = Math.max(1, Math.floor(parseNumeroInput(item?.parcelas || 1) || 1));
+      const parcelado = totalParcelas > 1;
+      const proximaParcela = parcelas.find(p => Number(p?.valor_pendente || 0) > 0.009) || null;
+
+      if (f.pagamentoParcelaWrap && f.pagamentoParcela) {
+        if (parcelado) {
+          if (!proximaParcela?.ID) {
+            if (typeof mostrarToast === 'function') {
+              mostrarToast('Nao ha parcela pendente para esta compra', 'erro');
+            }
+            return false;
+          }
+          const numero = Number(proximaParcela.parcela_numero || 0);
+          const total = Number(proximaParcela.parcelas_total || 0);
+          const data = String(proximaParcela.data_prevista || '-').trim() || '-';
+          const valorPend = Number(proximaParcela.valor_pendente || 0);
+
+          f.pagamentoParcela.innerHTML = '';
+          const op = document.createElement('option');
+          op.value = String(proximaParcela.ID || '').trim();
+          op.textContent = `Parcela ${numero}/${total} - ${data} - ${formatarMoeda(valorPend)}`;
+          f.pagamentoParcela.appendChild(op);
+          f.pagamentoParcela.value = op.value;
+          f.pagamentoParcelaWrap.classList.remove('hidden');
+
+          if (f.pagamentoValor) {
+            f.pagamentoValor.value = valorPend > 0 ? valorPend.toFixed(2) : '';
+            f.pagamentoValor.readOnly = true;
+          }
+        } else {
+          f.pagamentoParcela.innerHTML = '<option value="">Parcela unica</option>';
+          f.pagamentoParcela.value = '';
+          f.pagamentoParcelaWrap.classList.add('hidden');
+          if (f.pagamentoValor) {
+            const pendente = Number(item?.total_pendente || 0);
+            f.pagamentoValor.value = pendente > 0 ? pendente.toFixed(2) : '';
+            f.pagamentoValor.readOnly = false;
+          }
+        }
+      } else if (f.pagamentoValor) {
         const pendente = Number(item?.total_pendente || 0);
         f.pagamentoValor.value = pendente > 0 ? pendente.toFixed(2) : '';
       }
+
       if (f.pagamentoForma) f.pagamentoForma.value = item?.forma_pagamento || item?.forma_pagamento_padrao || '';
       if (f.pagamentoObservacao) f.pagamentoObservacao.value = '';
+      f.pagamentoModal.dataset.parcelado = parcelado ? 'true' : 'false';
 
       f.pagamentoModal.classList.remove('hidden');
+      return true;
     }
 
     function setModalPagamentoCompraProcessando(processando) {
       const f = el();
       const on = !!processando;
-      [f.pagamentoData, f.pagamentoValor, f.pagamentoForma, f.pagamentoObservacao, f.pagamentoConfirmar]
+      [f.pagamentoData, f.pagamentoValor, f.pagamentoParcela, f.pagamentoForma, f.pagamentoObservacao, f.pagamentoConfirmar]
         .forEach(input => {
           if (input) input.disabled = on;
         });
@@ -766,14 +900,21 @@
       const f = el();
       if (!f.pagamentoModal) return;
       f.pagamentoModal.classList.add('hidden');
+      if (f.pagamentoValor) f.pagamentoValor.readOnly = false;
+      if (f.pagamentoParcelaWrap) f.pagamentoParcelaWrap.classList.add('hidden');
+      if (f.pagamentoParcela) f.pagamentoParcela.innerHTML = '<option value="">Selecione</option>';
+      f.pagamentoModal.dataset.parcelado = 'false';
       setModalPagamentoCompraProcessando(false);
     }
 
     function lerModalPagamentoCompra() {
       const f = el();
+      const parcelado = String(f.pagamentoModal?.dataset?.parcelado || '').toLowerCase() === 'true';
       return {
         data_pagamento: String(f.pagamentoData?.value || '').trim(),
         valor_pago: String(f.pagamentoValor?.value || '').trim(),
+        parcela_alvo_id: parcelado ? String(f.pagamentoParcela?.value || '').trim() : '',
+        parcelado,
         forma_pagamento: String(f.pagamentoForma?.value || '').trim(),
         observacao: String(f.pagamentoObservacao?.value || '').trim()
       };
@@ -790,6 +931,7 @@
       resetFormulario,
       handleTipoChange,
       handleFormaPagamentoChange,
+      handleParcelasConfigChange,
       renderLista,
 
       renderTipos,
@@ -804,6 +946,7 @@
       definirTituloFormulario,
       abrirModalPagamentoCompra,
       fecharModalPagamentoCompra,
+      lerParcelasDetalheCompra,
       lerModalPagamentoCompra,
       setModalPagamentoCompraProcessando
     };

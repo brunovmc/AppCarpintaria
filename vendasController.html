@@ -90,8 +90,6 @@
         data_venda: String(get('vendaData') || '').trim(),
         forma_pagamento: String(get('vendaFormaPagamento') || '').trim(),
         parcelas: Math.floor(parseNumeroInput(get('vendaParcelas')) || 1),
-        plano_recebimento: String(get('vendaPlano') || '').trim(),
-        data_entrega_prevista: String(get('vendaDataEntrega') || '').trim(),
         observacao: String(get('vendaObservacao') || '').trim()
       };
 
@@ -111,6 +109,32 @@
         mostrarToast('Parcelas deve ser maior ou igual a 1', 'erro');
         return;
       }
+      const formaExigeParcelas = (() => {
+        const forma = String(dados.forma_pagamento || '')
+          .normalize('NFD')
+          .replace(/[\u0300-\u036f]/g, '')
+          .trim()
+          .toUpperCase();
+        return forma === 'CREDITO' || forma === 'PIX PARCELADO' || forma === 'DINHEIRO';
+      })();
+      const parcelasDetalhe = formaExigeParcelas
+        ? (VendasUI.lerParcelasDetalheVenda ? VendasUI.lerParcelasDetalheVenda() : [])
+        : [];
+      if (formaExigeParcelas) {
+        if (!Array.isArray(parcelasDetalhe) || parcelasDetalhe.length !== dados.parcelas) {
+          mostrarToast('Revise as parcelas detalhadas', 'erro');
+          return;
+        }
+        if (parcelasDetalhe.some(p => !String(p.data || '').trim())) {
+          mostrarToast('Preencha a data de todas as parcelas', 'erro');
+          return;
+        }
+        if (parcelasDetalhe.some(p => Number(p.valor || 0) <= 0)) {
+          mostrarToast('Valor de parcela deve ser maior que zero', 'erro');
+          return;
+        }
+      }
+      dados.parcelas_detalhe = parcelasDetalhe;
 
       setSalvando(true);
       if (editandoId) {
@@ -168,7 +192,6 @@
 
     function finalizarUX() {
       VendasUI.fecharFormulario();
-      window.scrollTo({ top: 0, behavior: 'smooth' });
     }
 
     function editar(id) {
@@ -215,7 +238,10 @@
         return;
       }
       recebimentoVendaId = id;
-      VendasUI.abrirModalRecebimento(item);
+      const abriu = VendasUI.abrirModalRecebimento(item);
+      if (!abriu) {
+        recebimentoVendaId = null;
+      }
     }
 
     function confirmarRecebimento() {
@@ -233,6 +259,10 @@
       }
       if (!dados.forma_pagamento) {
         mostrarToast('Forma de pagamento e obrigatoria', 'erro');
+        return;
+      }
+      if (dados.parcelado && !dados.parcela_alvo_id) {
+        mostrarToast('Selecione a parcela pendente', 'erro');
         return;
       }
       if (!valor || valor <= 0) {
@@ -277,6 +307,7 @@
         .registrarRecebimentoVenda(recebimentoVendaId, {
           data_pagamento: dados.data_pagamento,
           valor_pago: valor,
+          parcela_alvo_id: dados.parcela_alvo_id,
           forma_pagamento: dados.forma_pagamento,
           observacao: dados.observacao
         });
