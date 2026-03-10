@@ -1,6 +1,8 @@
 const ABA_DESPESAS_GERAIS = 'DESPESAS_GERAIS';
 const ABA_PAGAMENTOS = 'PAGAMENTOS';
+const ABA_PARCELAS_FINANCEIRAS = 'PARCELAS_FINANCEIRAS';
 const ABA_COMPRAS_FINANCEIRO = 'COMPRAS';
+const ABA_VENDAS_FINANCEIRO = 'VENDAS';
 
 const DESPESAS_GERAIS_CACHE_SCOPE = 'DESPESAS_GERAIS_LISTA_ATIVAS';
 const DESPESAS_GERAIS_CACHE_TTL_SEC = 90;
@@ -13,6 +15,9 @@ const DASHBOARD_FINANCEIRO_CACHE_TTL_SEC = 120;
 
 const ORIGEM_TIPO_COMPRA = 'COMPRA';
 const ORIGEM_TIPO_DESPESA = 'DESPESA_GERAL';
+const ORIGEM_TIPO_VENDA = 'VENDA';
+const NATUREZA_PAGAMENTO = 'PAGAMENTO';
+const NATUREZA_RECEBIMENTO = 'RECEBIMENTO';
 
 const DESPESAS_GERAIS_SCHEMA = [
   'ID',
@@ -37,10 +42,28 @@ const PAGAMENTOS_SCHEMA = [
   'ID',
   'origem_tipo',
   'origem_id',
+  'natureza',
   'data_pagamento',
   'valor_pago',
   'forma_pagamento',
   'observacao',
+  'ativo',
+  'criado_em'
+];
+
+const PARCELAS_FINANCEIRAS_SCHEMA = [
+  'ID',
+  'origem_tipo',
+  'origem_id',
+  'natureza',
+  'parcela_numero',
+  'parcelas_total',
+  'data_prevista',
+  'valor_previsto',
+  'valor_pago',
+  'status',
+  'data_quitacao',
+  'pagamento_id',
   'ativo',
   'criado_em'
 ];
@@ -379,10 +402,24 @@ function salvarCacheDashboardFinanceiro(payload) {
 
 function normalizarOrigemTipoFinanceiro(origemTipo) {
   const tipo = String(origemTipo || '').trim().toUpperCase();
-  if (tipo === ORIGEM_TIPO_COMPRA || tipo === ORIGEM_TIPO_DESPESA) {
+  if (tipo === ORIGEM_TIPO_COMPRA || tipo === ORIGEM_TIPO_DESPESA || tipo === ORIGEM_TIPO_VENDA) {
     return tipo;
   }
   throw new Error('Origem de pagamento invalida.');
+}
+
+function normalizarNaturezaFinanceiro(natureza) {
+  const n = String(natureza || '').trim().toUpperCase();
+  if (n === NATUREZA_PAGAMENTO || n === NATUREZA_RECEBIMENTO) {
+    return n;
+  }
+  throw new Error('Natureza financeira invalida.');
+}
+
+function getNaturezaOrigemFinanceiro(origemTipo) {
+  const tipo = normalizarOrigemTipoFinanceiro(origemTipo);
+  if (tipo === ORIGEM_TIPO_VENDA) return NATUREZA_RECEBIMENTO;
+  return NATUREZA_PAGAMENTO;
 }
 
 function getTotalPrevistoCompraFinanceiro(compra) {
@@ -393,6 +430,10 @@ function getTotalPrevistoCompraFinanceiro(compra) {
 
 function getTotalPrevistoDespesaFinanceiro(despesa) {
   return round2Financeiro(Math.max(0, parseNumeroBR(despesa?.valor_total)));
+}
+
+function getTotalPrevistoVendaFinanceiro(venda) {
+  return round2Financeiro(Math.max(0, parseNumeroBR(venda?.valor_total_venda)));
 }
 
 function getStatusPagamentoFinanceiro(totalPrevisto, totalPago) {
@@ -483,6 +524,14 @@ function enriquecerDespesasComResumoPagamento(listaDespesas) {
   );
 }
 
+function enriquecerVendasComResumoPagamento(listaVendas) {
+  return enriquecerListaComPagamentosFinanceiro(
+    listaVendas,
+    ORIGEM_TIPO_VENDA,
+    getTotalPrevistoVendaFinanceiro
+  );
+}
+
 function listarPagamentos(forcarRecarregar) {
   if (!forcarRecarregar) {
     const cached = lerCachePagamentos();
@@ -502,6 +551,21 @@ function listarPagamentos(forcarRecarregar) {
     .filter(i => String(i.ativo).toLowerCase() === 'true')
     .map(i => ({
       ...i,
+      natureza: (() => {
+        const bruto = String(i.natureza || '').trim();
+        if (bruto) {
+          try {
+            return normalizarNaturezaFinanceiro(bruto);
+          } catch (error) {
+            return getNaturezaOrigemFinanceiro(i.origem_tipo);
+          }
+        }
+        try {
+          return getNaturezaOrigemFinanceiro(i.origem_tipo);
+        } catch (error) {
+          return NATUREZA_PAGAMENTO;
+        }
+      })(),
       valor_pago: round2Financeiro(parseNumeroBR(i.valor_pago)),
       data_pagamento: i.data_pagamento
         ? formatarDataYmdFinanceiroSafe(i.data_pagamento)
@@ -531,6 +595,235 @@ function recarregarCachePagamentos() {
     scope: PAGAMENTOS_CACHE_SCOPE,
     ttl_segundos: PAGAMENTOS_CACHE_TTL_SEC,
     total_itens: Array.isArray(dados) ? dados.length : 0
+  };
+}
+
+function listarParcelasFinanceirasOrigem(origemTipo, origemId) {
+  const tipo = normalizarOrigemTipoFinanceiro(origemTipo);
+  const id = String(origemId || '').trim();
+  if (!id) return [];
+
+  const sheet = getSheet(ABA_PARCELAS_FINANCEIRAS);
+  if (!sheet) return [];
+
+  return rowsToObjects(sheet)
+    .filter(i =>
+      String(i.ativo).toLowerCase() === 'true' &&
+      String(i.origem_tipo || '').trim().toUpperCase() === tipo &&
+      String(i.origem_id || '').trim() === id
+    )
+    .map(i => {
+      const valorPrevisto = round2Financeiro(parseNumeroBR(i.valor_previsto));
+      const valorPago = round2Financeiro(parseNumeroBR(i.valor_pago));
+      const pendente = round2Financeiro(Math.max(0, valorPrevisto - valorPago));
+      const statusRaw = String(i.status || '').trim().toUpperCase();
+      const status = statusRaw || (valorPago <= 0 ? 'PENDENTE' : (pendente <= 0.009 ? 'PAGO' : 'PARCIAL'));
+      return {
+        ...i,
+        natureza: (() => {
+          try {
+            return normalizarNaturezaFinanceiro(i.natureza || getNaturezaOrigemFinanceiro(tipo));
+          } catch (error) {
+            return getNaturezaOrigemFinanceiro(tipo);
+          }
+        })(),
+        parcela_numero: Number(i.parcela_numero || 0),
+        parcelas_total: Number(i.parcelas_total || 0),
+        valor_previsto: valorPrevisto,
+        valor_pago: valorPago,
+        valor_pendente: pendente,
+        status
+      };
+    })
+    .sort((a, b) => {
+      const pa = Number(a.parcela_numero || 0);
+      const pb = Number(b.parcela_numero || 0);
+      if (pa !== pb) return pa - pb;
+      return String(a.ID || '').localeCompare(String(b.ID || ''));
+    });
+}
+
+function limparParcelasFinanceirasOrigem(origemTipo, origemId) {
+  const tipo = normalizarOrigemTipoFinanceiro(origemTipo);
+  const id = String(origemId || '').trim();
+  if (!id) return { ok: true, removidas: 0 };
+
+  const sheet = getSheet(ABA_PARCELAS_FINANCEIRAS);
+  if (!sheet) return { ok: true, removidas: 0 };
+
+  const rows = rowsToObjects(sheet).filter(i =>
+    String(i.ativo).toLowerCase() === 'true' &&
+    String(i.origem_tipo || '').trim().toUpperCase() === tipo &&
+    String(i.origem_id || '').trim() === id
+  );
+  rows.forEach(r => {
+    updateById(
+      ABA_PARCELAS_FINANCEIRAS,
+      'ID',
+      r.ID,
+      { ativo: false },
+      PARCELAS_FINANCEIRAS_SCHEMA
+    );
+  });
+  return { ok: true, removidas: rows.length };
+}
+
+function calcularPlanoParcelasFinanceiro(totalPrevisto, parcelas, dataInicio, planoRecebimento, dataEntregaPrevista) {
+  const total = round2Financeiro(parseNumeroBR(totalPrevisto));
+  const qtdParcelasBase = Math.max(1, Math.floor(parseNumeroBR(parcelas) || 1));
+  const inicio = parseDataFinanceiro(dataInicio);
+  if (!inicio) {
+    throw new Error('Data inicial invalida para gerar parcelas.');
+  }
+
+  const plano = String(planoRecebimento || '').trim().toUpperCase();
+  if (plano === 'ENCOMENDA_50_50') {
+    const entrega = parseDataFinanceiro(dataEntregaPrevista) || adicionarMesesComAjusteFinanceiro(inicio, 1);
+    const v1 = round2Financeiro(total / 2);
+    const v2 = round2Financeiro(total - v1);
+    return [
+      { numero: 1, data: inicio, valor: v1, total: 2 },
+      { numero: 2, data: entrega, valor: v2, total: 2 }
+    ];
+  }
+
+  const valorBase = round2Financeiro(total / qtdParcelasBase);
+  const planoParcelas = [];
+  for (let i = 1; i <= qtdParcelasBase; i++) {
+    const dataParcela = adicionarMesesComAjusteFinanceiro(inicio, i - 1);
+    const valor = i === qtdParcelasBase
+      ? round2Financeiro(total - (valorBase * (qtdParcelasBase - 1)))
+      : valorBase;
+    planoParcelas.push({
+      numero: i,
+      data: dataParcela,
+      valor,
+      total: qtdParcelasBase
+    });
+  }
+  return planoParcelas;
+}
+
+function gerarParcelasFinanceirasOrigem(origemTipo, origemId) {
+  const origem = obterOrigemPagamentoFinanceiro(origemTipo, origemId);
+  const item = origem.item || {};
+  const parcelas = Math.max(1, Math.floor(parseNumeroBR(item.parcelas) || 1));
+  const dataInicio = item.data_pagamento || item.data_venda || item.comprado_em || item.data_competencia || new Date();
+  const planoRecebimento = origem.tipo === ORIGEM_TIPO_VENDA
+    ? String(item.plano_recebimento || '').trim().toUpperCase()
+    : '';
+  const dataEntregaPrevista = origem.tipo === ORIGEM_TIPO_VENDA
+    ? String(item.data_entrega_prevista || '').trim()
+    : '';
+
+  limparParcelasFinanceirasOrigem(origem.tipo, origem.id);
+
+  const plano = calcularPlanoParcelasFinanceiro(
+    origem.total_previsto,
+    parcelas,
+    dataInicio,
+    planoRecebimento,
+    dataEntregaPrevista
+  );
+
+  plano.forEach(p => {
+    insert(ABA_PARCELAS_FINANCEIRAS, {
+      ID: gerarId('PAR'),
+      origem_tipo: origem.tipo,
+      origem_id: origem.id,
+      natureza: origem.natureza,
+      parcela_numero: p.numero,
+      parcelas_total: p.total,
+      data_prevista: formatarDataYmdFinanceiro(p.data),
+      valor_previsto: round2Financeiro(p.valor),
+      valor_pago: 0,
+      status: 'PENDENTE',
+      data_quitacao: '',
+      pagamento_id: '',
+      ativo: true,
+      criado_em: new Date()
+    }, PARCELAS_FINANCEIRAS_SCHEMA);
+  });
+
+  return listarParcelasFinanceirasOrigem(origem.tipo, origem.id);
+}
+
+function aplicarPagamentoEmParcelasFinanceiro(origemTipo, origemId, pagamentoId, valorPago, dataPagamento) {
+  const tipo = normalizarOrigemTipoFinanceiro(origemTipo);
+  const id = String(origemId || '').trim();
+  if (!id) return { valor_alocado: 0, valor_excedente: round2Financeiro(valorPago) };
+
+  let restante = round2Financeiro(parseNumeroBR(valorPago));
+  if (restante <= 0) return { valor_alocado: 0, valor_excedente: 0 };
+
+  const parcelas = listarParcelasFinanceirasOrigem(tipo, id);
+  if (parcelas.length === 0) {
+    gerarParcelasFinanceirasOrigem(tipo, id);
+  }
+  const parcelasAtuais = listarParcelasFinanceirasOrigem(tipo, id);
+
+  parcelasAtuais.forEach(parcela => {
+    if (restante <= 0.009) return;
+    const pendente = round2Financeiro(Math.max(0, parcela.valor_previsto - parcela.valor_pago));
+    if (pendente <= 0.009) return;
+
+    const aplicado = round2Financeiro(Math.min(restante, pendente));
+    const novoPago = round2Financeiro(parcela.valor_pago + aplicado);
+    const quitada = novoPago + 0.009 >= parcela.valor_previsto;
+
+    updateById(
+      ABA_PARCELAS_FINANCEIRAS,
+      'ID',
+      parcela.ID,
+      {
+        valor_pago: novoPago,
+        status: quitada ? 'PAGO' : 'PARCIAL',
+        data_quitacao: quitada ? String(dataPagamento || '') : (parcela.data_quitacao || ''),
+        pagamento_id: String(pagamentoId || '').trim() || (parcela.pagamento_id || '')
+      },
+      PARCELAS_FINANCEIRAS_SCHEMA
+    );
+
+    restante = round2Financeiro(restante - aplicado);
+  });
+
+  return {
+    valor_alocado: round2Financeiro(parseNumeroBR(valorPago) - restante),
+    valor_excedente: round2Financeiro(restante)
+  };
+}
+
+function regerarParcelasFinanceirasOrigemComPagamentos(origemTipo, origemId) {
+  const tipo = normalizarOrigemTipoFinanceiro(origemTipo);
+  const id = String(origemId || '').trim();
+  if (!id) throw new Error('Origem nao informada.');
+
+  gerarParcelasFinanceirasOrigem(tipo, id);
+  const pagamentos = listarPagamentos(true)
+    .filter(p => {
+      try {
+        return normalizarOrigemTipoFinanceiro(p.origem_tipo) === tipo &&
+          String(p.origem_id || '').trim() === id;
+      } catch (error) {
+        return false;
+      }
+    })
+    .sort((a, b) => {
+      const da = parseDataFinanceiro(a.data_pagamento)?.getTime() || 0;
+      const db = parseDataFinanceiro(b.data_pagamento)?.getTime() || 0;
+      if (da !== db) return da - db;
+      return String(a.ID || '').localeCompare(String(b.ID || ''));
+    });
+
+  pagamentos.forEach(p => {
+    aplicarPagamentoEmParcelasFinanceiro(tipo, id, p.ID, p.valor_pago, p.data_pagamento);
+  });
+
+  return {
+    ok: true,
+    origem_tipo: tipo,
+    origem_id: id,
+    parcelas: listarParcelasFinanceirasOrigem(tipo, id)
   };
 }
 
@@ -674,6 +967,11 @@ function gerarRecorrenciaDespesasFixasFinanceiro() {
 
         const ok = insert(ABA_DESPESAS_GERAIS, novo, DESPESAS_GERAIS_SCHEMA);
         if (!ok) break;
+        try {
+          gerarParcelasFinanceirasOrigem(ORIGEM_TIPO_DESPESA, novo.ID);
+        } catch (error) {
+          // sem acao: recorrencia nao deve falhar por parcelas
+        }
 
         criados += 1;
         const novoRef = {
@@ -769,6 +1067,7 @@ function criarDespesaGeral(payload) {
 
   const ok = insert(ABA_DESPESAS_GERAIS, novo, DESPESAS_GERAIS_SCHEMA);
   if (!ok) return null;
+  gerarParcelasFinanceirasOrigem(ORIGEM_TIPO_DESPESA, novo.ID);
   return listarDespesasGerais(true).find(i => i.ID === novo.ID) || null;
 }
 
@@ -792,7 +1091,7 @@ function atualizarDespesaGeral(id, payload) {
   const origemAtual = String(atual.origem_fixo_id || despesaId).trim();
   const origemFixoId = dados.fixo ? (origemAtual || despesaId) : '';
 
-  return updateById(
+  const ok = updateById(
     ABA_DESPESAS_GERAIS,
     'ID',
     despesaId,
@@ -802,16 +1101,24 @@ function atualizarDespesaGeral(id, payload) {
     },
     DESPESAS_GERAIS_SCHEMA
   );
+  if (ok) {
+    regerarParcelasFinanceirasOrigemComPagamentos(ORIGEM_TIPO_DESPESA, despesaId);
+  }
+  return ok;
 }
 
 function deletarDespesaGeral(id) {
-  return updateById(
+  const ok = updateById(
     ABA_DESPESAS_GERAIS,
     'ID',
     id,
     { ativo: false },
     DESPESAS_GERAIS_SCHEMA
   );
+  if (ok) {
+    limparParcelasFinanceirasOrigem(ORIGEM_TIPO_DESPESA, id);
+  }
+  return ok;
 }
 
 function obterOrigemPagamentoFinanceiro(origemTipo, origemId) {
@@ -832,7 +1139,24 @@ function obterOrigemPagamentoFinanceiro(origemTipo, origemId) {
       tipo,
       id,
       item: compra,
-      total_previsto: getTotalPrevistoCompraFinanceiro(compra)
+      total_previsto: getTotalPrevistoCompraFinanceiro(compra),
+      natureza: getNaturezaOrigemFinanceiro(tipo)
+    };
+  }
+
+  if (tipo === ORIGEM_TIPO_VENDA) {
+    const sheet = getSheet(ABA_VENDAS_FINANCEIRO);
+    if (!sheet) throw new Error('Aba VENDAS nao encontrada.');
+    const venda = rowsToObjects(sheet).find(i => i.ID === id);
+    if (!venda || String(venda.ativo).toLowerCase() !== 'true') {
+      throw new Error('Venda de origem nao encontrada ou inativa.');
+    }
+    return {
+      tipo,
+      id,
+      item: venda,
+      total_previsto: getTotalPrevistoVendaFinanceiro(venda),
+      natureza: getNaturezaOrigemFinanceiro(tipo)
     };
   }
 
@@ -846,7 +1170,8 @@ function obterOrigemPagamentoFinanceiro(origemTipo, origemId) {
     tipo,
     id,
     item: despesa,
-    total_previsto: getTotalPrevistoDespesaFinanceiro(despesa)
+    total_previsto: getTotalPrevistoDespesaFinanceiro(despesa),
+    natureza: getNaturezaOrigemFinanceiro(tipo)
   };
 }
 
@@ -891,6 +1216,7 @@ function registrarPagamento(origemTipo, origemId, payload) {
     ID: gerarId('PGT'),
     origem_tipo: origem.tipo,
     origem_id: origem.id,
+    natureza: origem.natureza,
     data_pagamento: dataPagamento,
     valor_pago: valorPago,
     forma_pagamento: formaPagamento,
@@ -902,9 +1228,18 @@ function registrarPagamento(origemTipo, origemId, payload) {
   const ok = insert(ABA_PAGAMENTOS, novo, PAGAMENTOS_SCHEMA);
   if (!ok) return null;
 
+  const alocacaoParcelas = aplicarPagamentoEmParcelasFinanceiro(
+    origem.tipo,
+    origem.id,
+    novo.ID,
+    valorPago,
+    dataPagamento
+  );
+
   return {
     ...novo,
-    criado_em: formatarDataYmdHmFinanceiro(new Date(novo.criado_em))
+    criado_em: formatarDataYmdHmFinanceiro(new Date(novo.criado_em)),
+    alocacao_parcelas: alocacaoParcelas
   };
 }
 
@@ -929,13 +1264,22 @@ function registrarPagamentoDespesaGeral(despesaId, payload) {
 }
 
 function removerPagamento(id) {
-  return updateById(
+  const pagamento = listarPagamentos(true).find(p => String(p.ID || '').trim() === String(id || '').trim());
+  const ok = updateById(
     ABA_PAGAMENTOS,
     'ID',
     id,
     { ativo: false },
     PAGAMENTOS_SCHEMA
   );
+  if (ok && pagamento) {
+    try {
+      regerarParcelasFinanceirasOrigemComPagamentos(pagamento.origem_tipo, pagamento.origem_id);
+    } catch (error) {
+      // sem acao
+    }
+  }
+  return ok;
 }
 
 function ordenarAgregadoFinanceiro(obj, limite) {
@@ -983,11 +1327,23 @@ function obterResumoDashboardFinanceiro(referenciaYm, forcarRecarregar) {
     } catch (error) {
       return false;
     }
+    let natureza = '';
+    try {
+      natureza = normalizarNaturezaFinanceiro(p.natureza || getNaturezaOrigemFinanceiro(tipo));
+    } catch (error) {
+      return false;
+    }
+    if (natureza !== NATUREZA_PAGAMENTO) {
+      return false;
+    }
     const origemId = String(p.origem_id || '').trim();
     if (tipo === ORIGEM_TIPO_COMPRA) {
       return !!comprasPorId[origemId];
     }
-    return !!despesasPorId[origemId];
+    if (tipo === ORIGEM_TIPO_DESPESA) {
+      return !!despesasPorId[origemId];
+    }
+    return false;
   });
 
   const porTipo = {};

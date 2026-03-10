@@ -1,0 +1,440 @@
+<script>
+  window.VendasUI = (() => {
+    let cardAberto = null;
+    let delegationInit = false;
+    let estoqueVendavel = [];
+
+    function el() {
+      return {
+        formulario: document.getElementById('formularioVenda'),
+        lista: document.getElementById('listaVendas'),
+        listaControles: document.getElementById('listaControlesVendas'),
+
+        estoqueItem: document.getElementById('vendaEstoqueItem'),
+        quantidade: document.getElementById('vendaQuantidade'),
+        valorTotal: document.getElementById('vendaValorTotal'),
+        valorUnit: document.getElementById('vendaValorUnit'),
+        recebidoPor: document.getElementById('vendaRecebidoPor'),
+        dataVenda: document.getElementById('vendaData'),
+        formaPagamento: document.getElementById('vendaFormaPagamento'),
+        parcelasWrap: document.getElementById('vendaParcelasWrap'),
+        parcelas: document.getElementById('vendaParcelas'),
+        plano: document.getElementById('vendaPlano'),
+        dataEntregaWrap: document.getElementById('vendaDataEntregaWrap'),
+        dataEntrega: document.getElementById('vendaDataEntrega'),
+        observacao: document.getElementById('vendaObservacao'),
+        formTitulo: document.getElementById('vendaFormTitulo'),
+
+        modalRecebimento: document.getElementById('modalRecebimentoVenda'),
+        recebimentoTitulo: document.getElementById('recebimentoVendaTitulo'),
+        recebimentoData: document.getElementById('recebimentoVendaData'),
+        recebimentoValor: document.getElementById('recebimentoVendaValor'),
+        recebimentoForma: document.getElementById('recebimentoVendaForma'),
+        recebimentoObs: document.getElementById('recebimentoVendaObservacao'),
+        btnConfirmarRecebimento: document.getElementById('btnConfirmarRecebimentoVenda')
+      };
+    }
+
+    function getHojeISO() {
+      const d = new Date();
+      const yyyy = d.getFullYear();
+      const mm = String(d.getMonth() + 1).padStart(2, '0');
+      const dd = String(d.getDate()).padStart(2, '0');
+      return `${yyyy}-${mm}-${dd}`;
+    }
+
+    function limparVazios(lista) {
+      return (Array.isArray(lista) ? lista : [])
+        .map(v => String(v ?? '').trim())
+        .filter(v => v !== '');
+    }
+
+    function parseNumeroInput(valor) {
+      const s = String(valor ?? '').trim();
+      if (!s) return 0;
+      const n = Number(s.replace(',', '.'));
+      return isNaN(n) ? 0 : n;
+    }
+
+    function formatarMoeda(valor) {
+      const n = Number(valor || 0);
+      return `R$ ${isNaN(n) ? '0.00' : n.toFixed(2)}`;
+    }
+
+    function normalizarFormaPagamento(valor) {
+      return String(valor || '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .trim()
+        .toUpperCase();
+    }
+
+    function formaExigeParcelas(valor) {
+      const forma = normalizarFormaPagamento(valor);
+      return forma === 'CREDITO' || forma === 'PIX PARCELADO' || forma === 'DINHEIRO';
+    }
+
+    function getEstoqueVendavelItem(estoqueId) {
+      const id = String(estoqueId || '').trim();
+      return (estoqueVendavel || []).find(i => String(i.ID || '').trim() === id) || null;
+    }
+
+    function renderEstoqueVendavel(lista) {
+      estoqueVendavel = Array.isArray(lista) ? lista : [];
+      const f = el();
+      if (!f.estoqueItem || f.estoqueItem.tagName !== 'SELECT') return;
+
+      const atual = String(f.estoqueItem.value || '').trim();
+      f.estoqueItem.innerHTML = '<option value="">Selecione</option>';
+
+      estoqueVendavel.forEach(i => {
+        const o = document.createElement('option');
+        o.value = i.ID;
+        o.textContent = `${i.item} | Saldo ${Number(i.quantidade || 0).toFixed(2)} ${i.unidade || ''}`;
+        f.estoqueItem.appendChild(o);
+      });
+
+      const existe = [...f.estoqueItem.options].some(o => String(o.value || '').trim() === atual);
+      f.estoqueItem.value = existe ? atual : '';
+    }
+
+    function renderRecebidosPor(lista) {
+      const f = el();
+      if (!f.recebidoPor || f.recebidoPor.tagName !== 'SELECT') return;
+      const clean = limparVazios(lista);
+      const atual = String(f.recebidoPor.value || '').trim().toUpperCase();
+      f.recebidoPor.innerHTML = '<option value="">Selecione</option>';
+      clean.forEach(v => {
+        const o = document.createElement('option');
+        o.value = v;
+        o.textContent = v;
+        f.recebidoPor.appendChild(o);
+      });
+      const match = [...f.recebidoPor.options].find(o => String(o.value || '').trim().toUpperCase() === atual);
+      f.recebidoPor.value = match ? match.value : '';
+    }
+
+    function renderFormasPagamento(lista) {
+      const f = el();
+      const clean = limparVazios(lista);
+
+      const preencher = selectEl => {
+        if (!selectEl || selectEl.tagName !== 'SELECT') return;
+        const atual = String(selectEl.value || '').trim().toUpperCase();
+        selectEl.innerHTML = '<option value="">Selecione</option>';
+        clean.forEach(v => {
+          const o = document.createElement('option');
+          o.value = v;
+          o.textContent = v;
+          selectEl.appendChild(o);
+        });
+        const match = [...selectEl.options].find(o => String(o.value || '').trim().toUpperCase() === atual);
+        selectEl.value = match ? match.value : '';
+      };
+
+      preencher(f.formaPagamento);
+      preencher(f.recebimentoForma);
+      handleFormaPagamentoChange();
+    }
+
+    function handleEstoqueItemChange() {
+      const f = el();
+      const item = getEstoqueVendavelItem(f.estoqueItem?.value);
+      if (!item) return;
+      const qtd = parseNumeroInput(f.quantidade?.value || 0);
+      const preco = parseNumeroInput(item.preco_venda || 0);
+      if (qtd > 0 && preco > 0 && (!String(f.valorTotal?.value || '').trim() || Number(f.valorTotal.value) <= 0)) {
+        f.valorTotal.value = (qtd * preco).toFixed(2);
+      }
+      handleQuantidadeOuTotalChange();
+    }
+
+    function handleQuantidadeOuTotalChange() {
+      const f = el();
+      const qtd = parseNumeroInput(f.quantidade?.value || 0);
+      const total = parseNumeroInput(f.valorTotal?.value || 0);
+      if (!f.valorUnit) return;
+      if (qtd > 0 && total > 0) {
+        f.valorUnit.value = (total / qtd).toFixed(2);
+      } else {
+        f.valorUnit.value = '';
+      }
+    }
+
+    function handleFormaPagamentoChange() {
+      const f = el();
+      if (!f.formaPagamento || !f.parcelasWrap || !f.parcelas) return;
+      const planoEncomenda = String(f.plano?.value || '').toUpperCase() === 'ENCOMENDA_50_50';
+      if (planoEncomenda) {
+        f.parcelasWrap.classList.add('hidden');
+        f.parcelas.value = '2';
+        return;
+      }
+      const exibirParcelas = formaExigeParcelas(f.formaPagamento.value);
+      f.parcelasWrap.classList.toggle('hidden', !exibirParcelas);
+      if (!exibirParcelas) {
+        f.parcelas.value = '1';
+      } else if (!String(f.parcelas.value || '').trim() || Number(f.parcelas.value) < 1) {
+        f.parcelas.value = '1';
+      }
+    }
+
+    function handlePlanoChange() {
+      const f = el();
+      const plano = String(f.plano?.value || '').toUpperCase();
+      const encomenda = plano === 'ENCOMENDA_50_50';
+      if (f.dataEntregaWrap) f.dataEntregaWrap.classList.toggle('hidden', !encomenda);
+      if (encomenda && f.parcelas) {
+        f.parcelas.value = '2';
+      }
+      handleFormaPagamentoChange();
+    }
+
+    function abrirFormularioNovo() {
+      resetFormulario();
+      mostrarFormulario();
+    }
+
+    function mostrarFormulario() {
+      const f = el();
+      if (!f.formulario) return;
+      f.formulario.style.display = 'block';
+      requestAnimationFrame(() => {
+        f.formulario.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
+    }
+
+    function fecharFormulario() {
+      const f = el();
+      if (!f.formulario) return;
+      f.formulario.style.display = 'none';
+      resetFormulario();
+      if (window.VendasController?.limparEdicao) {
+        VendasController.limparEdicao();
+      }
+    }
+
+    function preencherFormulario(data) {
+      const f = el();
+      if (f.estoqueItem) f.estoqueItem.value = data.estoque_id || '';
+      if (f.quantidade) f.quantidade.value = data.quantidade || '';
+      if (f.valorTotal) f.valorTotal.value = data.valor_total_venda || '';
+      if (f.valorUnit) f.valorUnit.value = data.valor_unit_venda || '';
+      if (f.recebidoPor) f.recebidoPor.value = data.recebido_por || '';
+      if (f.dataVenda) f.dataVenda.value = data.data_venda || '';
+      if (f.formaPagamento) f.formaPagamento.value = data.forma_pagamento || '';
+      if (f.parcelas) f.parcelas.value = data.parcelas || '1';
+      if (f.plano) f.plano.value = data.plano_recebimento || 'PADRAO';
+      if (f.dataEntrega) f.dataEntrega.value = data.data_entrega_prevista || '';
+      if (f.observacao) f.observacao.value = data.observacao || '';
+      if (f.formTitulo) f.formTitulo.innerText = 'Editar Venda';
+      handlePlanoChange();
+      handleQuantidadeOuTotalChange();
+    }
+
+    function resetFormulario() {
+      const f = el();
+      [
+        f.estoqueItem,
+        f.quantidade,
+        f.valorTotal,
+        f.valorUnit,
+        f.recebidoPor,
+        f.dataVenda,
+        f.formaPagamento,
+        f.parcelas,
+        f.plano,
+        f.dataEntrega,
+        f.observacao
+      ].forEach(i => i && (i.value = ''));
+      if (f.formTitulo) f.formTitulo.innerText = 'Nova Venda';
+      if (f.dataVenda) f.dataVenda.value = getHojeISO();
+      if (f.plano) f.plano.value = 'PADRAO';
+      handlePlanoChange();
+    }
+
+    function renderParcelasDetalhe(parcelas) {
+      const lista = Array.isArray(parcelas) ? parcelas : [];
+      if (lista.length === 0) return '<p>Nenhuma parcela gerada.</p>';
+      return lista.map(p => `
+        <div class="linha-material">
+          <span>Parcela ${Number(p.parcela_numero || 0)}/${Number(p.parcelas_total || 0)} - ${p.data_prevista || '-'}</span>
+          <span>${p.status || 'PENDENTE'} | ${formatarMoeda(p.valor_pago || 0)} / ${formatarMoeda(p.valor_previsto || 0)}</span>
+        </div>
+      `).join('');
+    }
+
+    function montarDetalhesCard(v) {
+      const podeReceber = Number(v.total_pendente || 0) > 0.009;
+      const estoqueLabel = v.estoque_baixado
+        ? `SIM (${v.data_baixa_estoque || '-'})`
+        : 'NAO';
+      return `
+        <p><b>Produto:</b> ${v.item || '-'}</p>
+        <p><b>Quantidade:</b> ${Number(v.quantidade || 0).toFixed(2)} ${v.unidade || ''}</p>
+        <p><b>Valor unitario:</b> ${formatarMoeda(v.valor_unit_venda || 0)}</p>
+        <p><b>Valor total:</b> ${formatarMoeda(v.valor_total_venda || 0)}</p>
+        <p><b>Recebido por:</b> ${v.recebido_por || '-'}</p>
+        <p><b>Data de venda:</b> ${v.data_venda || '-'}</p>
+        <p><b>Forma:</b> ${v.forma_pagamento || '-'}</p>
+        <p><b>Parcelas:</b> ${Number(v.parcelas || 1)} | Plano: ${v.plano_recebimento || 'PADRAO'}</p>
+        <p><b>Financeiro:</b> ${String(v.status_pagamento || 'PENDENTE').toUpperCase()} | Recebido ${formatarMoeda(v.total_pago || 0)} | Pendente ${formatarMoeda(v.total_pendente || 0)}</p>
+        <p><b>Estoque baixado:</b> ${estoqueLabel}</p>
+        <p><b>Observacao:</b> ${v.observacao || '-'}</p>
+        <div class="bloco">
+          <p><b>Parcelas</b></p>
+          ${renderParcelasDetalhe(v.parcelas_detalhe)}
+        </div>
+        <div class="acoes">
+          ${podeReceber ? `<button onclick="VendasController.registrarRecebimento('${v.ID}')">Registrar recebimento</button>` : ''}
+          <button onclick="VendasController.editar('${v.ID}')">Editar</button>
+          <button onclick="VendasController.excluir('${v.ID}')">Excluir</button>
+        </div>
+      `;
+    }
+
+    function renderLista(itens) {
+      const f = el();
+      if (!f.lista) return;
+      fecharCard();
+      f.lista.innerHTML = '';
+      if (f.listaControles) f.listaControles.innerHTML = '';
+
+      const lista = Array.isArray(itens) ? itens : [];
+      if (lista.length === 0) {
+        f.lista.innerHTML = '<p>Nenhuma venda cadastrada.</p>';
+        return;
+      }
+
+      lista.forEach(v => {
+        const div = document.createElement('div');
+        div.className = 'card';
+        div.dataset.id = v.ID;
+        div.innerHTML = `
+          <div class="card-resumo">
+            <strong>${v.item || '-'}</strong><br>
+            ${Number(v.quantidade || 0).toFixed(2)} ${v.unidade || ''}<br>
+            ${formatarMoeda(v.valor_total_venda || 0)}<br>
+            ${String(v.status_pagamento || 'PENDENTE').toUpperCase()}
+          </div>
+          <button class="ver-mais">Ver mais</button>
+          <div class="card-detalhes">
+            <button class="fechar-card">X</button>
+            ${montarDetalhesCard(v)}
+          </div>
+        `;
+        f.lista.appendChild(div);
+      });
+
+      initDelegation();
+    }
+
+    function initDelegation() {
+      if (delegationInit) return;
+      delegationInit = true;
+
+      document.addEventListener('click', e => {
+        const card = e.target.closest('.card');
+        const lista = document.getElementById('listaVendas');
+        if (card && lista && !lista.contains(card)) return;
+
+        if (e.target.classList.contains('ver-mais')) {
+          e.stopPropagation();
+          abrirCard(card);
+          return;
+        }
+
+        if (e.target.classList.contains('fechar-card')) {
+          e.stopPropagation();
+          fecharCard();
+          return;
+        }
+
+        if (cardAberto && !cardAberto.contains(e.target)) {
+          fecharCard();
+        }
+      });
+    }
+
+    function abrirCard(card) {
+      if (!card) return;
+      if (cardAberto && cardAberto !== card) fecharCard();
+      card.classList.add('aberto');
+      cardAberto = card;
+    }
+
+    function fecharCard() {
+      if (!cardAberto) return;
+      cardAberto.classList.remove('aberto');
+      cardAberto = null;
+    }
+
+    function abrirModalRecebimento(venda) {
+      const f = el();
+      if (!f.modalRecebimento) return;
+      if (f.recebimentoTitulo) {
+        const nome = String(venda?.item || '').trim();
+        f.recebimentoTitulo.textContent = nome
+          ? `Registrar recebimento: ${nome}`
+          : 'Registrar recebimento';
+      }
+      if (f.recebimentoData) f.recebimentoData.value = getHojeISO();
+      if (f.recebimentoValor) {
+        const pendente = Number(venda?.total_pendente || 0);
+        f.recebimentoValor.value = pendente > 0 ? pendente.toFixed(2) : '';
+      }
+      if (f.recebimentoForma) f.recebimentoForma.value = venda?.forma_pagamento || '';
+      if (f.recebimentoObs) f.recebimentoObs.value = '';
+      f.modalRecebimento.classList.remove('hidden');
+    }
+
+    function fecharModalRecebimento() {
+      const f = el();
+      if (!f.modalRecebimento) return;
+      f.modalRecebimento.classList.add('hidden');
+      setModalRecebimentoProcessando(false);
+    }
+
+    function lerModalRecebimento() {
+      const f = el();
+      return {
+        data_pagamento: String(f.recebimentoData?.value || '').trim(),
+        valor_pago: String(f.recebimentoValor?.value || '').trim(),
+        forma_pagamento: String(f.recebimentoForma?.value || '').trim(),
+        observacao: String(f.recebimentoObs?.value || '').trim()
+      };
+    }
+
+    function setModalRecebimentoProcessando(processando) {
+      const f = el();
+      const on = !!processando;
+      [f.recebimentoData, f.recebimentoValor, f.recebimentoForma, f.recebimentoObs, f.btnConfirmarRecebimento]
+        .forEach(input => {
+          if (input) input.disabled = on;
+        });
+      if (f.btnConfirmarRecebimento) {
+        f.btnConfirmarRecebimento.textContent = on ? 'Salvando...' : 'Confirmar recebimento';
+      }
+    }
+
+    return {
+      abrirFormularioNovo,
+      mostrarFormulario,
+      fecharFormulario,
+      preencherFormulario,
+      resetFormulario,
+      renderLista,
+      renderEstoqueVendavel,
+      renderRecebidosPor,
+      renderFormasPagamento,
+      handleEstoqueItemChange,
+      handleQuantidadeOuTotalChange,
+      handleFormaPagamentoChange,
+      handlePlanoChange,
+      abrirModalRecebimento,
+      fecharModalRecebimento,
+      lerModalRecebimento,
+      setModalRecebimentoProcessando
+    };
+  })();
+</script>

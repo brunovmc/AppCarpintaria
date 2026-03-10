@@ -16,6 +16,7 @@
       <button type="button" data-aba="dashboard" onclick="trocarAba('dashboard')">Dashboard</button>
       <button type="button" data-aba="estoque" onclick="trocarAba('estoque')">Estoque</button>
       <button type="button" data-aba="compras" onclick="trocarAba('compras')">Compras</button>
+      <button type="button" data-aba="vendas" onclick="trocarAba('vendas')">Vendas</button>
       <button type="button" data-aba="produtos" onclick="trocarAba('produtos')">Produtos</button>
       <button type="button" data-aba="producao" onclick="trocarAba('producao')">Producao</button>
     </div>
@@ -47,6 +48,12 @@
     <div id="topBarCompras" class="top-bar hidden">
       <input id="buscaCompras" type="text" placeholder="Buscar...">
       <button id="btnFiltroCompras" type="button">Filtrar</button>
+    </div>
+
+    <!-- BUSCA (VENDAS) -->
+    <div id="topBarVendas" class="top-bar hidden">
+      <input id="buscaVendas" type="text" placeholder="Buscar...">
+      <button id="btnFiltroVendas" type="button">Filtrar</button>
     </div>
 
     <div id="painelFiltroCompras" class="hidden" style="margin: 0 0 12px 0;">
@@ -90,6 +97,10 @@
       <?!= include('compras'); ?>
     </div>
 
+    <div id="aba-vendas" class="aba hidden">
+      <?!= include('vendas'); ?>
+    </div>
+
     <div id="aba-produtos" class="aba hidden">
       <?!= include('produtos'); ?>
     </div>
@@ -114,6 +125,10 @@
     <?!= include('comprasStore'); ?>
     <?!= include('comprasUI'); ?>
     <?!= include('comprasController'); ?>
+
+    <?!= include('vendasStore'); ?>
+    <?!= include('vendasUI'); ?>
+    <?!= include('vendasController'); ?>
 
     <?!= include('produtosStore'); ?>
     <?!= include('produtosUI'); ?>

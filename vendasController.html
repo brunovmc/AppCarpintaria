@@ -1,0 +1,312 @@
+<script>
+  window.VendasController = (() => {
+    let iniciado = false;
+    let editandoId = null;
+    let salvando = false;
+    let recebimentoVendaId = null;
+    let salvandoRecebimento = false;
+
+    let validacoes = {};
+
+    function parseNumeroInput(valor) {
+      const s = String(valor ?? '').trim();
+      if (!s) return 0;
+      const n = Number(s.replace(',', '.'));
+      return isNaN(n) ? 0 : n;
+    }
+
+    function setSalvando(ativo) {
+      salvando = !!ativo;
+      const btn = document.getElementById('btnSalvarVenda');
+      if (!btn) return;
+      btn.disabled = salvando;
+      btn.textContent = salvando ? 'Salvando...' : 'Salvar';
+    }
+
+    function init() {
+      if (iniciado) return;
+      carregarValidacoes();
+      carregarEstoqueVendavel();
+      carregarVendas();
+      iniciado = true;
+    }
+
+    function carregarValidacoes() {
+      google.script.run
+        .withSuccessHandler(data => {
+          validacoes = data || {};
+          validacoes.pagosPor ||= [];
+          validacoes.formasPagamento ||= [];
+
+          VendasUI.renderRecebidosPor?.(validacoes.pagosPor);
+          VendasUI.renderFormasPagamento?.(validacoes.formasPagamento);
+        })
+        .withFailureHandler(() => {
+          validacoes = {};
+        })
+        .obterValidacoes();
+    }
+
+    function carregarEstoqueVendavel() {
+      google.script.run
+        .withSuccessHandler(lista => {
+          VendasUI.renderEstoqueVendavel?.(Array.isArray(lista) ? lista : []);
+        })
+        .withFailureHandler(() => {
+          VendasUI.renderEstoqueVendavel?.([]);
+        })
+        .listarItensEstoqueVendaveis();
+    }
+
+    function renderListaAtual() {
+      if (window.aplicarBuscaVendas) {
+        aplicarBuscaVendas();
+        return;
+      }
+      VendasUI.renderLista(VendasStore.get());
+    }
+
+    function carregarVendas() {
+      google.script.run
+        .withSuccessHandler(lista => {
+          VendasStore.set(lista);
+          renderListaAtual();
+        })
+        .withFailureHandler(err => {
+          mostrarToast(err?.message || 'Erro ao carregar vendas', 'erro');
+        })
+        .listarVendas();
+    }
+
+    function salvar() {
+      if (salvando) return;
+      const get = id => document.getElementById(id)?.value || '';
+
+      const dados = {
+        estoque_id: String(get('vendaEstoqueItem') || '').trim(),
+        quantidade: parseNumeroInput(get('vendaQuantidade')),
+        valor_total_venda: parseNumeroInput(get('vendaValorTotal')),
+        recebido_por: String(get('vendaRecebidoPor') || '').trim(),
+        data_venda: String(get('vendaData') || '').trim(),
+        forma_pagamento: String(get('vendaFormaPagamento') || '').trim(),
+        parcelas: Math.floor(parseNumeroInput(get('vendaParcelas')) || 1),
+        plano_recebimento: String(get('vendaPlano') || '').trim(),
+        data_entrega_prevista: String(get('vendaDataEntrega') || '').trim(),
+        observacao: String(get('vendaObservacao') || '').trim()
+      };
+
+      if (!dados.estoque_id) {
+        mostrarToast('Selecione um produto do estoque', 'erro');
+        return;
+      }
+      if (!dados.quantidade || dados.quantidade <= 0) {
+        mostrarToast('Quantidade invalida', 'erro');
+        return;
+      }
+      if (!dados.data_venda) {
+        mostrarToast('Data de venda e obrigatoria', 'erro');
+        return;
+      }
+      if (!isFinite(dados.parcelas) || dados.parcelas < 1) {
+        mostrarToast('Parcelas deve ser maior ou igual a 1', 'erro');
+        return;
+      }
+
+      setSalvando(true);
+      if (editandoId) {
+        const idAtual = editandoId;
+        const snapshot = { ...VendasStore.getById(idAtual) };
+
+        VendasStore.update(idAtual, dados);
+        renderListaAtual();
+        finalizarUX();
+
+        google.script.run
+          .withFailureHandler(err => {
+            VendasStore.update(idAtual, snapshot);
+            renderListaAtual();
+            mostrarToast(err?.message || 'Erro ao salvar venda', 'erro');
+            setSalvando(false);
+          })
+          .withSuccessHandler(() => {
+            mostrarToast('Venda atualizada');
+            setSalvando(false);
+          })
+          .atualizarVenda(idAtual, dados);
+
+        editandoId = null;
+        return;
+      }
+
+      const tempId = `tmp_${Date.now()}`;
+      VendasStore.add({ ID: tempId, ...dados });
+      renderListaAtual();
+      finalizarUX();
+      mostrarToast('Salvando...');
+
+      google.script.run
+        .withFailureHandler(err => {
+          VendasStore.remove(tempId);
+          renderListaAtual();
+          mostrarToast(err?.message || 'Erro ao salvar venda', 'erro');
+          setSalvando(false);
+        })
+        .withSuccessHandler(itemSalvo => {
+          VendasStore.remove(tempId);
+          if (!itemSalvo || !itemSalvo.ID) {
+            carregarVendas();
+            setSalvando(false);
+            return;
+          }
+          VendasStore.add(itemSalvo);
+          renderListaAtual();
+          setSalvando(false);
+          mostrarToast('Venda salva');
+        })
+        .criarVenda(dados);
+    }
+
+    function finalizarUX() {
+      VendasUI.fecharFormulario();
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    function editar(id) {
+      const item = VendasStore.getById(id);
+      if (!item) {
+        mostrarToast('Venda nao encontrada', 'erro');
+        return;
+      }
+      editandoId = id;
+      VendasUI.preencherFormulario(item);
+      VendasUI.mostrarFormulario();
+    }
+
+    function excluir(id) {
+      if (!confirm('Deseja remover esta venda?')) return;
+      const snapshot = VendasStore.getById(id);
+      VendasStore.remove(id);
+      renderListaAtual();
+      mostrarToast('Venda removida');
+
+      google.script.run
+        .withFailureHandler(err => {
+          if (snapshot) VendasStore.add(snapshot);
+          renderListaAtual();
+          mostrarToast(err?.message || 'Erro ao remover venda', 'erro');
+        })
+        .withSuccessHandler(() => {
+          mostrarToast('Venda removida');
+          carregarEstoqueVendavel();
+        })
+        .deletarVenda(id);
+    }
+
+    function registrarRecebimento(id) {
+      if (salvandoRecebimento) return;
+      const item = VendasStore.getById(id);
+      if (!item) {
+        mostrarToast('Venda nao encontrada', 'erro');
+        return;
+      }
+      const pendente = Number(item.total_pendente || 0);
+      if (pendente <= 0.009) {
+        mostrarToast('Venda ja recebida');
+        return;
+      }
+      recebimentoVendaId = id;
+      VendasUI.abrirModalRecebimento(item);
+    }
+
+    function confirmarRecebimento() {
+      if (salvandoRecebimento) return;
+      if (!recebimentoVendaId) {
+        mostrarToast('Venda nao selecionada', 'erro');
+        return;
+      }
+
+      const dados = VendasUI.lerModalRecebimento();
+      const valor = parseNumeroInput(dados.valor_pago);
+      if (!dados.data_pagamento) {
+        mostrarToast('Data de recebimento e obrigatoria', 'erro');
+        return;
+      }
+      if (!dados.forma_pagamento) {
+        mostrarToast('Forma de pagamento e obrigatoria', 'erro');
+        return;
+      }
+      if (!valor || valor <= 0) {
+        mostrarToast('Valor de recebimento invalido', 'erro');
+        return;
+      }
+
+      salvandoRecebimento = true;
+      VendasUI.setModalRecebimentoProcessando(true);
+
+      google.script.run
+        .withFailureHandler(err => {
+          salvandoRecebimento = false;
+          VendasUI.setModalRecebimentoProcessando(false);
+          mostrarToast(err?.message || 'Erro ao registrar recebimento', 'erro');
+        })
+        .withSuccessHandler(resp => {
+          salvandoRecebimento = false;
+          VendasUI.setModalRecebimentoProcessando(false);
+
+          if (resp?.vendaAtualizada?.ID) {
+            VendasStore.update(resp.vendaAtualizada.ID, resp.vendaAtualizada);
+            renderListaAtual();
+          } else {
+            carregarVendas();
+          }
+
+          if (resp?.baixaEstoque?.estoqueAtualizado && window.EstoqueStore) {
+            EstoqueStore.update(resp.baixaEstoque.estoqueAtualizado.ID, {
+              quantidade: resp.baixaEstoque.estoqueAtualizado.quantidade
+            });
+          }
+          if (window.EstoqueController?.syncFromBackend) {
+            EstoqueController.syncFromBackend();
+          }
+
+          VendasUI.fecharModalRecebimento();
+          recebimentoVendaId = null;
+          carregarEstoqueVendavel();
+          mostrarToast('Recebimento registrado');
+        })
+        .registrarRecebimentoVenda(recebimentoVendaId, {
+          data_pagamento: dados.data_pagamento,
+          valor_pago: valor,
+          forma_pagamento: dados.forma_pagamento,
+          observacao: dados.observacao
+        });
+    }
+
+    function cancelarRecebimento() {
+      recebimentoVendaId = null;
+      salvandoRecebimento = false;
+      VendasUI.fecharModalRecebimento();
+    }
+
+    function limparEdicao() {
+      editandoId = null;
+    }
+
+    function syncFromBackend() {
+      carregarVendas();
+      carregarEstoqueVendavel();
+    }
+
+    return {
+      init,
+      salvar,
+      editar,
+      excluir,
+      registrarRecebimento,
+      confirmarRecebimento,
+      cancelarRecebimento,
+      limparEdicao,
+      syncFromBackend
+    };
+  })();
+</script>

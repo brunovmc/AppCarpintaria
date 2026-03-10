@@ -1,0 +1,96 @@
+<div id="listaVendas"></div>
+<div id="listaControlesVendas" class="lista-controles"></div>
+
+<div id="formularioVenda" class="form-modal" style="display:none; margin-top:32px;">
+  <h2 id="vendaFormTitulo">Nova Venda</h2>
+
+  <div class="campo-ajuda-wrap">
+    <span class="campo-ajuda-tag">Produto (estoque)</span>
+    <select id="vendaEstoqueItem" onchange="VendasUI.handleEstoqueItemChange()"></select>
+  </div>
+
+  <div class="campo-ajuda-wrap">
+    <span class="campo-ajuda-tag">Quantidade</span>
+    <input id="vendaQuantidade" type="number" min="0.01" step="0.01" oninput="VendasUI.handleQuantidadeOuTotalChange()">
+  </div>
+
+  <div class="campo-ajuda-wrap">
+    <span class="campo-ajuda-tag">Valor total da venda (R$)</span>
+    <input id="vendaValorTotal" type="number" min="0" step="0.01" oninput="VendasUI.handleQuantidadeOuTotalChange()">
+  </div>
+
+  <div class="campo-ajuda-wrap">
+    <span class="campo-ajuda-tag">Valor unitario (R$)</span>
+    <input id="vendaValorUnit" type="number" readonly>
+  </div>
+
+  <div class="campo-ajuda-wrap">
+    <span class="campo-ajuda-tag">Recebido por</span>
+    <select id="vendaRecebidoPor"></select>
+  </div>
+
+  <div class="campo-ajuda-wrap">
+    <span class="campo-ajuda-tag">Data de venda</span>
+    <input id="vendaData" type="date">
+  </div>
+
+  <div class="campo-ajuda-wrap">
+    <span class="campo-ajuda-tag">Forma de pagamento</span>
+    <select id="vendaFormaPagamento" onchange="VendasUI.handleFormaPagamentoChange()"></select>
+  </div>
+
+  <div id="vendaParcelasWrap" class="campo-ajuda-wrap hidden">
+    <span class="campo-ajuda-tag">Parcelas</span>
+    <input id="vendaParcelas" type="number" min="1" step="1" value="1">
+  </div>
+
+  <div class="campo-ajuda-wrap">
+    <span class="campo-ajuda-tag">Plano de recebimento</span>
+    <select id="vendaPlano" onchange="VendasUI.handlePlanoChange()">
+      <option value="PADRAO">PADRAO</option>
+      <option value="ENCOMENDA_50_50">ENCOMENDA 50/50</option>
+    </select>
+  </div>
+
+  <div id="vendaDataEntregaWrap" class="campo-ajuda-wrap hidden">
+    <span class="campo-ajuda-tag">Data prevista de entrega</span>
+    <input id="vendaDataEntrega" type="date">
+  </div>
+
+  <div class="campo-ajuda-wrap">
+    <span class="campo-ajuda-tag">Observacao</span>
+    <textarea id="vendaObservacao"></textarea>
+  </div>
+
+  <button id="btnSalvarVenda" onclick="VendasController.salvar()">Salvar</button>
+  <button onclick="VendasUI.fecharFormulario()">Cancelar</button>
+</div>
+
+<div id="modalRecebimentoVenda" class="modal hidden">
+  <div class="modal-content">
+    <h3 id="recebimentoVendaTitulo">Registrar recebimento</h3>
+
+    <div class="campo-ajuda-wrap">
+      <span class="campo-ajuda-tag">Data do recebimento</span>
+      <input id="recebimentoVendaData" type="date">
+    </div>
+
+    <div class="campo-ajuda-wrap">
+      <span class="campo-ajuda-tag">Valor recebido (R$)</span>
+      <input id="recebimentoVendaValor" type="number" step="0.01" min="0">
+    </div>
+
+    <div class="campo-ajuda-wrap">
+      <span class="campo-ajuda-tag">Forma de pagamento</span>
+      <select id="recebimentoVendaForma"></select>
+    </div>
+
+    <div class="campo-ajuda-wrap">
+      <span class="campo-ajuda-tag">Observacao</span>
+      <textarea id="recebimentoVendaObservacao"></textarea>
+    </div>
+
+    <button id="btnConfirmarRecebimentoVenda" onclick="VendasController.confirmarRecebimento()">Confirmar recebimento</button>
+    <button onclick="VendasController.cancelarRecebimento()">Cancelar</button>
+  </div>
+</div>

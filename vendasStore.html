@@ -1,0 +1,97 @@
+<script>
+  window.VendasStore = (() => {
+    let itens = [];
+    let carregado = false;
+
+    function parseData(valor) {
+      if (!valor) return 0;
+      if (valor instanceof Date) return valor.getTime() || 0;
+      const s = String(valor || '').trim();
+      if (!s) return 0;
+      if (/^\d{4}-\d{2}-\d{2}( \d{2}:\d{2})?$/.test(s)) {
+        const iso = s.includes(' ') ? s.replace(' ', 'T') : `${s}T00:00`;
+        const t = Date.parse(iso);
+        return isNaN(t) ? 0 : t;
+      }
+      const t = Date.parse(s);
+      return isNaN(t) ? 0 : t;
+    }
+
+    function ordenar(lista) {
+      return [...(Array.isArray(lista) ? lista : [])].sort((a, b) => {
+        const da = parseData(a?.data_venda);
+        const db = parseData(b?.data_venda);
+        if (da !== db) return db - da;
+        const ca = parseData(a?.criado_em);
+        const cb = parseData(b?.criado_em);
+        if (ca !== cb) return cb - ca;
+        return String(b?.ID || '').localeCompare(String(a?.ID || ''));
+      });
+    }
+
+    function set(lista) {
+      itens = ordenar(lista);
+      carregado = true;
+    }
+
+    function get() {
+      return ordenar(itens);
+    }
+
+    function isLoaded() {
+      return carregado;
+    }
+
+    function clear() {
+      itens = [];
+      carregado = false;
+    }
+
+    function add(item) {
+      if (!item || !item.ID) return;
+      itens.unshift(item);
+      itens = ordenar(itens);
+    }
+
+    function update(id, dados) {
+      const idx = itens.findIndex(i => i.ID === id);
+      if (idx === -1) return;
+      itens[idx] = { ...itens[idx], ...dados };
+      itens = ordenar(itens);
+    }
+
+    function remove(id) {
+      itens = itens.filter(i => i.ID !== id);
+    }
+
+    function getById(id) {
+      return itens.find(i => i.ID === id) || null;
+    }
+
+    function filter({ texto } = {}) {
+      let resultado = [...itens];
+      if (texto) {
+        const t = String(texto || '').toLowerCase();
+        const toText = v => String(v ?? '');
+        resultado = resultado.filter(i =>
+          toText(i.item).toLowerCase().includes(t) ||
+          toText(i.recebido_por).toLowerCase().includes(t) ||
+          toText(i.forma_pagamento).toLowerCase().includes(t)
+        );
+      }
+      return ordenar(resultado);
+    }
+
+    return {
+      set,
+      get,
+      isLoaded,
+      clear,
+      add,
+      update,
+      remove,
+      getById,
+      filter
+    };
+  })();
+</script>

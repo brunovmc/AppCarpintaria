@@ -68,6 +68,10 @@ function invalidarCachesRelacionadosAba(sheetName) {
     limparCacheCompras();
   }
 
+  if (aba === 'VENDAS' && typeof limparCacheVendas === 'function') {
+    limparCacheVendas();
+  }
+
   if (aba === 'DESPESAS_GERAIS' && typeof limparCacheDespesasGerais === 'function') {
     limparCacheDespesasGerais();
   }
@@ -84,12 +88,16 @@ function invalidarCachesRelacionadosAba(sheetName) {
     }
   }
 
+  if (aba === 'PARCELAS_FINANCEIRAS' && typeof limparCacheDashboardFinanceiro === 'function') {
+    limparCacheDashboardFinanceiro();
+  }
+
   if ((aba === 'VALIDACAO' || aba === 'VALIDACAO_TIPO_CATEGORIA') && typeof limparCacheValidacoes === 'function') {
     limparCacheValidacoes();
   }
 
   if (
-    (aba === 'ESTOQUE' || aba === 'COMPRAS' || aba === 'DESPESAS_GERAIS' || aba === 'PAGAMENTOS') &&
+    (aba === 'ESTOQUE' || aba === 'COMPRAS' || aba === 'VENDAS' || aba === 'DESPESAS_GERAIS' || aba === 'PAGAMENTOS' || aba === 'PARCELAS_FINANCEIRAS') &&
     typeof limparCacheDashboardFinanceiro === 'function'
   ) {
     limparCacheDashboardFinanceiro();

@@ -194,28 +194,41 @@ function criarItemCompra(payload) {
 
   const ok = insert(ABA_COMPRAS, novo, COMPRAS_SCHEMA);
   if (!ok) return null;
+  if (typeof gerarParcelasFinanceirasOrigem === 'function') {
+    gerarParcelasFinanceirasOrigem(ORIGEM_TIPO_COMPRA, novo.ID);
+  }
   return listarCompras(true).find(i => i.ID === novo.ID) || null;
 }
 
 function atualizarItemCompra(id, payload) {
   const dados = normalizarCamposFinanceirosCompra(normalizarPayloadMadeiraCompra(payload));
-  return updateById(
+  const ok = updateById(
     ABA_COMPRAS,
     'ID',
     id,
     dados,
     COMPRAS_SCHEMA
   );
+  if (ok && typeof regerarParcelasFinanceirasOrigemComPagamentos === 'function') {
+    regerarParcelasFinanceirasOrigemComPagamentos(ORIGEM_TIPO_COMPRA, id);
+  } else if (ok && typeof gerarParcelasFinanceirasOrigem === 'function') {
+    gerarParcelasFinanceirasOrigem(ORIGEM_TIPO_COMPRA, id);
+  }
+  return ok;
 }
 
 function deletarItemCompra(id) {
-  return updateById(
+  const ok = updateById(
     ABA_COMPRAS,
     'ID',
     id,
     { ativo: false },
     COMPRAS_SCHEMA
   );
+  if (ok && typeof limparParcelasFinanceirasOrigem === 'function') {
+    limparParcelasFinanceirasOrigem(ORIGEM_TIPO_COMPRA, id);
+  }
+  return ok;
 }
 
 function adicionarCompraAoEstoque(compraId) {

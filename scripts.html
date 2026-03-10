@@ -39,6 +39,11 @@
       aplicarBuscaCompras();
     }
 
+    if (nome === 'vendas' && window.VendasController) {
+      VendasController.init();
+      aplicarBuscaVendas();
+    }
+
     if (nome === 'produtos' && window.ProdutosController) {
       ProdutosController.init();
       aplicarBuscaProdutos();
@@ -53,12 +58,14 @@
   function setTopBars(nome) {
     const topEstoque = document.getElementById('topBarEstoque');
     const topCompras = document.getElementById('topBarCompras');
+    const topVendas = document.getElementById('topBarVendas');
     const topProdutos = document.getElementById('topBarProdutos');
     const topProducao = document.getElementById('topBarProducao');
     const bottomBar = document.querySelector('.bottom-bar');
 
     if (topEstoque) topEstoque.classList.toggle('hidden', nome !== 'estoque');
     if (topCompras) topCompras.classList.toggle('hidden', nome !== 'compras');
+    if (topVendas) topVendas.classList.toggle('hidden', nome !== 'vendas');
     if (topProdutos) topProdutos.classList.toggle('hidden', nome !== 'produtos');
     if (topProducao) topProducao.classList.toggle('hidden', nome !== 'producao');
     if (bottomBar) bottomBar.classList.toggle('hidden', nome === 'dashboard');
@@ -82,6 +89,12 @@
         ComprasUI.abrirFormularioNovo();
       } else if (window.ComprasUI?.abrirFormulario) {
         ComprasUI.abrirFormulario();
+      }
+    } else if (abaAtiva.id === 'aba-vendas') {
+      if (window.VendasUI?.abrirFormularioNovo) {
+        VendasUI.abrirFormularioNovo();
+      } else if (window.VendasUI?.abrirFormulario) {
+        VendasUI.abrirFormulario();
       }
     } else if (abaAtiva.id === 'aba-produtos') {
       if (window.ProdutosUI?.abrirFormularioNovo) {
@@ -132,6 +145,10 @@
     tipo: '',
     categoria: '',
     unidade: ''
+  };
+
+  const buscaStateVendas = {
+    texto: ''
   };
 
   const buscaStateProdutos = {
@@ -197,6 +214,11 @@
   function produtosEstaAtivo() {
     const abaProdutos = document.getElementById('aba-produtos');
     return abaProdutos && !abaProdutos.classList.contains('hidden');
+  }
+
+  function vendasEstaAtivo() {
+    const abaVendas = document.getElementById('aba-vendas');
+    return abaVendas && !abaVendas.classList.contains('hidden');
   }
 
   function producaoEstaAtivo() {
@@ -277,6 +299,21 @@
   }
 
   const aplicarBuscaComprasDebounced = debounce(aplicarBuscaCompras, 350);
+
+  function aplicarBuscaVendas() {
+    if (!vendasEstaAtivo()) return;
+
+    if (!window.VendasStore || !window.VendasUI) return;
+    if (!VendasStore.isLoaded()) return;
+
+    const texto = (buscaStateVendas.texto || '').trim();
+    const lista = VendasStore.filter({
+      texto: texto || undefined
+    });
+    VendasUI.renderLista(lista);
+  }
+
+  const aplicarBuscaVendasDebounced = debounce(aplicarBuscaVendas, 350);
 
   function aplicarBuscaProdutos() {
     if (!produtosEstaAtivo()) return;
@@ -708,6 +745,24 @@
     }
   }
 
+  function initBuscaVendas() {
+    const input = document.getElementById('buscaVendas');
+    const btnFiltro = document.getElementById('btnFiltroVendas');
+
+    if (input) {
+      input.addEventListener('input', () => {
+        buscaStateVendas.texto = input.value || '';
+        aplicarBuscaVendasDebounced();
+      });
+    }
+
+    if (btnFiltro) {
+      btnFiltro.addEventListener('click', () => {
+        mostrarToast('Filtro avancado em breve');
+      });
+    }
+  }
+
   function initBuscaProducao() {
     const input = document.getElementById('buscaProducao');
     const btnFiltro = document.getElementById('btnFiltroProducao');
@@ -730,6 +785,7 @@
     trocarAba('dashboard');
     initBuscaEFiltroEstoque();
     initBuscaEFiltroCompras();
+    initBuscaVendas();
     initBuscaProdutos();
     initBuscaProducao();
   });
