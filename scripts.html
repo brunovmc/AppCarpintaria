@@ -2,6 +2,22 @@
   /* =========================
      NAV / ABAS
   ========================== */
+  const ABAS_MENU_HAMBURGER = ['estoque', 'compras', 'vendas', 'produtos', 'producao'];
+  let listenerFecharMenuNavbarAtivo = false;
+
+  function getNavbarHamburgerEls() {
+    return {
+      wrap: document.getElementById('navbarMenuWrap'),
+      btn: document.getElementById('btnNavHamburger'),
+      menu: document.getElementById('navbarMenu')
+    };
+  }
+
+  function menuNavbarAberto() {
+    const { menu } = getNavbarHamburgerEls();
+    return !!menu && !menu.classList.contains('hidden');
+  }
+
   function atualizarEstadoNavbar(abaAtiva) {
     const botoes = document.querySelectorAll('.navbar button[data-aba]');
     const alvo = String(abaAtiva || '').trim();
@@ -14,6 +30,68 @@
         btn.removeAttribute('aria-current');
       }
     });
+
+    const { btn } = getNavbarHamburgerEls();
+    if (btn) {
+      const ativoNoMenu = ABAS_MENU_HAMBURGER.includes(alvo);
+      btn.classList.toggle('active', ativoNoMenu);
+      btn.setAttribute('aria-expanded', menuNavbarAberto() ? 'true' : 'false');
+    }
+  }
+
+  function fecharMenuNavbar() {
+    const { menu, btn } = getNavbarHamburgerEls();
+    if (menu) menu.classList.add('hidden');
+    if (btn) btn.setAttribute('aria-expanded', 'false');
+
+    if (listenerFecharMenuNavbarAtivo) {
+      listenerFecharMenuNavbarAtivo = false;
+      document.removeEventListener('pointerdown', fecharMenuNavbarAoClicarFora, { capture: true });
+      document.removeEventListener('keydown', fecharMenuNavbarPorTeclado);
+    }
+  }
+
+  function abrirMenuNavbar() {
+    const { menu, btn } = getNavbarHamburgerEls();
+    if (!menu || !btn) return;
+    menu.classList.remove('hidden');
+    btn.setAttribute('aria-expanded', 'true');
+
+    if (!listenerFecharMenuNavbarAtivo) {
+      listenerFecharMenuNavbarAtivo = true;
+      document.addEventListener('pointerdown', fecharMenuNavbarAoClicarFora, { capture: true });
+      document.addEventListener('keydown', fecharMenuNavbarPorTeclado);
+    }
+  }
+
+  function toggleMenuNavbar() {
+    if (menuNavbarAberto()) {
+      fecharMenuNavbar();
+    } else {
+      abrirMenuNavbar();
+    }
+  }
+
+  function fecharMenuNavbarAoClicarFora(evento) {
+    const { wrap } = getNavbarHamburgerEls();
+    if (!wrap) return;
+    if (wrap.contains(evento.target)) return;
+    fecharMenuNavbar();
+  }
+
+  function fecharMenuNavbarPorTeclado(evento) {
+    const tecla = String(evento?.key || '').toLowerCase();
+    if (tecla === 'escape') {
+      fecharMenuNavbar();
+    }
+  }
+
+  function initNavbarHamburger() {
+    const { btn } = getNavbarHamburgerEls();
+    if (!btn) return;
+    btn.addEventListener('click', () => {
+      toggleMenuNavbar();
+    });
   }
 
   function trocarAba(nome) {
@@ -22,6 +100,7 @@
 
     const aba = document.getElementById('aba-' + nome);
     if (aba) aba.classList.remove('hidden');
+    fecharMenuNavbar();
     atualizarEstadoNavbar(nome);
     setTopBars(nome);
 
@@ -782,6 +861,7 @@
   }
 
   document.addEventListener('DOMContentLoaded', () => {
+    initNavbarHamburger();
     trocarAba('dashboard');
     initBuscaEFiltroEstoque();
     initBuscaEFiltroCompras();

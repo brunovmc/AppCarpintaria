@@ -14,11 +14,27 @@
     <!-- NAVBAR -->
     <div class="navbar">
       <button type="button" data-aba="dashboard" onclick="trocarAba('dashboard')">Dashboard</button>
-      <button type="button" data-aba="estoque" onclick="trocarAba('estoque')">Estoque</button>
-      <button type="button" data-aba="compras" onclick="trocarAba('compras')">Compras</button>
-      <button type="button" data-aba="vendas" onclick="trocarAba('vendas')">Vendas</button>
-      <button type="button" data-aba="produtos" onclick="trocarAba('produtos')">Produtos</button>
-      <button type="button" data-aba="producao" onclick="trocarAba('producao')">Producao</button>
+
+      <div id="navbarMenuWrap" class="navbar-menu-wrap">
+        <button
+          id="btnNavHamburger"
+          type="button"
+          class="navbar-hamburger"
+          aria-expanded="false"
+          aria-controls="navbarMenu"
+          aria-label="Abrir menu de abas"
+        >
+          &#9776;
+        </button>
+
+        <div id="navbarMenu" class="navbar-menu hidden">
+          <button type="button" data-aba="estoque" onclick="trocarAba('estoque')">Estoque</button>
+          <button type="button" data-aba="compras" onclick="trocarAba('compras')">Compras</button>
+          <button type="button" data-aba="vendas" onclick="trocarAba('vendas')">Vendas</button>
+          <button type="button" data-aba="produtos" onclick="trocarAba('produtos')">Produtos</button>
+          <button type="button" data-aba="producao" onclick="trocarAba('producao')">Producao</button>
+        </div>
+      </div>
     </div>
 
     <!-- BUSCA + FILTRO (ESTOQUE) -->

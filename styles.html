@@ -89,11 +89,12 @@ textarea {
 /* NAVBAR SUPERIOR */
 .navbar {
   display: flex;
-  justify-content: space-around;
-  gap: 0;
+  align-items: stretch;
+  justify-content: space-between;
+  gap: 10px;
   margin: calc(-1 * var(--app-body-padding)) calc(-1 * var(--app-body-padding)) 0;
   border-bottom: 1px solid #ddd;
-  padding: 8px 0;
+  padding: 4px var(--app-body-padding) 0;
   background: #fff;
   box-shadow: 0 10px 10px -12px rgba(0, 0, 0, 0.45);
   position: sticky;
@@ -104,14 +105,69 @@ textarea {
 .navbar button {
   width: auto;
   margin: 0;
-  flex: 1;
   border: none;
   border-bottom: 2px solid transparent;
   border-radius: 0;
   background: transparent;
   color: #3c3c3c;
   font-weight: bold;
+  padding: 12px 10px;
   transition: box-shadow 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+}
+
+.navbar-menu-wrap {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+}
+
+.navbar-hamburger {
+  min-width: 44px;
+  font-size: 18px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.navbar-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 210px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 10px 18px rgba(0, 0, 0, 0.12);
+  z-index: 15;
+}
+
+.navbar-menu button {
+  width: 100%;
+  text-align: left;
+  border: none;
+  border-bottom: none;
+  border-radius: 6px;
+  padding: 10px 12px;
+  box-shadow: none;
+}
+
+.navbar .navbar-menu button.active {
+  background: #111;
+  color: #fff;
+  border-bottom-color: transparent;
+  box-shadow: none;
+}
+
+.navbar .navbar-menu button:focus-visible {
+  outline: 2px solid #4a79ff;
+  outline-offset: 1px;
+  border-bottom-color: transparent;
+  box-shadow: none;
 }
 
 .navbar button.active {
