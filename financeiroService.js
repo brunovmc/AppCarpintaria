@@ -1658,6 +1658,8 @@ function obterResumoDashboardFinanceiro(referenciaYm, forcarRecarregar) {
   });
 
   let compromissoPrevistoMes = 0;
+  const origensComParcelasPagamento = {};
+  let pendenteTotal = 0;
   const sheetParcelas = getSheet(ABA_PARCELAS_FINANCEIRAS);
   if (sheetParcelas) {
     rowsToObjects(sheetParcelas)
@@ -1670,10 +1672,21 @@ function obterResumoDashboardFinanceiro(referenciaYm, forcarRecarregar) {
           return;
         }
         if (natureza !== NATUREZA_PAGAMENTO) return;
+        const origemTipo = String(i.origem_tipo || '').trim().toUpperCase();
+        const origemId = String(i.origem_id || '').trim();
+        if (origemTipo && origemId) {
+          origensComParcelasPagamento[`${origemTipo}|${origemId}`] = true;
+        }
         const dataPrevista = parseDataFinanceiro(i.data_prevista);
         if (!dataPrevista || dataPrevista < inicio || dataPrevista >= fim) return;
+        const valorPrevisto = round2Financeiro(parseNumeroBR(i.valor_previsto));
+        const valorPagoParcela = round2Financeiro(parseNumeroBR(i.valor_pago));
+        const valorPendenteParcela = round2Financeiro(Math.max(0, valorPrevisto - valorPagoParcela));
         compromissoPrevistoMes = round2Financeiro(
-          compromissoPrevistoMes + round2Financeiro(parseNumeroBR(i.valor_previsto))
+          compromissoPrevistoMes + valorPrevisto
+        );
+        pendenteTotal = round2Financeiro(
+          pendenteTotal + valorPendenteParcela
         );
       });
   }
@@ -1690,19 +1703,26 @@ function obterResumoDashboardFinanceiro(referenciaYm, forcarRecarregar) {
   const limite7 = new Date(hoje.getTime());
   limite7.setDate(limite7.getDate() + 7);
 
-  let pendenteTotal = 0;
   let vencidoTotal = 0;
   let aVencer7Dias = 0;
 
-  const pendentes = [...compras, ...despesas];
-  pendentes.forEach(item => {
+  const origensPendentes = [];
+  compras.forEach(item => origensPendentes.push({ origem_tipo: ORIGEM_TIPO_COMPRA, item }));
+  despesas.forEach(item => origensPendentes.push({ origem_tipo: ORIGEM_TIPO_DESPESA, item }));
+
+  origensPendentes.forEach(entry => {
+    const item = entry.item || {};
     const pendente = round2Financeiro(parseNumeroBR(item.total_pendente));
     if (pendente <= 0) return;
+    const origemId = String(item.ID || '').trim();
+    const origemComParcelas = !!origensComParcelasPagamento[`${entry.origem_tipo}|${origemId}`];
     const vencimento = inicioDoDiaFinanceiro(item.data_vencimento);
-    const pendenciaDoMesReferencia = !!vencimento && vencimento >= inicio && vencimento < fim;
 
-    if (pendenciaDoMesReferencia) {
-      pendenteTotal = round2Financeiro(pendenteTotal + pendente);
+    if (!origemComParcelas) {
+      const pendenciaDoMesReferencia = !!vencimento && vencimento >= inicio && vencimento < fim;
+      if (pendenciaDoMesReferencia) {
+        pendenteTotal = round2Financeiro(pendenteTotal + pendente);
+      }
     }
     if (!vencimento) return;
     if (vencimento.getTime() < hoje.getTime()) {
@@ -1956,6 +1976,8 @@ function obterComposicaoCardDashboardFinanceiro(referenciaYm, cardKey, forcarRec
         const origemId = String(i.origem_id || '').trim();
         const dataPrevista = formatarDataYmdFinanceiroSafe(i.data_prevista);
         const valorPrevisto = round2Financeiro(parseNumeroBR(i.valor_previsto));
+        const valorPago = round2Financeiro(parseNumeroBR(i.valor_pago));
+        const valorPendente = round2Financeiro(Math.max(0, valorPrevisto - valorPago));
         let natureza = '';
         try {
           natureza = normalizarNaturezaFinanceiro(i.natureza || getNaturezaOrigemFinanceiro(tipo));
@@ -1969,6 +1991,8 @@ function obterComposicaoCardDashboardFinanceiro(referenciaYm, cardKey, forcarRec
           natureza,
           data_prevista: dataPrevista,
           valor_previsto: valorPrevisto,
+          valor_pago: valorPago,
+          valor_pendente: valorPendente,
           parcela_numero: Number(i.parcela_numero || 0),
           parcelas_total: Number(i.parcelas_total || 0)
         };
@@ -2118,11 +2142,51 @@ function obterComposicaoCardDashboardFinanceiro(referenciaYm, cardKey, forcarRec
     const origensPendentes = [];
     compras.forEach(item => origensPendentes.push({ origem_tipo: ORIGEM_TIPO_COMPRA, item }));
     despesas.forEach(item => origensPendentes.push({ origem_tipo: ORIGEM_TIPO_DESPESA, item }));
+    const origensComParcelasPagamento = {};
+    parcelasAtivas.forEach(parcela => {
+      if (parcela.natureza !== NATUREZA_PAGAMENTO) return;
+      const origemKey = `${String(parcela.origem_tipo || '').trim()}|${String(parcela.origem_id || '').trim()}`;
+      if (!origemKey || origemKey === '|') return;
+      origensComParcelasPagamento[origemKey] = true;
+    });
+
+    if (chave === 'pendente_total') {
+      parcelasAtivas.forEach(parcela => {
+        if (parcela.natureza !== NATUREZA_PAGAMENTO) return;
+        const dataPrev = parseDataFinanceiro(parcela.data_prevista);
+        if (!dataPrev || dataPrev < inicio || dataPrev >= fim) return;
+        const pendenteParcela = round2Financeiro(parseNumeroBR(parcela.valor_pendente));
+        if (pendenteParcela <= 0) return;
+
+        const meta = obterMetaOrigem(parcela.origem_tipo, parcela.origem_id);
+        if (!meta) return;
+
+        itens.push({
+          linha_id: `PENPAR:${String(parcela.ID || '').trim()}`,
+          tipo_linha: 'parcela_pendente',
+          titulo: meta.titulo,
+          detalhe: `${meta.detalhe} | Parcela ${Number(parcela.parcela_numero || 0)}/${Number(parcela.parcelas_total || 0)}`,
+          data: String(parcela.data_prevista || '').trim(),
+          valor: pendenteParcela,
+          origem_tipo: meta.origem_tipo,
+          origem_id: meta.origem_id,
+          origem_aba: meta.origem_aba,
+          pagamento_id: '',
+          pode_editar_origem: true,
+          pode_excluir_origem: true,
+          pode_remover_pagamento: false,
+          eh_contagem: false
+        });
+      });
+    }
 
     origensPendentes.forEach(entry => {
       const item = entry.item || {};
       const pendente = round2Financeiro(parseNumeroBR(item.total_pendente));
       if (pendente <= 0) return;
+      const origemId = String(item.ID || '').trim();
+      const origemKey = `${entry.origem_tipo}|${origemId}`;
+      const origemTemParcela = !!origensComParcelasPagamento[origemKey];
       const dataVenc = inicioDoDiaFinanceiro(item.data_vencimento);
 
       if (chave === 'vencido_total') {
@@ -2130,6 +2194,7 @@ function obterComposicaoCardDashboardFinanceiro(referenciaYm, cardKey, forcarRec
       } else if (chave === 'avencer_7_dias') {
         if (!dataVenc || dataVenc.getTime() < hoje.getTime() || dataVenc.getTime() > limite7.getTime()) return;
       } else if (chave === 'pendente_total') {
+        if (origemTemParcela) return;
         if (!dataVenc || dataVenc < inicio || dataVenc >= fim) return;
       }
 
