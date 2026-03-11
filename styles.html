@@ -267,6 +267,28 @@
     white-space: nowrap;
   }
 
+  .dashboard-statusbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin: -4px 0 12px;
+  }
+
+  .dashboard-status-text {
+    font-size: 12px;
+    color: #666;
+  }
+
+  .dashboard-readonly {
+    font-size: 12px;
+    color: #8a1f11;
+    background: #fff2ef;
+    border: 1px solid #ffd7cf;
+    border-radius: 999px;
+    padding: 4px 10px;
+  }
+
   .dash-cards {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));

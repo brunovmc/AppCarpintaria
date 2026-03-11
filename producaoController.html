@@ -68,6 +68,13 @@
       return isNaN(n) ? 0 : n;
     }
 
+    function podeAlterarDados(contexto = 'Operacao') {
+      if (window.AppRuntime?.ensureWritable) {
+        return window.AppRuntime.ensureWritable(contexto);
+      }
+      return true;
+    }
+
     function toDateString(value) {
       if (!value) return '';
       if (value instanceof Date) {
@@ -188,6 +195,9 @@
     function carregarProducao() {
       google.script.run
         .withSuccessHandler(lista => {
+          if (window.AppRuntime?.setReadOnly) {
+            window.AppRuntime.setReadOnly(false);
+          }
           ProducaoStore.set(lista);
           renderListaAtual();
         })
@@ -201,6 +211,7 @@
     }
 
     function salvar() {
+      if (!podeAlterarDados('Salvamento bloqueado em modo somente leitura')) return;
       const get = id => document.getElementById(id)?.value || '';
 
       const dados = {
@@ -304,6 +315,7 @@
     }
 
     function editar(id) {
+      if (!podeAlterarDados('Edicao bloqueada em modo somente leitura')) return;
       const item = ProducaoStore.getById(id);
 
       if (!item) {
@@ -318,6 +330,7 @@
     }
 
     function abrirFormularioComModelo(produtoId, receitaId = '') {
+      if (!podeAlterarDados('Adicao bloqueada em modo somente leitura')) return;
       const prodId = String(produtoId || '').trim();
       if (!prodId) {
         mostrarToast('Produto invalido', 'erro');
@@ -341,6 +354,7 @@
     }
 
     function excluir(id) {
+      if (!podeAlterarDados('Exclusao bloqueada em modo somente leitura')) return;
       if (!confirm('Deseja remover esta producao?')) return;
 
       const snapshot = ProducaoStore.getById(id);
@@ -420,6 +434,7 @@
     }
 
     function atualizarCustoLoteSaida(producaoId, loteId, custoUnitarioInput) {
+      if (!podeAlterarDados('Atualizacao bloqueada em modo somente leitura')) return;
       const prodId = String(producaoId || '').trim();
       const lotId = String(loteId || '').trim();
       const custo = Number(String(custoUnitarioInput || '').replace(',', '.'));
@@ -469,6 +484,7 @@
     }
 
     function vincularItemEstoque(producaoId, vinculoId, estoqueId) {
+      if (!podeAlterarDados('Vinculo bloqueado em modo somente leitura')) return;
       const prodId = String(producaoId || '').trim();
       const vinId = String(vinculoId || '').trim();
       const estId = String(estoqueId || '').trim();
@@ -505,6 +521,7 @@
     }
 
     function adicionarItemManual(producaoId, payload) {
+      if (!podeAlterarDados('Adicao bloqueada em modo somente leitura')) return;
       const prodId = String(producaoId || '').trim();
       if (!prodId) {
         mostrarToast('Producao invalida', 'erro');
@@ -534,6 +551,7 @@
     }
 
     function abrirAtualizarEstoque(id) {
+      if (!podeAlterarDados('Atualizacao bloqueada em modo somente leitura')) return;
       const item = ProducaoStore.getById(id);
       if (!item) return;
 
@@ -576,6 +594,7 @@
     }
 
     function confirmarAtualizacaoEstoque() {
+      if (!podeAlterarDados('Atualizacao bloqueada em modo somente leitura')) return;
       const payload = ProducaoUI.obterConsumoPayload();
       if (!payload.producaoId) {
         mostrarToast('Producao invalida', 'erro');
@@ -635,6 +654,7 @@
     }
 
     function confirmarPendenciasVinculo() {
+      if (!podeAlterarDados('Vinculo bloqueado em modo somente leitura')) return;
       const payload = ProducaoUI.obterPendenciasVinculoPayload?.();
       if (!payload?.producaoId) {
         mostrarToast('Producao invalida', 'erro');
@@ -680,6 +700,7 @@
     }
 
     function adicionarEtapa(producaoId, nome) {
+      if (!podeAlterarDados('Adicao bloqueada em modo somente leitura')) return;
       const item = ProducaoStore.getById(producaoId);
       if (!item) return;
 
@@ -716,6 +737,7 @@
     }
 
     function marcarEtapa(producaoId, etapaId, feito) {
+      if (!podeAlterarDados('Edicao bloqueada em modo somente leitura')) return;
       const item = ProducaoStore.getById(producaoId);
       if (!item) return;
 
@@ -759,6 +781,7 @@
     }
 
     function iniciarEdicaoEtapa(producaoId, etapaId) {
+      if (!podeAlterarDados('Edicao bloqueada em modo somente leitura')) return;
       const item = ProducaoStore.getById(producaoId);
       if (!item) return;
 
@@ -785,6 +808,7 @@
     }
 
     function salvarEdicaoEtapa(producaoId, etapaId, novoNome) {
+      if (!podeAlterarDados('Edicao bloqueada em modo somente leitura')) return;
       const item = ProducaoStore.getById(producaoId);
       if (!item) return;
 
@@ -829,6 +853,7 @@
     }
 
     function deletarEtapa(producaoId, etapaId) {
+      if (!podeAlterarDados('Exclusao bloqueada em modo somente leitura')) return;
       if (!confirm('Deseja remover esta etapa?')) return;
 
       const item = ProducaoStore.getById(producaoId);

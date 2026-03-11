@@ -17,6 +17,13 @@
       window.AppPerf?.end(token, extra);
     }
 
+    function podeAlterarDados(contexto = 'Operacao') {
+      if (window.AppRuntime?.ensureWritable) {
+        return window.AppRuntime.ensureWritable(contexto);
+      }
+      return true;
+    }
+
     function normalizarTextoSemAcento(valor) {
       return String(valor || '')
         .normalize('NFD')
@@ -135,6 +142,9 @@
       const perf = perfStart('rpc.estoque.listarEstoque');
       google.script.run
         .withSuccessHandler(lista => {
+          if (window.AppRuntime?.setReadOnly) {
+            window.AppRuntime.setReadOnly(false);
+          }
           perfEnd(perf, { ok: true, total: Array.isArray(lista) ? lista.length : 0 });
           EstoqueStore.set(lista);
           if (typeof aplicarBuscaEstoque === 'function') {
@@ -155,6 +165,7 @@
     }
 
     function salvar() {
+      if (!podeAlterarDados('Salvamento bloqueado em modo somente leitura')) return;
       if (salvando) return;
 
       const get = id => document.getElementById(id)?.value || '';
@@ -295,6 +306,7 @@
     }
 
     function editar(id) {
+      if (!podeAlterarDados('Edicao bloqueada em modo somente leitura')) return;
       const item = EstoqueStore.getById(id);
 
       if (!item) {
@@ -308,6 +320,7 @@
     }
 
     function excluir(id) {
+      if (!podeAlterarDados('Exclusao bloqueada em modo somente leitura')) return;
       if (!confirm('Deseja remover este item?')) return;
 
       const snapshot = EstoqueStore.getById(id);
@@ -327,6 +340,7 @@
 
 
     function adicionarMaterialDestino(estoqueId, destinoId, quantidade) {
+      if (!podeAlterarDados('Alteracao bloqueada em modo somente leitura')) return;
       const qtd = Number(String(quantidade || '').replace(',', '.'));
 
       if (!estoqueId || !destinoId) {

@@ -70,6 +70,13 @@
       return isNaN(n) ? 0 : n;
     }
 
+    function podeAlterarDados(contexto = 'Operacao') {
+      if (window.AppRuntime?.ensureWritable) {
+        return window.AppRuntime.ensureWritable(contexto);
+      }
+      return true;
+    }
+
     function proximoFrame(fn) {
       if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
         window.requestAnimationFrame(fn);
@@ -404,6 +411,9 @@
           if (typeof onDone === 'function') onDone();
         })
         .withSuccessHandler(lista => {
+          if (window.AppRuntime?.setReadOnly) {
+            window.AppRuntime.setReadOnly(false);
+          }
           despesas = Array.isArray(lista) ? lista : [];
           carregado = true;
           renderDespesas();
@@ -507,6 +517,7 @@
     }
 
     function abrirFormularioDespesa() {
+      if (!podeAlterarDados('Adicao bloqueada em modo somente leitura')) return;
       const f = el();
       if (!f.formDespesa) return;
       limparFormularioDespesa();
@@ -518,6 +529,7 @@
     }
 
     function editarDespesa(id) {
+      if (!podeAlterarDados('Edicao bloqueada em modo somente leitura')) return;
       const despesaId = String(id || '').trim();
       const item = despesas.find(d => String(d.ID || '').trim() === despesaId);
       if (!item) {
@@ -574,6 +586,7 @@
     }
 
     function salvarDespesa() {
+      if (!podeAlterarDados('Salvamento bloqueado em modo somente leitura')) return;
       if (salvandoDespesa) return;
       const f = el();
 
@@ -659,6 +672,7 @@
     }
 
     function excluirDespesa(id) {
+      if (!podeAlterarDados('Exclusao bloqueada em modo somente leitura')) return;
       const despesaId = String(id || '').trim();
       if (!despesaId) return;
       if (!confirm('Deseja remover esta despesa geral?')) return;
@@ -703,6 +717,7 @@
     }
 
     function registrarPagamentoDespesa(id) {
+      if (!podeAlterarDados('Pagamento bloqueado em modo somente leitura')) return;
       if (salvandoPagamentoDespesa) return;
       const despesaId = String(id || '').trim();
       const item = despesas.find(d => String(d.ID || '').trim() === despesaId);
@@ -783,6 +798,7 @@
     }
 
     function confirmarPagamentoDespesa() {
+      if (!podeAlterarDados('Pagamento bloqueado em modo somente leitura')) return;
       if (salvandoPagamentoDespesa) return;
       if (!despesaPagamentoId) {
         mostrarToast('Despesa nao selecionada', 'erro');

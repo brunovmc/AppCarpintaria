@@ -19,6 +19,13 @@
       window.AppPerf?.end(token, extra);
     }
 
+    function podeAlterarDados(contexto = 'Operacao') {
+      if (window.AppRuntime?.ensureWritable) {
+        return window.AppRuntime.ensureWritable(contexto);
+      }
+      return true;
+    }
+
     function getDataHojeISO() {
       const agora = new Date();
       const yyyy = agora.getFullYear();
@@ -132,6 +139,9 @@
       const perf = perfStart('rpc.compras.listarCompras');
       google.script.run
         .withSuccessHandler(lista => {
+          if (window.AppRuntime?.setReadOnly) {
+            window.AppRuntime.setReadOnly(false);
+          }
           perfEnd(perf, { ok: true, total: Array.isArray(lista) ? lista.length : 0 });
           ComprasStore.set(lista);
           renderListaAtual();
@@ -148,6 +158,7 @@
     }
 
     function salvar() {
+      if (!podeAlterarDados('Salvamento bloqueado em modo somente leitura')) return;
       if (salvando) return;
 
       const get = id => document.getElementById(id)?.value || '';
@@ -325,6 +336,7 @@
     }
 
     function editar(id) {
+      if (!podeAlterarDados('Edicao bloqueada em modo somente leitura')) return;
       const item = ComprasStore.getById(id);
 
       if (!item) {
@@ -339,6 +351,7 @@
     }
 
     function refazer(id) {
+      if (!podeAlterarDados('Adicao bloqueada em modo somente leitura')) return;
       const item = ComprasStore.getById(id);
 
       if (!item) {
@@ -365,6 +378,7 @@
     }
 
     function excluir(id) {
+      if (!podeAlterarDados('Exclusao bloqueada em modo somente leitura')) return;
       if (!confirm('Deseja remover esta compra?')) return;
 
       const snapshot = ComprasStore.getById(id);
@@ -383,6 +397,7 @@
     }
 
     function adicionarAoEstoque(id) {
+      if (!podeAlterarDados('Atualizacao bloqueada em modo somente leitura')) return;
       if (adicionandoAoEstoque.has(id)) return;
       if (!confirm('Adicionar esta compra ao estoque?')) return;
 
@@ -437,6 +452,7 @@
     }
 
     function registrarPagamento(id) {
+      if (!podeAlterarDados('Pagamento bloqueado em modo somente leitura')) return;
       if (salvandoPagamento) return;
 
       const item = ComprasStore.getById(id);
@@ -465,6 +481,7 @@
     }
 
     function confirmarPagamentoCompra() {
+      if (!podeAlterarDados('Pagamento bloqueado em modo somente leitura')) return;
       if (salvandoPagamento) return;
       if (!pagamentoCompraId) {
         mostrarToast('Compra nao selecionada para pagamento', 'erro');

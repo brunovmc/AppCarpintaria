@@ -5,6 +5,10 @@
   </div>
   <button id="btnDashboardAtualizar" class="dashboard-btn-inline" onclick="DashboardController.atualizar(true)">Atualizar</button>
 </div>
+<div class="dashboard-statusbar">
+  <span id="dashUltimaAtualizacao" class="dashboard-status-text">Ultima atualizacao: -</span>
+  <span id="dashModoSomenteLeitura" class="dashboard-readonly hidden">Sem conexao com backend • modo somente leitura</span>
+</div>
 
 <div id="dashboardCards" class="dash-cards"></div>
 

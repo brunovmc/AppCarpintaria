@@ -15,6 +15,13 @@
       return isNaN(n) ? 0 : n;
     }
 
+    function podeAlterarDados(contexto = 'Operacao') {
+      if (window.AppRuntime?.ensureWritable) {
+        return window.AppRuntime.ensureWritable(contexto);
+      }
+      return true;
+    }
+
     function setSalvando(ativo) {
       salvando = !!ativo;
       const btn = document.getElementById('btnSalvarVenda');
@@ -73,6 +80,9 @@
     function carregarVendas() {
       google.script.run
         .withSuccessHandler(lista => {
+          if (window.AppRuntime?.setReadOnly) {
+            window.AppRuntime.setReadOnly(false);
+          }
           VendasStore.set(lista);
           renderListaAtual();
         })
@@ -83,6 +93,7 @@
     }
 
     function salvar() {
+      if (!podeAlterarDados('Salvamento bloqueado em modo somente leitura')) return;
       if (salvando) return;
       const get = id => document.getElementById(id)?.value || '';
 
@@ -199,6 +210,7 @@
     }
 
     function editar(id) {
+      if (!podeAlterarDados('Edicao bloqueada em modo somente leitura')) return;
       const item = VendasStore.getById(id);
       if (!item) {
         mostrarToast('Venda nao encontrada', 'erro');
@@ -210,6 +222,7 @@
     }
 
     function excluir(id) {
+      if (!podeAlterarDados('Exclusao bloqueada em modo somente leitura')) return;
       if (!confirm('Deseja remover esta venda?')) return;
       const snapshot = VendasStore.getById(id);
       VendasStore.remove(id);
@@ -230,6 +243,7 @@
     }
 
     function registrarRecebimento(id) {
+      if (!podeAlterarDados('Recebimento bloqueado em modo somente leitura')) return;
       if (salvandoRecebimento) return;
       const item = VendasStore.getById(id);
       if (!item) {
@@ -249,6 +263,7 @@
     }
 
     function confirmarRecebimento() {
+      if (!podeAlterarDados('Recebimento bloqueado em modo somente leitura')) return;
       if (salvandoRecebimento) return;
       if (!recebimentoVendaId) {
         mostrarToast('Venda nao selecionada', 'erro');

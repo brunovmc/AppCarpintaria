@@ -18,6 +18,13 @@
       return isNaN(n) ? '' : n;
     }
 
+    function podeAlterarDados(contexto = 'Operacao') {
+      if (window.AppRuntime?.ensureWritable) {
+        return window.AppRuntime.ensureWritable(contexto);
+      }
+      return true;
+    }
+
     function getTiposEstoque() {
       const tipos = new Set();
       (estoqueOpcoes || []).forEach(item => {
@@ -141,6 +148,9 @@
     function carregarProdutos() {
       google.script.run
         .withSuccessHandler(lista => {
+          if (window.AppRuntime?.setReadOnly) {
+            window.AppRuntime.setReadOnly(false);
+          }
           const atual = ProdutosStore.get();
           const map = {};
           atual.forEach(p => {
@@ -247,6 +257,7 @@
     }
 
     function criarReceita(produtoId) {
+      if (!podeAlterarDados('Edicao bloqueada em modo somente leitura')) return;
       const item = ProdutosStore.getById(produtoId);
       if (!item) return;
 
@@ -278,6 +289,7 @@
     }
 
     function iniciarEdicaoReceita(produtoId, receitaId) {
+      if (!podeAlterarDados('Edicao bloqueada em modo somente leitura')) return;
       const item = ProdutosStore.getById(produtoId);
       if (!item) return;
 
@@ -358,6 +370,7 @@
     }
 
     function salvarReceita(produtoId, receitaId, dados, entradas, saidas) {
+      if (!podeAlterarDados('Salvamento bloqueado em modo somente leitura')) return;
       const item = ProdutosStore.getById(produtoId);
       if (!item) return;
 
@@ -409,6 +422,7 @@
     }
 
     function salvar() {
+      if (!podeAlterarDados('Salvamento bloqueado em modo somente leitura')) return;
       const get = id => document.getElementById(id)?.value || '';
       const nomeProduto = String(get('produtoNome') || '').trim();
       if (!nomeProduto) {
@@ -466,6 +480,7 @@
     }
 
     function editar(id) {
+      if (!podeAlterarDados('Edicao bloqueada em modo somente leitura')) return;
       const item = ProdutosStore.getById(id);
 
       if (!item) {
@@ -513,6 +528,7 @@
     }
 
     function excluir(id) {
+      if (!podeAlterarDados('Exclusao bloqueada em modo somente leitura')) return;
       if (!confirm('Deseja remover este produto?')) return;
 
       const snapshot = ProdutosStore.getById(id);

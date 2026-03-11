@@ -159,6 +159,57 @@
 
   window.AppLoading = window.AppLoading || createLoadingHelper();
 
+  function createRuntimeState() {
+    let readOnly = false;
+    let reason = '';
+
+    function emitirMudanca() {
+      if (typeof window === 'undefined') return;
+      try {
+        window.dispatchEvent(new CustomEvent('app:runtime:readonly-changed', {
+          detail: {
+            readOnly,
+            reason
+          }
+        }));
+      } catch (error) {
+        // sem acao
+      }
+    }
+
+    function setReadOnly(ativo, motivo = '') {
+      readOnly = !!ativo;
+      reason = String(motivo || '').trim();
+      emitirMudanca();
+    }
+
+    function isReadOnly() {
+      return !!readOnly;
+    }
+
+    function getReason() {
+      return reason;
+    }
+
+    function ensureWritable(contexto = 'Operacao bloqueada') {
+      if (!readOnly) return true;
+      if (typeof mostrarToast === 'function') {
+        const msg = reason || `${String(contexto || '').trim() || 'Operacao'} indisponivel em modo somente leitura`;
+        mostrarToast(msg, 'erro');
+      }
+      return false;
+    }
+
+    return {
+      setReadOnly,
+      isReadOnly,
+      getReason,
+      ensureWritable
+    };
+  }
+
+  window.AppRuntime = window.AppRuntime || createRuntimeState();
+
   /* =========================
      PERF + CICLO DE ABAS
   ========================== */
@@ -429,6 +480,8 @@
   }
 
   function acaoPrimaria() {
+    if (window.AppRuntime?.ensureWritable && !window.AppRuntime.ensureWritable('Adicao bloqueada')) return;
+
     const abaAtiva = document.querySelector('.aba:not(.hidden)');
     if (!abaAtiva) return;
 

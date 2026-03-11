@@ -12,17 +12,25 @@
     let cardObservabilidadeItens = [];
     let carregandoObservabilidade = false;
     let carregandoDashboard = false;
+    let resumoRequestSeq = 0;
     let despesasVisiveis = false;
     let cacheResumoLocal = {};
     let cacheDespesasLocal = { ts: 0, data: null };
+    let runtimeListenerRegistrado = false;
+    let prefetchVizinhoRefTs = {};
 
     const DASHBOARD_CACHE_TTL_RESUMO_MS = 30000;
     const DASHBOARD_CACHE_TTL_DESPESAS_MS = 30000;
+    const DASHBOARD_STORAGE_VERSION = 'v1';
+    const DASHBOARD_STORAGE_PREFIX = `app:dash:${DASHBOARD_STORAGE_VERSION}:resumo:`;
+    const DASHBOARD_PREFETCH_TTL_MS = 120000;
 
     function el() {
       return {
         mesReferencia: document.getElementById('dashMesReferencia'),
         btnAtualizar: document.getElementById('btnDashboardAtualizar'),
+        ultimaAtualizacao: document.getElementById('dashUltimaAtualizacao'),
+        modoSomenteLeitura: document.getElementById('dashModoSomenteLeitura'),
         cards: document.getElementById('dashboardCards'),
         gastoPorTipo: document.getElementById('dashGastoPorTipo'),
         gastoPorCategoria: document.getElementById('dashGastoPorCategoria'),
@@ -84,9 +92,185 @@
       return `${yyyy}-${mm}`;
     }
 
+    function referenciaEhValida(referencia) {
+      return /^\d{4}-\d{2}$/.test(String(referencia || '').trim());
+    }
+
+    function deslocarReferenciaMes(referencia, delta) {
+      const ref = String(referencia || '').trim();
+      if (!referenciaEhValida(ref)) return '';
+      const [yyyy, mm] = ref.split('-').map(Number);
+      const d = new Date(yyyy, mm - 1, 1);
+      d.setMonth(d.getMonth() + Number(delta || 0));
+      const y2 = d.getFullYear();
+      const m2 = String(d.getMonth() + 1).padStart(2, '0');
+      return `${y2}-${m2}`;
+    }
+
+    function obterJanelaReferencias(referenciaBase) {
+      const base = referenciaEhValida(referenciaBase) ? referenciaBase : getMesAtualISO();
+      return [
+        deslocarReferenciaMes(base, -1),
+        base,
+        deslocarReferenciaMes(base, 1)
+      ].filter(Boolean);
+    }
+
+    function getStorageKeyResumo(referencia) {
+      const ref = String(referencia || '').trim();
+      if (!referenciaEhValida(ref)) return '';
+      return `${DASHBOARD_STORAGE_PREFIX}${ref}`;
+    }
+
+    function storageDisponivel() {
+      try {
+        if (typeof window === 'undefined' || !window.localStorage) return false;
+        const key = `${DASHBOARD_STORAGE_PREFIX}__probe`;
+        window.localStorage.setItem(key, '1');
+        window.localStorage.removeItem(key);
+        return true;
+      } catch (error) {
+        return false;
+      }
+    }
+
+    function storageLerJson(key) {
+      try {
+        if (!key || !storageDisponivel()) return null;
+        const raw = window.localStorage.getItem(key);
+        if (!raw) return null;
+        return JSON.parse(raw);
+      } catch (error) {
+        return null;
+      }
+    }
+
+    function storageSalvarJson(key, value) {
+      try {
+        if (!key || !storageDisponivel()) return false;
+        window.localStorage.setItem(key, JSON.stringify(value || {}));
+        return true;
+      } catch (error) {
+        return false;
+      }
+    }
+
+    function storageRemover(key) {
+      try {
+        if (!key || !storageDisponivel()) return;
+        window.localStorage.removeItem(key);
+      } catch (error) {
+        // sem acao
+      }
+    }
+
+    function gerarResumoHash(resumo) {
+      try {
+        return JSON.stringify(resumo || {});
+      } catch (error) {
+        return '';
+      }
+    }
+
+    function lerResumoPersistido(referencia) {
+      const key = getStorageKeyResumo(referencia);
+      if (!key) return null;
+      const payload = storageLerJson(key);
+      if (!payload || typeof payload !== 'object') return null;
+      return {
+        resumo: payload.resumo || {},
+        hash: String(payload.hash || ''),
+        updatedAt: Number(payload.updatedAt || 0)
+      };
+    }
+
+    function salvarResumoPersistido(referencia, resumo, updatedAt, hashForcado = '') {
+      const key = getStorageKeyResumo(referencia);
+      if (!key) return;
+      const hash = String(hashForcado || gerarResumoHash(resumo));
+      storageSalvarJson(key, {
+        referencia: String(referencia || '').trim(),
+        updatedAt: Number(updatedAt || Date.now()),
+        hash,
+        resumo: resumo || {}
+      });
+    }
+
+    function limparResumoPersistidoForaDaJanela(referenciaBase) {
+      if (!storageDisponivel()) return;
+      const permitidas = new Set(obterJanelaReferencias(referenciaBase).map(r => getStorageKeyResumo(r)).filter(Boolean));
+      try {
+        const keys = [];
+        for (let i = 0; i < window.localStorage.length; i++) {
+          const key = window.localStorage.key(i);
+          if (!key) continue;
+          if (key.startsWith(DASHBOARD_STORAGE_PREFIX)) keys.push(key);
+        }
+        keys.forEach(key => {
+          if (!permitidas.has(key)) storageRemover(key);
+        });
+      } catch (error) {
+        // sem acao
+      }
+    }
+
+    function formatarDataHora(ts) {
+      const n = Number(ts || 0);
+      if (!n) return '-';
+      const d = new Date(n);
+      if (Number.isNaN(d.getTime())) return '-';
+      return d.toLocaleString('pt-BR', {
+        day: '2-digit',
+        month: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+    }
+
+    function atualizarTextoUltimaAtualizacao(ts) {
+      const f = el();
+      if (!f.ultimaAtualizacao) return;
+      f.ultimaAtualizacao.textContent = `Ultima atualizacao: ${formatarDataHora(ts)}`;
+    }
+
+    function atualizarIndicadorSomenteLeitura() {
+      const f = el();
+      if (!f.modoSomenteLeitura) return;
+      const ativo = !!window.AppRuntime?.isReadOnly?.();
+      f.modoSomenteLeitura.classList.toggle('hidden', !ativo);
+    }
+
+    function setModoSomenteLeitura(ativo, motivo = '') {
+      if (window.AppRuntime?.setReadOnly) {
+        window.AppRuntime.setReadOnly(!!ativo, motivo);
+      }
+      atualizarIndicadorSomenteLeitura();
+    }
+
+    function registrarListenerRuntimeSeNecessario() {
+      if (runtimeListenerRegistrado) return;
+      if (typeof window === 'undefined' || typeof window.addEventListener !== 'function') return;
+      window.addEventListener('app:runtime:readonly-changed', () => {
+        atualizarIndicadorSomenteLeitura();
+      });
+      runtimeListenerRegistrado = true;
+    }
+
+    function podeAlterarDados(contexto = 'Operacao') {
+      if (window.AppRuntime?.ensureWritable) {
+        return window.AppRuntime.ensureWritable(contexto);
+      }
+      return true;
+    }
+
     function limparCacheDashboardLocal() {
       cacheResumoLocal = {};
       cacheDespesasLocal = { ts: 0, data: null };
+      const refAtual = String(el().mesReferencia?.value || getMesAtualISO()).trim() || getMesAtualISO();
+      obterJanelaReferencias(refAtual).forEach(ref => {
+        const key = getStorageKeyResumo(ref);
+        if (key) storageRemover(key);
+      });
     }
 
     function lerResumoCacheLocal(referencia) {
@@ -304,6 +488,10 @@
     }
 
     function init() {
+      registrarListenerRuntimeSeNecessario();
+      atualizarIndicadorSomenteLeitura();
+      bindEventosDashboard();
+
       if (!iniciado) {
         const f = el();
         if (f.mesReferencia && !String(f.mesReferencia.value || '').trim()) {
@@ -315,6 +503,22 @@
       }
 
       atualizar(false);
+    }
+
+    function bindEventosDashboard() {
+      const f = el();
+      if (!f.mesReferencia) return;
+      if (f.mesReferencia.dataset.boundAutoRefresh === '1') return;
+      f.mesReferencia.dataset.boundAutoRefresh = '1';
+
+      const onMesChange = () => {
+        const ref = String(f.mesReferencia?.value || '').trim();
+        if (!referenciaEhValida(ref)) return;
+        atualizar(false);
+      };
+
+      f.mesReferencia.addEventListener('change', onMesChange);
+      f.mesReferencia.addEventListener('input', onMesChange);
     }
 
     function setDespesasVisiveis(visivel) {
@@ -396,42 +600,105 @@
       `).join('');
     }
 
+    function renderResumoCompleto(resumo) {
+      const f = el();
+      const data = resumo || {};
+      renderCards(data?.cards || {});
+      renderListaAgregada(f.gastoPorTipo, data?.agregados?.gasto_por_tipo);
+      renderListaAgregada(f.gastoPorCategoria, data?.agregados?.gasto_por_categoria);
+      renderListaAgregada(f.gastoPorFornecedor, data?.agregados?.gasto_por_fornecedor);
+      renderListaAgregada(f.estoquePorTipo, data?.agregados?.valor_estoque_por_tipo);
+      renderEvolucaoMensal(f.evolucaoMensal, data?.evolucao_mensal);
+    }
+
+    function devePrefetchResumoVizinho(referencia) {
+      const ref = String(referencia || '').trim();
+      if (!referenciaEhValida(ref)) return false;
+      const now = Date.now();
+      const last = Number(prefetchVizinhoRefTs[ref] || 0);
+      if ((now - last) < DASHBOARD_PREFETCH_TTL_MS) return false;
+      prefetchVizinhoRefTs[ref] = now;
+      return true;
+    }
+
+    function prefetchResumosVizinhos(referenciaBase) {
+      const refs = obterJanelaReferencias(referenciaBase);
+      refs.forEach(ref => {
+        if (ref === referenciaBase) return;
+        if (!devePrefetchResumoVizinho(ref)) return;
+
+        google.script.run
+          .withSuccessHandler(resumo => {
+            const resumoSeguro = resumo || {};
+            const hash = gerarResumoHash(resumoSeguro);
+            salvarResumoCacheLocal(ref, resumoSeguro);
+            salvarResumoPersistido(ref, resumoSeguro, Date.now(), hash);
+          })
+          .withFailureHandler(() => {
+            // prefetch nao deve poluir UX
+          })
+          .obterResumoDashboardFinanceiro(ref, false);
+      });
+    }
+
     function carregarResumo(forcarRecarregar = false, onDone) {
+      const requestSeq = ++resumoRequestSeq;
       const f = el();
       const referencia = String(f.mesReferencia?.value || getMesAtualISO()).trim() || getMesAtualISO();
-      const resumoCache = !forcarRecarregar ? lerResumoCacheLocal(referencia) : null;
+      const refValida = referenciaEhValida(referencia) ? referencia : getMesAtualISO();
+      const cacheSessao = !forcarRecarregar ? lerResumoCacheLocal(refValida) : null;
+      const cachePersistido = !forcarRecarregar ? lerResumoPersistido(refValida) : null;
+      const hadCache = !!cacheSessao || !!cachePersistido;
+      const resumoCache = cacheSessao || cachePersistido?.resumo || null;
+      const hashCache = cachePersistido?.hash || gerarResumoHash(resumoCache || {});
+
       if (resumoCache) {
-        renderCards(resumoCache?.cards || {});
-        renderListaAgregada(f.gastoPorTipo, resumoCache?.agregados?.gasto_por_tipo);
-        renderListaAgregada(f.gastoPorCategoria, resumoCache?.agregados?.gasto_por_categoria);
-        renderListaAgregada(f.gastoPorFornecedor, resumoCache?.agregados?.gasto_por_fornecedor);
-        renderListaAgregada(f.estoquePorTipo, resumoCache?.agregados?.valor_estoque_por_tipo);
-        renderEvolucaoMensal(f.evolucaoMensal, resumoCache?.evolucao_mensal);
-        if (typeof onDone === 'function') onDone();
-        return;
+        renderResumoCompleto(resumoCache);
+        atualizarTextoUltimaAtualizacao(cachePersistido?.updatedAt || Date.now());
+      } else {
+        atualizarTextoUltimaAtualizacao(0);
       }
 
       google.script.run
         .withSuccessHandler(resumo => {
-          salvarResumoCacheLocal(referencia, resumo || {});
-          renderCards(resumo?.cards || {});
-          renderListaAgregada(f.gastoPorTipo, resumo?.agregados?.gasto_por_tipo);
-          renderListaAgregada(f.gastoPorCategoria, resumo?.agregados?.gasto_por_categoria);
-          renderListaAgregada(f.gastoPorFornecedor, resumo?.agregados?.gasto_por_fornecedor);
-          renderListaAgregada(f.estoquePorTipo, resumo?.agregados?.valor_estoque_por_tipo);
-          renderEvolucaoMensal(f.evolucaoMensal, resumo?.evolucao_mensal);
+          if (requestSeq !== resumoRequestSeq) return;
+
+          const resumoSeguro = resumo || {};
+          const hashNovo = gerarResumoHash(resumoSeguro);
+          const mudou = !!forcarRecarregar || !hadCache || hashNovo !== hashCache;
+          const tsAtualizacao = Date.now();
+
+          salvarResumoCacheLocal(refValida, resumoSeguro);
+          salvarResumoPersistido(refValida, resumoSeguro, tsAtualizacao, hashNovo);
+          limparResumoPersistidoForaDaJanela(refValida);
+          prefetchResumosVizinhos(refValida);
+
+          if (mudou) {
+            renderResumoCompleto(resumoSeguro);
+          }
+          atualizarTextoUltimaAtualizacao(tsAtualizacao);
+          setModoSomenteLeitura(false);
           if (typeof onDone === 'function') onDone();
         })
         .withFailureHandler(() => {
+          if (requestSeq !== resumoRequestSeq) return;
+
+          setModoSomenteLeitura(true, 'Sem conexao com backend - modo somente leitura');
           mostrarToast('Erro ao carregar dashboard', 'erro');
+          if (hadCache) {
+            mostrarToast('Exibindo ultimo snapshot em cache', 'erro');
+          }
           if (typeof onDone === 'function') onDone();
         })
-        .obterResumoDashboardFinanceiro(referencia, !!forcarRecarregar);
+        .obterResumoDashboardFinanceiro(refValida, !!forcarRecarregar);
+
+      return requestSeq;
     }
 
     function atualizar(forcarRecarregar = false) {
       setCarregandoDashboard(true);
-      carregarResumo(!!forcarRecarregar, () => {
+      const requestSeq = carregarResumo(!!forcarRecarregar, () => {
+        if (requestSeq !== resumoRequestSeq) return;
         setCarregandoDashboard(false);
       });
     }
@@ -589,6 +856,7 @@
     }
 
     function editarOrigemObservabilidade(index) {
+      if (!podeAlterarDados('Edicao bloqueada em modo somente leitura')) return;
       const item = getItemObservabilidade(index);
       if (!item) {
         mostrarToast('Linha de composicao nao encontrada', 'erro');
@@ -636,6 +904,7 @@
     }
 
     function excluirOrigemObservabilidade(index) {
+      if (!podeAlterarDados('Exclusao bloqueada em modo somente leitura')) return;
       const item = getItemObservabilidade(index);
       if (!item) {
         mostrarToast('Linha de composicao nao encontrada', 'erro');
@@ -683,6 +952,7 @@
     }
 
     function removerPagamentoObservabilidade(index) {
+      if (!podeAlterarDados('Remocao de pagamento bloqueada em modo somente leitura')) return;
       const item = getItemObservabilidade(index);
       if (!item) {
         mostrarToast('Linha de composicao nao encontrada', 'erro');
@@ -774,6 +1044,7 @@
     }
 
     function abrirFormularioDespesa() {
+      if (!podeAlterarDados('Adicao bloqueada em modo somente leitura')) return;
       const f = el();
       if (!f.formDespesa) return;
       limparFormularioDespesa();
@@ -781,6 +1052,7 @@
     }
 
     function editarDespesa(id) {
+      if (!podeAlterarDados('Edicao bloqueada em modo somente leitura')) return;
       const despesaId = String(id || '').trim();
       const item = despesas.find(d => String(d.ID || '').trim() === despesaId);
       if (!item) {
@@ -835,6 +1107,7 @@
     }
 
     function salvarDespesa() {
+      if (!podeAlterarDados('Salvamento bloqueado em modo somente leitura')) return;
       if (salvandoDespesa) return;
       const f = el();
 
@@ -974,6 +1247,7 @@
     }
 
     function excluirDespesa(id) {
+      if (!podeAlterarDados('Exclusao bloqueada em modo somente leitura')) return;
       const despesaId = String(id || '').trim();
       if (!despesaId) return;
       if (!confirm('Deseja remover esta despesa geral?')) return;
@@ -1014,6 +1288,7 @@
     }
 
     function registrarPagamentoDespesa(id) {
+      if (!podeAlterarDados('Pagamento bloqueado em modo somente leitura')) return;
       if (salvandoPagamentoDespesa) return;
       const despesaId = String(id || '').trim();
       const item = despesas.find(d => String(d.ID || '').trim() === despesaId);
@@ -1107,6 +1382,7 @@
     }
 
     function confirmarPagamentoDespesa() {
+      if (!podeAlterarDados('Pagamento bloqueado em modo somente leitura')) return;
       if (salvandoPagamentoDespesa) return;
       if (!despesaPagamentoId) {
         mostrarToast('Despesa nao selecionada', 'erro');
