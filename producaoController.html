@@ -214,9 +214,12 @@
       if (!podeAlterarDados('Salvamento bloqueado em modo somente leitura')) return;
       const get = id => document.getElementById(id)?.value || '';
 
+      const produtoId = get('producaoProduto');
+      const itemEditando = editandoId ? ProducaoStore.getById(editandoId) : null;
+
       const dados = {
-        produto_id: get('producaoProduto'),
-        receita_id: get('producaoReceita'),
+        produto_id: produtoId,
+        receita_id: '',
         nome_ordem: get('producaoNome'),
         qtd_planejada: parseNumeroInput(get('producaoQtd')) || 0,
         status: get('producaoStatus'),
@@ -230,14 +233,24 @@
         return;
       }
 
+      if (
+        itemEditando &&
+        String(itemEditando.produto_id || '') === String(dados.produto_id || '') &&
+        String(itemEditando.receita_id || '').trim()
+      ) {
+        dados.receita_id = String(itemEditando.receita_id || '').trim();
+        dados.receita_nome = itemEditando.receita_nome || '';
+      }
+
       if (!dados.receita_id) {
         const receitaPadrao = receitasCache[dados.produto_id]?.[0] || null;
         dados.receita_id = receitaPadrao?.receita_id || '';
         dados.receita_nome = receitaPadrao?.nome_receita || '';
-        if (!dados.receita_id) {
-          mostrarToast('Produto sem modelo cadastrado', 'erro');
-          return;
-        }
+      }
+
+      if (!dados.receita_id) {
+        mostrarToast('Produto sem modelo cadastrado', 'erro');
+        return;
       }
 
       const receitasProduto = receitasCache[dados.produto_id] || [];

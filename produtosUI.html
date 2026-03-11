@@ -381,66 +381,28 @@
       return renderOpcoesSelect(getUnidadesValidacao(), selecionado, 'Unidade');
     }
 
-    function renderEntradaEditRow(entrada = {}, produtoId = '') {
+    function renderEntradaEditRow(entrada = {}) {
       const tipo = String(entrada.tipo_item || '').toUpperCase();
-      const isProduto = tipo === 'PRODUTO';
-      const isEstoque = !!tipo && !isProduto;
       const isMadeira = tipo === 'MADEIRA';
-
-      const produtoRefId = entrada.produto_ref_id || '';
-      const receitaRefId = entrada.receita_ref_id || '';
-      const estoqueRefId = entrada.estoque_ref_id || '';
-
-      const produtoNome = isProduto
-        ? (getProdutoNome(produtoRefId) || entrada.nome_item || '')
-        : '';
-      const receitaNome = isProduto
-        ? (getReceitaNome(produtoRefId, receitaRefId) || '')
-        : '';
-      const estoqueNome = isEstoque
-        ? (getEstoqueNome(estoqueRefId) || entrada.nome_item || '')
-        : '';
-
-      const listaProdutos = produtoId ? `list="produtosAutocomplete_${produtoId}"` : '';
-      const listaReceitas = produtoRefId ? `list="receitasAutocomplete_${produtoRefId}"` : '';
-      const tipoKey = String(tipo || '').replace(/[^a-zA-Z0-9]/g, '');
-      const listaEstoque = isEstoque && produtoId
-        ? `list="estoqueAutocomplete_${produtoId}_${tipoKey}"`
-        : '';
-
-      const categoriaValor = entrada.categoria || (isEstoque
-        ? getEstoqueCategoria(estoqueRefId)
-        : (isProduto ? getProdutoCategoria(produtoRefId) : ''));
-      const unidadeValor = entrada.unidade || (isEstoque
-        ? getEstoqueUnidade(estoqueRefId)
-        : (isProduto ? getProdutoUnidade(produtoRefId) : ''));
-
       const dimsHidden = isMadeira ? '' : 'hidden';
-      const estoqueHidden = isEstoque ? '' : 'hidden';
-      const produtoHidden = isProduto ? '' : 'hidden';
 
       return `
         <div class="linha-receita-entrada">
           <select class="entrada-tipo">
             ${renderOpcoesTipoEntrada(tipo)}
           </select>
-          <input class="entrada-estoque ${estoqueHidden}" placeholder="Item do estoque" value="${estoqueNome}" ${listaEstoque} data-estoque-id="${estoqueRefId}">
-          <input class="entrada-produto ${produtoHidden}" placeholder="Produto" value="${produtoNome}" ${listaProdutos} data-produto-id="${produtoRefId}">
-          <input class="entrada-receita ${produtoHidden}" placeholder="Receita" value="${receitaNome}" ${listaReceitas} data-produto-id="${produtoRefId}" data-receita-id="${receitaRefId}">
+          <input class="entrada-nome-item" placeholder="Nome do item" value="${entrada.nome_item || ''}">
           <select class="entrada-categoria">
-            ${renderOpcoesCategoria(categoriaValor, tipo)}
+            ${renderOpcoesCategoria(entrada.categoria || '', tipo)}
           </select>
           <select class="entrada-unidade">
-            ${renderOpcoesUnidade(unidadeValor)}
+            ${renderOpcoesUnidade(entrada.unidade || '')}
           </select>
           <input class="entrada-qtd" type="number" step="0.01" min="0" placeholder="Quantidade" value="${entrada.qtd_pecas ?? ''}">
           <input class="entrada-comp ${dimsHidden}" type="number" step="0.01" min="0" placeholder="Comp (cm)" value="${entrada.comprimento_cm ?? ''}">
           <input class="entrada-larg ${dimsHidden}" type="number" step="0.01" min="0" placeholder="Larg (cm)" value="${entrada.largura_cm ?? ''}">
           <input class="entrada-esp ${dimsHidden}" type="number" step="0.01" min="0" placeholder="Esp (cm)" value="${entrada.espessura_cm ?? ''}">
           <input class="entrada-custo" type="number" step="0.01" min="0" placeholder="Custo/peca" value="${entrada.custo_manual ?? ''}">
-          <input type="hidden" class="entrada-estoque-id" value="${estoqueRefId}">
-          <input type="hidden" class="entrada-produto-id" value="${produtoRefId}">
-          <input type="hidden" class="entrada-receita-id" value="${receitaRefId}">
           <button class="btn-receita-remover-entrada">Remover</button>
         </div>
       `;
@@ -621,29 +583,15 @@
         const custo = parseNumero(e.custo_manual) > 0
           ? `Custo/peca: R$ ${formatNumero(e.custo_manual)}`
           : 'Custo/peca: -';
-        const compat = contarCompativeis(e);
-        const compatTexto = tipo === 'MADEIRA' ? compat : '-';
-
-        let titulo = e.nome_item || '-';
-        if (tipo === 'PRODUTO') {
-          titulo = getProdutoNome(e.produto_ref_id) || e.nome_item || e.produto_ref_id || '-';
-        } else if (isTipoEstoque(tipo)) {
-          titulo = getEstoqueNome(e.estoque_ref_id) || e.nome_item || e.estoque_ref_id || '-';
-        }
-
-        const receitaNome = tipo === 'PRODUTO'
-          ? (getReceitaNome(e.produto_ref_id, e.receita_ref_id) || e.receita_ref_id || '-')
-          : '';
+        const titulo = e.nome_item || '-';
 
         return `
           <div class="linha-receita">
             <div><strong>${titulo}</strong></div>
             <div class="comp-meta">Tipo: ${tipo} | Quantidade: ${qtd}</div>
-            ${tipo === 'PRODUTO' ? `<div class="comp-meta">Receita: ${receitaNome}</div>` : ''}
             <div class="comp-meta">Categoria: ${e.categoria || '-'}</div>
             <div class="comp-meta">Unidade: ${e.unidade || '-'}</div>
             ${tipo === 'MADEIRA' ? `<div class="comp-meta">Dimensoes: ${dims}</div>` : ''}
-            <div class="comp-meta">Compativeis no estoque: ${compatTexto}</div>
             <div class="comp-meta">${custo}</div>
           </div>
         `;
@@ -681,7 +629,7 @@
             <div class="bloco">
               <p><b>Entradas</b></p>
               <div class="receita-entradas">
-                ${entradas.map(e => renderEntradaEditRow(e, produtoId)).join('')}
+                ${entradas.map(e => renderEntradaEditRow(e)).join('')}
               </div>
               <button class="btn-receita-add-entrada" data-produto-id="${produtoId}" data-receita-id="${receita.receita_id}">Adicionar entrada</button>
             </div>
@@ -793,22 +741,14 @@
 
       const entradas = [...card.querySelectorAll('.linha-receita-entrada')].map(row => {
         const tipo = String(row.querySelector('.entrada-tipo')?.value || '').toUpperCase();
-        const nomeProduto = row.querySelector('.entrada-produto')?.value || '';
-        const nomeEstoque = row.querySelector('.entrada-estoque')?.value || '';
-
-        let nomeItem = '';
-        if (tipo === 'PRODUTO') {
-          nomeItem = nomeProduto;
-        } else {
-          nomeItem = nomeEstoque;
-        }
+        const nomeItem = row.querySelector('.entrada-nome-item')?.value || '';
 
         return {
           tipo_item: tipo,
           nome_item: nomeItem,
-          estoque_ref_id: row.querySelector('.entrada-estoque-id')?.value || '',
-          produto_ref_id: row.querySelector('.entrada-produto-id')?.value || '',
-          receita_ref_id: row.querySelector('.entrada-receita-id')?.value || '',
+          estoque_ref_id: '',
+          produto_ref_id: '',
+          receita_ref_id: '',
           categoria: row.querySelector('.entrada-categoria')?.value || '',
           unidade: row.querySelector('.entrada-unidade')?.value || '',
           qtd_pecas: row.querySelector('.entrada-qtd')?.value || '',
@@ -843,7 +783,6 @@
       const { lista } = el();
       if (!lista) return;
 
-      const precisaReceitas = new Set();
       const abertoId = cardAberto ? cardAberto.dataset.id : null;
       cardAberto = null;
       lista.innerHTML = '';
@@ -874,16 +813,6 @@
           ? `Modelo: ${entradasTotal} entradas, ${saidasTotal} saidas, ${etapasTotal} etapas`
           : 'Modelo: nao configurado';
 
-        receitas.forEach(r => {
-          (r.entradas || []).forEach(e => {
-            if (String(e.tipo_item || '').toUpperCase() === 'PRODUTO' && e.produto_ref_id) {
-              if (!receitasPorProduto[e.produto_ref_id]) {
-                precisaReceitas.add(e.produto_ref_id);
-              }
-            }
-          });
-        });
-
         div.innerHTML = `
           <div class="card-resumo">
             <strong>${i.nome_produto || i.produto_id}</strong><br>
@@ -899,8 +828,6 @@
               <p><b>Receitas</b></p>
               ${renderReceitas(receitas, receitasCarregadas, i.produto_id)}
             </div>
-            ${renderProdutosDatalist(i.produto_id)}
-            ${renderEstoqueDatalists(i.produto_id)}
 
             <div class="acoes">
               <button onclick="ProdutosController.enviarParaProducao('${i.produto_id}')">Criar OP</button>
@@ -912,10 +839,6 @@
 
         lista.appendChild(div);
       });
-
-      if (precisaReceitas.size > 0 && window.ProdutosController?.carregarReceitasProdutoEntrada) {
-        precisaReceitas.forEach(id => ProdutosController.carregarReceitasProdutoEntrada(id));
-      }
 
       initDelegation();
 
@@ -996,8 +919,7 @@
           const cardReceita = e.target.closest('.receita-card');
           const container = cardReceita?.querySelector('.receita-entradas');
           if (container) {
-            const produtoId = cardReceita?.dataset.produtoId || '';
-            container.insertAdjacentHTML('beforeend', renderEntradaEditRow({}, produtoId));
+            container.insertAdjacentHTML('beforeend', renderEntradaEditRow({}));
           }
           return;
         }
@@ -1038,25 +960,13 @@
         if (e.target.classList.contains('entrada-tipo')) {
           const row = e.target.closest('.linha-receita-entrada');
           if (!row) return;
-          const cardReceita = e.target.closest('.receita-card');
-          const produtoId = cardReceita?.dataset.produtoId || '';
           const tipo = String(e.target.value || '').toUpperCase();
-          const isProduto = tipo === 'PRODUTO';
-          const isEstoqueTipo = !!tipo && !isProduto;
           const isMadeira = tipo === 'MADEIRA';
-
-          const estoqueInput = row.querySelector('.entrada-estoque');
-          const produtoInput = row.querySelector('.entrada-produto');
-          const receitaInput = row.querySelector('.entrada-receita');
           const unidadeInput = row.querySelector('.entrada-unidade');
           const categoriaInput = row.querySelector('.entrada-categoria');
           const compInput = row.querySelector('.entrada-comp');
           const largInput = row.querySelector('.entrada-larg');
           const espInput = row.querySelector('.entrada-esp');
-
-          if (estoqueInput) estoqueInput.classList.toggle('hidden', !isEstoqueTipo);
-          if (produtoInput) produtoInput.classList.toggle('hidden', !isProduto);
-          if (receitaInput) receitaInput.classList.toggle('hidden', !isProduto);
 
           if (compInput) compInput.classList.toggle('hidden', !isMadeira);
           if (largInput) largInput.classList.toggle('hidden', !isMadeira);
@@ -1068,37 +978,6 @@
             if (espInput) espInput.value = '';
           }
 
-          const estoqueIdInput = row.querySelector('.entrada-estoque-id');
-          const prodIdInput = row.querySelector('.entrada-produto-id');
-          const recIdInput = row.querySelector('.entrada-receita-id');
-
-          if (!isEstoqueTipo) {
-            if (estoqueInput) {
-              estoqueInput.value = '';
-              estoqueInput.dataset.estoqueId = '';
-              estoqueInput.removeAttribute('list');
-            }
-            if (estoqueIdInput) estoqueIdInput.value = '';
-          } else if (estoqueInput && produtoId) {
-            const tipoKey = String(tipo || '').replace(/[^a-zA-Z0-9]/g, '');
-            estoqueInput.setAttribute('list', `estoqueAutocomplete_${produtoId}_${tipoKey}`);
-          }
-
-          if (!isProduto) {
-            if (produtoInput) {
-              produtoInput.value = '';
-              produtoInput.dataset.produtoId = '';
-            }
-            if (receitaInput) {
-              receitaInput.value = '';
-              receitaInput.dataset.receitaId = '';
-              receitaInput.dataset.produtoId = '';
-              receitaInput.removeAttribute('list');
-            }
-            if (prodIdInput) prodIdInput.value = '';
-            if (recIdInput) recIdInput.value = '';
-          }
-
           if (categoriaInput) {
             categoriaInput.innerHTML = renderOpcoesCategoria('', tipo);
           }
@@ -1107,60 +986,6 @@
 
           return;
         }
-
-        if (e.target.classList.contains('entrada-produto')) {
-          atualizarEntradaProduto(e.target);
-          return;
-        }
-
-        if (e.target.classList.contains('entrada-receita')) {
-          atualizarEntradaReceita(e.target);
-          return;
-        }
-
-        if (e.target.classList.contains('entrada-estoque')) {
-          atualizarEntradaEstoque(e.target);
-          return;
-        }
-      });
-
-      document.addEventListener('input', e => {
-        if (e.target.classList.contains('entrada-produto')) {
-          atualizarEntradaProduto(e.target);
-          return;
-        }
-        if (e.target.classList.contains('entrada-receita')) {
-          atualizarEntradaReceita(e.target);
-          return;
-        }
-        if (e.target.classList.contains('entrada-estoque')) {
-          atualizarEntradaEstoque(e.target);
-          return;
-        }
-      });
-
-      document.addEventListener('focusin', e => {
-        if (!e.target.classList.contains('entrada-receita')) return;
-        const row = e.target.closest('.linha-receita-entrada');
-        const produtoId = row?.querySelector('.entrada-produto-id')?.value || '';
-        if (!produtoId) return;
-        e.target.setAttribute('list', `receitasAutocomplete_${produtoId}`);
-        if (!receitasPorProduto[produtoId] && window.ProdutosController?.carregarReceitasProdutoEntrada) {
-          ProdutosController.carregarReceitasProdutoEntrada(produtoId);
-        } else {
-          atualizarReceitasDatalist(produtoId);
-        }
-      });
-
-      document.addEventListener('focusin', e => {
-        if (!e.target.classList.contains('entrada-estoque')) return;
-        const row = e.target.closest('.linha-receita-entrada');
-        const cardReceita = e.target.closest('.receita-card');
-        const produtoId = cardReceita?.dataset.produtoId || '';
-        const tipo = row?.querySelector('.entrada-tipo')?.value || '';
-        if (!produtoId || !tipo) return;
-        const tipoKey = String(tipo || '').replace(/[^a-zA-Z0-9]/g, '');
-        e.target.setAttribute('list', `estoqueAutocomplete_${produtoId}_${tipoKey}`);
       });
 
     }

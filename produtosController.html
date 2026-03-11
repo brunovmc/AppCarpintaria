@@ -4,7 +4,6 @@
     let editandoId = null;
     let iniciado = false;
 
-    let estoqueOpcoes = [];
     let receitasCache = {};
     let tiposValidacao = [];
     let unidadesValidacao = [];
@@ -23,20 +22,6 @@
         return window.AppRuntime.ensureWritable(contexto);
       }
       return true;
-    }
-
-    function getTiposEstoque() {
-      const tipos = new Set();
-      (estoqueOpcoes || []).forEach(item => {
-        if (item && item.tipo) {
-          tipos.add(String(item.tipo || '').toUpperCase());
-        }
-      });
-      return tipos;
-    }
-
-    function isTipoEstoque(tipo) {
-      return getTiposEstoque().has(String(tipo || '').toUpperCase());
     }
 
     function isTipoValidacao(tipo) {
@@ -78,7 +63,6 @@
       if (iniciado) return;
 
       carregarValidacoes();
-      carregarEstoqueOpcoes();
       carregarProdutos();
 
       iniciado = true;
@@ -86,10 +70,7 @@
 
     function atualizarOpcoesReceitas() {
       if (!window.ProdutosUI || !window.ProdutosStore) return;
-      const produtos = ProdutosStore.get();
       ProdutosUI.setOpcoesReceitas({
-        estoque: estoqueOpcoes,
-        produtos,
         tipos: tiposValidacao,
         unidades: unidadesValidacao,
         categorias: categoriasValidacao,
@@ -136,15 +117,6 @@
       ProdutosUI.renderLista(ProdutosStore.get());
     }
 
-    function carregarEstoqueOpcoes() {
-      google.script.run
-        .withSuccessHandler(lista => {
-          estoqueOpcoes = Array.isArray(lista) ? lista : [];
-          atualizarOpcoesReceitas();
-        })
-        .listarEstoque();
-    }
-
     function carregarProdutos() {
       google.script.run
         .withSuccessHandler(lista => {
@@ -177,7 +149,6 @@
 
     function syncFromBackend() {
       carregarProdutos();
-      carregarEstoqueOpcoes();
     }
 
     function carregarReceitas(produtoId, forcar = false) {
@@ -231,27 +202,6 @@
         })
         .withFailureHandler(() => {
           mostrarToast('Erro ao carregar receitas', 'erro');
-        })
-        .listarReceitasProduto(produtoId);
-    }
-
-    function carregarReceitasProdutoEntrada(produtoId, forcar = false) {
-      if (!produtoId || !window.ProdutosUI) return;
-
-      if (receitasCache[produtoId] && !forcar) {
-        ProdutosUI.setReceitasProduto(produtoId, receitasCache[produtoId]);
-        return;
-      }
-
-      google.script.run
-        .withSuccessHandler(receitas => {
-          const listaBruta = Array.isArray(receitas) ? receitas : [];
-          const lista = listaBruta.length > 0 ? [listaBruta[0]] : [];
-          receitasCache[produtoId] = lista;
-          ProdutosUI.setReceitasProduto(produtoId, lista);
-        })
-        .withFailureHandler(() => {
-          mostrarToast('Erro ao carregar receitas do produto', 'erro');
         })
         .listarReceitasProduto(produtoId);
     }
@@ -561,7 +511,6 @@
       enviarParaProducao,
       excluir,
       carregarReceitas,
-      carregarReceitasProdutoEntrada,
       criarReceita,
       iniciarEdicaoReceita,
       cancelarEdicaoReceita,

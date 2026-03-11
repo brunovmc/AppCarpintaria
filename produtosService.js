@@ -568,17 +568,26 @@ function salvarEntradasReceita(receitaId, linhas) {
 
   const linhasValidas = Array.isArray(linhas) ? linhas : [];
   linhasValidas.forEach(l => {
+    const tipoItem = String(l.tipo_item || '').toUpperCase();
+    const nomeItem = String(l.nome_item || '').trim();
+    const qtdPecas = parseNumeroBR(l.qtd_pecas);
+
+    if (!tipoItem || !nomeItem || !qtdPecas || qtdPecas <= 0) {
+      return;
+    }
+
     const novo = {
       id: gerarId('REN'),
       receita_id: receitaId,
-      tipo_item: String(l.tipo_item || '').toUpperCase(),
-      nome_item: l.nome_item || '',
-      estoque_ref_id: l.estoque_ref_id || '',
-      produto_ref_id: l.produto_ref_id || '',
-      receita_ref_id: l.receita_ref_id || '',
+      tipo_item: tipoItem,
+      nome_item: nomeItem,
+      // Modelo nao deve vincular estoque/produto; vinculo real acontece na OP.
+      estoque_ref_id: '',
+      produto_ref_id: '',
+      receita_ref_id: '',
       categoria: l.categoria || '',
       unidade: l.unidade || '',
-      qtd_pecas: parseNumeroBR(l.qtd_pecas),
+      qtd_pecas: qtdPecas,
       comprimento_cm: parseNumeroBR(l.comprimento_cm),
       largura_cm: parseNumeroBR(l.largura_cm),
       espessura_cm: parseNumeroBR(l.espessura_cm),
