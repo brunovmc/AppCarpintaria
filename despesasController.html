@@ -11,10 +11,18 @@
     let despesaPagamentoId = null;
     let salvandoPagamentoDespesa = false;
     let despesaPagamentoParcelado = false;
+    let listaFiltradaAtual = [];
+    let qtdRenderizada = 0;
+    let carregandoMais = false;
+    let renderJobSeq = 0;
+
+    const PAGE_SIZE = 30;
+    const RENDER_CHUNK_SIZE = 8;
 
     function el() {
       return {
         listaDespesas: document.getElementById('listaDespesasGerais'),
+        listaControles: document.getElementById('listaControlesDespesas'),
         formDespesa: document.getElementById('formularioDespesaGeral'),
         despesaFormTitulo: document.getElementById('despesaFormTitulo'),
         btnSalvarDespesa: document.getElementById('btnSalvarDespesaGeral'),
@@ -60,6 +68,14 @@
       if (!s) return 0;
       const n = Number(s.replace(',', '.'));
       return isNaN(n) ? 0 : n;
+    }
+
+    function proximoFrame(fn) {
+      if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+        window.requestAnimationFrame(fn);
+        return;
+      }
+      setTimeout(fn, 16);
     }
 
     function parseBooleanInput(valor) {
@@ -262,13 +278,110 @@
       });
     }
 
-    function renderDespesas() {
+    function montarCardResumoDespesa(d) {
+      const pendente = Number(d?.total_pendente || 0);
+      const podePagar = pendente > 0.009;
+      const fixo = parseBooleanInput(d?.fixo);
+
+      const card = document.createElement('div');
+      card.className = 'card';
+      card.innerHTML = `
+        <div class="card-resumo">
+          <strong>${escapeHtml(d?.descricao || '-')}</strong><br>
+          ${escapeHtml(d?.categoria || 'SEM_CATEGORIA')} | ${escapeHtml(d?.fornecedor || 'SEM_FORNECEDOR')} | Pago por: ${escapeHtml(d?.pago_por || '-')}<br>
+          Previsto: ${formatarMoeda(d?.total_previsto || 0)} | Pago: ${formatarMoeda(d?.total_pago || 0)} | Pendente: ${formatarMoeda(d?.total_pendente || 0)}<br>
+          Status: ${escapeHtml(d?.status_pagamento || 'PENDENTE')} | Vencimento: ${escapeHtml(d?.data_vencimento || '-')}<br>
+          Pagamento: ${escapeHtml(d?.data_pagamento || '-')} | Forma: ${escapeHtml(d?.forma_pagamento || '-')} | Parcelas: ${Number(d?.parcelas || 1)} | Fixo: ${fixo ? 'SIM' : 'NAO'}
+        </div>
+        <div class="acoes">
+          <button onclick="DespesasController.editarDespesa('${escapeHtml(d?.ID)}')">Editar</button>
+          ${podePagar ? `<button onclick="DespesasController.registrarPagamentoDespesa('${escapeHtml(d?.ID)}')">Registrar pagamento</button>` : ''}
+          <button onclick="DespesasController.excluirDespesa('${escapeHtml(d?.ID)}')">Excluir</button>
+        </div>
+      `;
+      return card;
+    }
+
+    function renderControlesListaDespesas() {
+      const f = el();
+      if (!f.listaControles) return;
+
+      f.listaControles.innerHTML = '';
+      const restante = listaFiltradaAtual.length - qtdRenderizada;
+      if (restante <= 0) return;
+
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'btn-carregar-mais';
+      const labelIdle = `Carregar mais (${restante})`;
+      if (window.AppLoading?.setButtonLoading) {
+        window.AppLoading.setButtonLoading(btn, carregandoMais, labelIdle, 'Carregando');
+      } else {
+        btn.textContent = carregandoMais ? 'Carregando...' : labelIdle;
+      }
+      btn.disabled = carregandoMais;
+      btn.addEventListener('click', () => {
+        renderMaisItensDespesas();
+      });
+      f.listaControles.appendChild(btn);
+    }
+
+    function renderMaisItensDespesas(onDone) {
+      const f = el();
+      if (!f.listaDespesas || carregandoMais) return;
+      if (qtdRenderizada >= listaFiltradaAtual.length) {
+        renderControlesListaDespesas();
+        if (typeof onDone === 'function') onDone();
+        return;
+      }
+
+      carregandoMais = true;
+      renderControlesListaDespesas();
+
+      const inicio = qtdRenderizada;
+      const fim = Math.min(inicio + PAGE_SIZE, listaFiltradaAtual.length);
+      const jobId = ++renderJobSeq;
+      let idx = inicio;
+
+      const processarChunk = () => {
+        if (jobId !== renderJobSeq) return;
+
+        const limite = Math.min(idx + RENDER_CHUNK_SIZE, fim);
+        const fragment = document.createDocumentFragment();
+
+        for (; idx < limite; idx++) {
+          fragment.appendChild(montarCardResumoDespesa(listaFiltradaAtual[idx]));
+        }
+
+        f.listaDespesas.appendChild(fragment);
+
+        if (idx < fim) {
+          proximoFrame(processarChunk);
+          return;
+        }
+
+        qtdRenderizada = fim;
+        carregandoMais = false;
+        renderControlesListaDespesas();
+        if (typeof onDone === 'function') onDone();
+      };
+
+      proximoFrame(processarChunk);
+    }
+
+    function renderListaDespesas(itensFiltrados) {
       const f = el();
       if (!f.listaDespesas) return;
       f.listaDespesas.classList.remove('hidden');
+      f.listaDespesas.innerHTML = '';
+      if (f.listaControles) f.listaControles.innerHTML = '';
 
-      const lista = filtrarDespesas(despesas, filtroTexto);
-      if (!Array.isArray(lista) || lista.length === 0) {
+      renderJobSeq += 1;
+      listaFiltradaAtual = Array.isArray(itensFiltrados) ? itensFiltrados : [];
+      qtdRenderizada = 0;
+      carregandoMais = false;
+
+      if (listaFiltradaAtual.length === 0) {
         const semFiltro = !String(filtroTexto || '').trim();
         f.listaDespesas.innerHTML = semFiltro
           ? '<p>Nenhuma despesa geral cadastrada.</p>'
@@ -276,27 +389,12 @@
         return;
       }
 
-      f.listaDespesas.innerHTML = lista.map(d => {
-        const pendente = Number(d.total_pendente || 0);
-        const podePagar = pendente > 0.009;
-        const fixo = parseBooleanInput(d.fixo);
-        return `
-          <div class="card">
-            <div class="card-resumo">
-              <strong>${escapeHtml(d.descricao || '-')}</strong><br>
-              ${escapeHtml(d.categoria || 'SEM_CATEGORIA')} | ${escapeHtml(d.fornecedor || 'SEM_FORNECEDOR')} | Pago por: ${escapeHtml(d.pago_por || '-')}<br>
-              Previsto: ${formatarMoeda(d.total_previsto || 0)} | Pago: ${formatarMoeda(d.total_pago || 0)} | Pendente: ${formatarMoeda(d.total_pendente || 0)}<br>
-              Status: ${escapeHtml(d.status_pagamento || 'PENDENTE')} | Vencimento: ${escapeHtml(d.data_vencimento || '-')}<br>
-              Pagamento: ${escapeHtml(d.data_pagamento || '-')} | Forma: ${escapeHtml(d.forma_pagamento || '-')} | Parcelas: ${Number(d.parcelas || 1)} | Fixo: ${fixo ? 'SIM' : 'NAO'}
-            </div>
-            <div class="acoes">
-              <button onclick="DespesasController.editarDespesa('${escapeHtml(d.ID)}')">Editar</button>
-              ${podePagar ? `<button onclick="DespesasController.registrarPagamentoDespesa('${escapeHtml(d.ID)}')">Registrar pagamento</button>` : ''}
-              <button onclick="DespesasController.excluirDespesa('${escapeHtml(d.ID)}')">Excluir</button>
-            </div>
-          </div>
-        `;
-      }).join('');
+      renderMaisItensDespesas();
+    }
+
+    function renderDespesas() {
+      const lista = filtrarDespesas(despesas, filtroTexto);
+      renderListaDespesas(lista);
     }
 
     function carregarDespesas(forcarRecarregar = false, onDone) {
