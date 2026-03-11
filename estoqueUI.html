@@ -3,7 +3,6 @@
     let cardAberto = null;
     let delegationInit = false;
 
-    let opcoesProducao = [];
     let categoriasBaseValidacao = [];
     let categoriasPorTipoValidacao = {};
     let listaFiltradaAtual = [];
@@ -170,35 +169,6 @@
 
       const m3 = (comp * larg * espes) / 1000000;
       f.quantidade.value = m3.toFixed(2);
-    }
-
-    function setOpcoesAdicao({ producao } = {}) {
-      opcoesProducao = Array.isArray(producao) ? producao : [];
-
-      const selects = document.querySelectorAll('.add-destino-ref');
-      selects.forEach(sel => {
-        sel.innerHTML = renderOpcoesDestino(sel.value || '');
-      });
-    }
-
-    function renderOpcoesDestino(selecionadoId) {
-      const lista = opcoesProducao;
-      const placeholder = '<option value="">Selecione a producao</option>';
-      const opts = lista.map(i => {
-        const val = i.producao_id;
-        const label = i.nome_ordem || i.nome_produto || i.producao_id;
-        const selected = val === selecionadoId ? 'selected' : '';
-        return `<option value="${val}" ${selected}>${label}</option>`;
-      }).join('');
-      return placeholder + opts;
-    }
-
-    function resetarAdicaoDestino(estoqueId) {
-      const ref = document.getElementById(`addRef_${estoqueId}`);
-      const qtd = document.getElementById(`addQtd_${estoqueId}`);
-
-      if (ref) ref.innerHTML = '<option value="">Selecione a producao</option>';
-      if (qtd) qtd.value = '';
     }
 
     /* =========================
@@ -529,24 +499,6 @@
           <p><b>Voltagem:</b> ${i.voltagem || '-'}</p>
         ` : ''}
 
-        <div class="bloco">
-          <p><b>Adicionar a producao</b></p>
-          <div class="linha-add-destino">
-            <select id="addRef_${i.ID}" class="add-destino-ref" data-estoque-id="${i.ID}">
-              ${renderOpcoesDestino('')}
-            </select>
-            <input
-              id="addQtd_${i.ID}"
-              class="add-destino-qtd"
-              type="number"
-              step="0.01"
-              min="0"
-              placeholder="Qtd (${i.unidade || ''})"
-            >
-            <button class="btn-add-destino" data-estoque-id="${i.ID}">Adicionar</button>
-          </div>
-        </div>
-
         <div class="acoes">
           <button onclick="EstoqueController.editar('${i.ID}')">Editar</button>
           <button onclick="EstoqueController.excluir('${i.ID}')">Excluir</button>
@@ -756,17 +708,6 @@
           return;
         }
 
-        if (e.target.classList.contains('btn-add-destino')) {
-          const estoqueId = e.target.dataset.estoqueId;
-          const destinoId = document.getElementById(`addRef_${estoqueId}`)?.value || '';
-          const quantidade = document.getElementById(`addQtd_${estoqueId}`)?.value || '';
-
-          if (window.EstoqueController) {
-            EstoqueController.adicionarMaterialDestino(estoqueId, destinoId, quantidade);
-          }
-          return;
-        }
-
         if (cardAberto && !cardAberto.contains(e.target)) {
           fecharCard();
         }
@@ -824,8 +765,6 @@
       renderFiltroRapidoTipos,
       marcarTipoRapidoAtivo,
 
-      setOpcoesAdicao,
-      resetarAdicaoDestino,
       atualizarQuantidadeMadeira,
       handleFormaPagamentoChange
     };

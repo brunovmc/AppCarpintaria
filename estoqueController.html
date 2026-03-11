@@ -7,8 +7,6 @@
 
     let validacoes = null;
 
-    let destinosProducao = [];
-
     function perfStart(label, meta) {
       return window.AppPerf?.start(label, meta);
     }
@@ -54,26 +52,8 @@
 
       carregarValidacoes();
       carregarEstoque();
-      carregarDestinosAdicao();
 
       iniciado = true;
-    }
-
-
-    function carregarDestinosAdicao() {
-      const perf = perfStart('rpc.estoque.listarProducao');
-      google.script.run
-        .withSuccessHandler(lista => {
-          perfEnd(perf, { ok: true, total: Array.isArray(lista) ? lista.length : 0 });
-          destinosProducao = Array.isArray(lista) ? lista : [];
-          EstoqueUI.setOpcoesAdicao?.({
-            producao: destinosProducao
-          });
-        })
-        .withFailureHandler(() => {
-          perfEnd(perf, { ok: false });
-        })
-        .listarProducao();
     }
 
     function carregarValidacoes() {
@@ -339,36 +319,6 @@
     }
 
 
-    function adicionarMaterialDestino(estoqueId, destinoId, quantidade) {
-      if (!podeAlterarDados('Alteracao bloqueada em modo somente leitura')) return;
-      const qtd = Number(String(quantidade || '').replace(',', '.'));
-
-      if (!estoqueId || !destinoId) {
-        mostrarToast('Selecione a producao', 'erro');
-        return;
-      }
-
-      if (!qtd || isNaN(qtd) || qtd <= 0) {
-        mostrarToast('Quantidade invalida', 'erro');
-        return;
-      }
-
-      mostrarToast('Adicionando a producao...');
-
-      google.script.run
-        .withFailureHandler(() => {
-          mostrarToast('Erro ao adicionar a producao', 'erro');
-        })
-        .withSuccessHandler(() => {
-          if (window.ProducaoController?.carregarMateriaisPrevistos) {
-            ProducaoController.carregarMateriaisPrevistos(destinoId, true);
-          }
-          EstoqueUI.resetarAdicaoDestino?.(estoqueId);
-          mostrarToast('Adicionado a producao');
-        })
-        .adicionarMaterialExtraProducao(destinoId, estoqueId, qtd);
-    }
-
     function limparEdicao() {
       editandoId = null;
     }
@@ -378,7 +328,6 @@
       salvar,
       editar,
       excluir,
-      adicionarMaterialDestino,
       limparEdicao,
       syncFromBackend
     };
