@@ -15,6 +15,13 @@
       return isNaN(n) ? 0 : n;
     }
 
+    function invalidarCacheDashboardPorImpacto() {
+      const dash = window.DashboardController;
+      if (!dash?.invalidarCacheMeses) return;
+      const refs = dash.coletarMesesImpactados ? dash.coletarMesesImpactados(...arguments) : [];
+      dash.invalidarCacheMeses(refs);
+    }
+
     function podeAlterarDados(contexto = 'Operacao') {
       if (window.AppRuntime?.ensureWritable) {
         return window.AppRuntime.ensureWritable(contexto);
@@ -169,6 +176,7 @@
           })
           .withSuccessHandler(() => {
             mostrarToast('Venda atualizada');
+            invalidarCacheDashboardPorImpacto(snapshot, dados);
             setSalvando(false);
           })
           .atualizarVenda(idAtual, dados);
@@ -200,6 +208,7 @@
           VendasStore.add(itemSalvo);
           renderListaAtual();
           setSalvando(false);
+          invalidarCacheDashboardPorImpacto(dados, itemSalvo);
           mostrarToast('Venda salva');
         })
         .criarVenda(dados);
@@ -228,6 +237,7 @@
       VendasStore.remove(id);
       renderListaAtual();
       mostrarToast('Venda removida');
+      invalidarCacheDashboardPorImpacto(snapshot);
 
       google.script.run
         .withFailureHandler(err => {
@@ -288,6 +298,7 @@
         mostrarToast('Valor de recebimento invalido', 'erro');
         return;
       }
+      const itemAntes = VendasStore.getById(recebimentoVendaId);
 
       salvandoRecebimento = true;
       VendasUI.setModalRecebimentoProcessando(true);
@@ -318,6 +329,7 @@
             EstoqueController.syncFromBackend();
           }
 
+          invalidarCacheDashboardPorImpacto(itemAntes, dados, resp?.vendaAtualizada);
           VendasUI.fecharModalRecebimento();
           recebimentoVendaId = null;
           carregarEstoqueVendavel();

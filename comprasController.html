@@ -19,6 +19,13 @@
       window.AppPerf?.end(token, extra);
     }
 
+    function invalidarCacheDashboardPorImpacto() {
+      const dash = window.DashboardController;
+      if (!dash?.invalidarCacheMeses) return;
+      const refs = dash.coletarMesesImpactados ? dash.coletarMesesImpactados(...arguments) : [];
+      dash.invalidarCacheMeses(refs);
+    }
+
     function podeAlterarDados(contexto = 'Operacao') {
       if (window.AppRuntime?.ensureWritable) {
         return window.AppRuntime.ensureWritable(contexto);
@@ -286,6 +293,7 @@
           })
           .withSuccessHandler(() => {
             mostrarToast('Salvo com sucesso');
+            invalidarCacheDashboardPorImpacto(snapshot, dados);
             setSalvando(false);
           })
           .atualizarItemCompra(idAtual, dados);
@@ -319,6 +327,7 @@
           if (!itemSalvo || !itemSalvo.ID) {
             mostrarToast('Salvo. Atualizando lista...');
             carregarCompras();
+            invalidarCacheDashboardPorImpacto(dados);
             setSalvando(false);
             return;
           }
@@ -326,6 +335,7 @@
           ComprasStore.add(itemSalvo);
           renderListaAtual();
           mostrarToast('Salvo com sucesso');
+          invalidarCacheDashboardPorImpacto(dados, itemSalvo);
           setSalvando(false);
         })
         .criarItemCompra(dados);
@@ -386,6 +396,7 @@
       ComprasStore.remove(id);
       renderListaAtual();
       mostrarToast('Compra removida');
+      invalidarCacheDashboardPorImpacto(snapshot);
 
       google.script.run
         .withFailureHandler(() => {
@@ -441,6 +452,7 @@
           if (window.EstoqueController?.syncFromBackend) {
             EstoqueController.syncFromBackend();
           }
+          invalidarCacheDashboardPorImpacto(snapshot, resp?.compraAtualizada, resp?.itemEstoqueCriado);
           mostrarToast('Adicionado ao estoque');
         })
         .adicionarCompraAoEstoque(id);
@@ -506,6 +518,7 @@
         mostrarToast('Valor pago invalido', 'erro');
         return;
       }
+      const itemAntes = ComprasStore.getById(pagamentoCompraId);
 
       salvandoPagamento = true;
       ComprasUI.setModalPagamentoCompraProcessando(true);
@@ -527,6 +540,7 @@
             carregarCompras();
           }
 
+          invalidarCacheDashboardPorImpacto(itemAntes, dados, resp?.compraAtualizada);
           ComprasUI.fecharModalPagamentoCompra();
           pagamentoCompraId = null;
           mostrarToast('Pagamento registrado');

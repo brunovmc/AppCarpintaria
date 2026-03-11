@@ -257,8 +257,13 @@
 
     function notificarDashboardAlterado() {
       try {
-        if (window.DashboardController?.atualizar) {
-          window.DashboardController.atualizar(true);
+        const dash = window.DashboardController;
+        if (dash?.invalidarCacheMeses) {
+          const refs = dash.coletarMesesImpactados ? dash.coletarMesesImpactados(...arguments) : [];
+          dash.invalidarCacheMeses(refs);
+        }
+        if (dash?.atualizar) {
+          dash.atualizar(true);
         }
       } catch (error) {
         // sem acao
@@ -649,6 +654,7 @@
         fixo: !!f.despesaFixo?.checked,
         observacao: String(f.despesaObservacao?.value || '').trim()
       };
+      const despesaAnterior = despesaEditandoId ? getById(despesaEditandoId) : null;
 
       setSalvandoDespesa(true);
       const runner = google.script.run
@@ -661,7 +667,7 @@
           cancelarFormularioDespesa();
           mostrarToast('Despesa salva');
           carregarDespesas(true);
-          notificarDashboardAlterado();
+          notificarDashboardAlterado(despesaAnterior, payload);
         });
 
       if (despesaEditandoId) {
@@ -676,6 +682,7 @@
       const despesaId = String(id || '').trim();
       if (!despesaId) return;
       if (!confirm('Deseja remover esta despesa geral?')) return;
+      const despesaAtual = getById(despesaId);
 
       google.script.run
         .withFailureHandler(() => {
@@ -684,7 +691,7 @@
         .withSuccessHandler(() => {
           mostrarToast('Despesa removida');
           carregarDespesas(true);
-          notificarDashboardAlterado();
+          notificarDashboardAlterado(despesaAtual);
         })
         .deletarDespesaGeral(despesaId);
     }
@@ -827,6 +834,7 @@
         mostrarToast('Valor pago invalido', 'erro');
         return;
       }
+      const despesaAtual = getById(despesaPagamentoId);
 
       setSalvandoPagamentoDespesa(true);
       google.script.run
@@ -839,7 +847,9 @@
           cancelarPagamentoDespesa();
           mostrarToast('Pagamento registrado');
           carregarDespesas(true);
-          notificarDashboardAlterado();
+          notificarDashboardAlterado(despesaAtual, {
+            data_pagamento: dataPagamento
+          });
         })
         .registrarPagamentoDespesaGeral(despesaPagamentoId, {
           data_pagamento: dataPagamento,

@@ -15,14 +15,17 @@
     let resumoRequestSeq = 0;
     let despesasVisiveis = false;
     let cacheResumoLocal = {};
+    let cacheComposicaoLocal = {};
     let cacheDespesasLocal = { ts: 0, data: null };
     let runtimeListenerRegistrado = false;
     let prefetchVizinhoRefTs = {};
 
     const DASHBOARD_CACHE_TTL_RESUMO_MS = 30000;
+    const DASHBOARD_CACHE_TTL_COMPOSICAO_MS = 30000;
     const DASHBOARD_CACHE_TTL_DESPESAS_MS = 30000;
     const DASHBOARD_STORAGE_VERSION = 'v1';
     const DASHBOARD_STORAGE_PREFIX = `app:dash:${DASHBOARD_STORAGE_VERSION}:resumo:`;
+    const DASHBOARD_STORAGE_COMP_PREFIX = `app:dash:${DASHBOARD_STORAGE_VERSION}:comp:`;
     const DASHBOARD_PREFETCH_TTL_MS = 120000;
 
     function el() {
@@ -109,17 +112,31 @@
 
     function obterJanelaReferencias(referenciaBase) {
       const base = referenciaEhValida(referenciaBase) ? referenciaBase : getMesAtualISO();
-      return [
-        deslocarReferenciaMes(base, -1),
-        base,
-        deslocarReferenciaMes(base, 1)
-      ].filter(Boolean);
+      const refs = [];
+      for (let i = -3; i <= 3; i++) {
+        refs.push(deslocarReferenciaMes(base, i));
+      }
+      return refs.filter(Boolean);
     }
 
     function getStorageKeyResumo(referencia) {
       const ref = String(referencia || '').trim();
       if (!referenciaEhValida(ref)) return '';
       return `${DASHBOARD_STORAGE_PREFIX}${ref}`;
+    }
+
+    function getStorageKeyComposicao(referencia, cardKey) {
+      const ref = String(referencia || '').trim();
+      const card = String(cardKey || '').trim();
+      if (!referenciaEhValida(ref) || !card) return '';
+      return `${DASHBOARD_STORAGE_COMP_PREFIX}${ref}:${card}`;
+    }
+
+    function getCacheKeyComposicao(referencia, cardKey) {
+      const ref = String(referencia || '').trim();
+      const card = String(cardKey || '').trim();
+      if (!referenciaEhValida(ref) || !card) return '';
+      return `${ref}::${card}`;
     }
 
     function storageDisponivel() {
@@ -196,6 +213,49 @@
       });
     }
 
+    function lerComposicaoPersistida(referencia, cardKey) {
+      const key = getStorageKeyComposicao(referencia, cardKey);
+      if (!key) return null;
+      const payload = storageLerJson(key);
+      if (!payload || typeof payload !== 'object') return null;
+      return {
+        data: payload.data || {},
+        hash: String(payload.hash || ''),
+        updatedAt: Number(payload.updatedAt || 0)
+      };
+    }
+
+    function salvarComposicaoPersistida(referencia, cardKey, data, updatedAt, hashForcado = '') {
+      const key = getStorageKeyComposicao(referencia, cardKey);
+      if (!key) return;
+      const hash = String(hashForcado || gerarResumoHash(data));
+      storageSalvarJson(key, {
+        referencia: String(referencia || '').trim(),
+        card: String(cardKey || '').trim(),
+        updatedAt: Number(updatedAt || Date.now()),
+        hash,
+        data: data || {}
+      });
+    }
+
+    function lerComposicaoCacheLocal(referencia, cardKey) {
+      const cacheKey = getCacheKeyComposicao(referencia, cardKey);
+      if (!cacheKey) return null;
+      const entry = cacheComposicaoLocal[cacheKey];
+      if (!entry) return null;
+      if ((Date.now() - Number(entry.ts || 0)) > DASHBOARD_CACHE_TTL_COMPOSICAO_MS) return null;
+      return entry.data || null;
+    }
+
+    function salvarComposicaoCacheLocal(referencia, cardKey, data) {
+      const cacheKey = getCacheKeyComposicao(referencia, cardKey);
+      if (!cacheKey) return;
+      cacheComposicaoLocal[cacheKey] = {
+        ts: Date.now(),
+        data: data || {}
+      };
+    }
+
     function limparResumoPersistidoForaDaJanela(referenciaBase) {
       if (!storageDisponivel()) return;
       const permitidas = new Set(obterJanelaReferencias(referenciaBase).map(r => getStorageKeyResumo(r)).filter(Boolean));
@@ -209,6 +269,43 @@
         keys.forEach(key => {
           if (!permitidas.has(key)) storageRemover(key);
         });
+      } catch (error) {
+        // sem acao
+      }
+    }
+
+    function limparComposicaoPersistidaForaDaJanela(referenciaBase) {
+      if (!storageDisponivel()) return;
+      const refsPermitidas = new Set(obterJanelaReferencias(referenciaBase).map(r => String(r || '').trim()));
+      try {
+        const keys = [];
+        for (let i = 0; i < window.localStorage.length; i++) {
+          const key = window.localStorage.key(i);
+          if (!key) continue;
+          if (key.startsWith(DASHBOARD_STORAGE_COMP_PREFIX)) keys.push(key);
+        }
+        keys.forEach(key => {
+          const semPrefixo = key.slice(DASHBOARD_STORAGE_COMP_PREFIX.length);
+          const ref = semPrefixo.split(':')[0] || '';
+          if (!refsPermitidas.has(ref)) storageRemover(key);
+        });
+      } catch (error) {
+        // sem acao
+      }
+    }
+
+    function limparComposicaoPersistidaMes(referencia) {
+      const ref = String(referencia || '').trim();
+      if (!referenciaEhValida(ref) || !storageDisponivel()) return;
+      try {
+        const keys = [];
+        const prefixoRef = `${DASHBOARD_STORAGE_COMP_PREFIX}${ref}:`;
+        for (let i = 0; i < window.localStorage.length; i++) {
+          const key = window.localStorage.key(i);
+          if (!key) continue;
+          if (key.startsWith(prefixoRef)) keys.push(key);
+        }
+        keys.forEach(storageRemover);
       } catch (error) {
         // sem acao
       }
@@ -263,14 +360,97 @@
       return true;
     }
 
-    function limparCacheDashboardLocal() {
-      cacheResumoLocal = {};
-      cacheDespesasLocal = { ts: 0, data: null };
-      const refAtual = String(el().mesReferencia?.value || getMesAtualISO()).trim() || getMesAtualISO();
-      obterJanelaReferencias(refAtual).forEach(ref => {
-        const key = getStorageKeyResumo(ref);
-        if (key) storageRemover(key);
+    function getMesReferenciaAtiva() {
+      const ref = String(el().mesReferencia?.value || getMesAtualISO()).trim();
+      return referenciaEhValida(ref) ? ref : getMesAtualISO();
+    }
+
+    function extrairMesReferencia(valor) {
+      const s = String(valor || '').trim();
+      if (!s) return '';
+      if (/^\d{4}-\d{2}$/.test(s)) return s;
+      const match = s.match(/^(\d{4}-\d{2})-\d{2}/);
+      if (match && match[1]) return match[1];
+      if (s.includes('T')) {
+        const m2 = s.split('T')[0].match(/^(\d{4}-\d{2})-\d{2}/);
+        if (m2 && m2[1]) return m2[1];
+      }
+      return '';
+    }
+
+    function coletarMesesImpactados() {
+      const refs = new Set();
+
+      const addMes = valor => {
+        const ref = extrairMesReferencia(valor);
+        if (referenciaEhValida(ref)) refs.add(ref);
+      };
+
+      const percorrer = valor => {
+        if (!valor) return;
+        if (Array.isArray(valor)) {
+          valor.forEach(percorrer);
+          return;
+        }
+        if (typeof valor === 'string') {
+          addMes(valor);
+          return;
+        }
+        if (typeof valor !== 'object') return;
+
+        addMes(valor.referencia);
+        addMes(valor.data);
+        addMes(valor.data_pagamento);
+        addMes(valor.data_venda);
+        addMes(valor.data_competencia);
+        addMes(valor.data_vencimento);
+        addMes(valor.data_prevista);
+        addMes(valor.data_prevista_termino);
+        addMes(valor.data_ultimo_pagamento);
+        addMes(valor.comprado_em);
+
+        if (Array.isArray(valor.parcelas_detalhe)) {
+          valor.parcelas_detalhe.forEach(p => {
+            addMes(p?.data_prevista);
+            addMes(p?.data);
+            addMes(p?.data_pagamento);
+          });
+        }
+      };
+
+      for (let i = 0; i < arguments.length; i++) {
+        percorrer(arguments[i]);
+      }
+
+      if (refs.size === 0) {
+        refs.add(getMesReferenciaAtiva());
+      }
+      return Array.from(refs);
+    }
+
+    function invalidarCacheMeses(referencias) {
+      const lista = (Array.isArray(referencias) ? referencias : [])
+        .map(r => String(r || '').trim())
+        .filter(referenciaEhValida);
+      const refs = lista.length > 0 ? [...new Set(lista)] : [getMesReferenciaAtiva()];
+
+      refs.forEach(ref => {
+        delete cacheResumoLocal[ref];
+        const prefixoCache = `${ref}::`;
+        Object.keys(cacheComposicaoLocal).forEach(key => {
+          if (key.startsWith(prefixoCache)) delete cacheComposicaoLocal[key];
+        });
+        storageRemover(getStorageKeyResumo(ref));
+        limparComposicaoPersistidaMes(ref);
       });
+    }
+
+    function limparCacheDashboardLocal(referencias = []) {
+      cacheDespesasLocal = { ts: 0, data: null };
+      const refs = (Array.isArray(referencias) && referencias.length > 0)
+        ? referencias
+        : obterJanelaReferencias(getMesReferenciaAtiva());
+      invalidarCacheMeses(refs);
     }
 
     function lerResumoCacheLocal(referencia) {
@@ -671,6 +851,7 @@
           salvarResumoCacheLocal(refValida, resumoSeguro);
           salvarResumoPersistido(refValida, resumoSeguro, tsAtualizacao, hashNovo);
           limparResumoPersistidoForaDaJanela(refValida);
+          limparComposicaoPersistidaForaDaJanela(refValida);
           prefetchResumosVizinhos(refValida);
 
           if (mudou) {
@@ -793,6 +974,17 @@
       if (!f.modalObservabilidadeCard || !f.obsCardLista || !f.obsCardResumo || !f.obsCardTitulo) return;
 
       f.modalObservabilidadeCard.classList.remove('hidden');
+      const referencia = String(f.mesReferencia?.value || getMesAtualISO()).trim() || getMesAtualISO();
+      const cacheSessao = lerComposicaoCacheLocal(referencia, key);
+      const cachePersistido = lerComposicaoPersistida(referencia, key);
+      const payloadCache = cacheSessao || cachePersistido?.data || null;
+
+      if (payloadCache) {
+        renderObservabilidadeCard(payloadCache, key);
+        setModoSomenteLeitura(false);
+        return;
+      }
+
       f.obsCardTitulo.textContent = 'Buscando dados';
       const loadingHtml = window.AppLoading?.inlineHtml
         ? window.AppLoading.inlineHtml('Carregando')
@@ -800,12 +992,19 @@
       f.obsCardResumo.innerHTML = `<span>${loadingHtml}</span>`;
       f.obsCardLista.innerHTML = `<p class="dash-empty">${loadingHtml}</p>`;
 
-      const referencia = String(f.mesReferencia?.value || getMesAtualISO()).trim() || getMesAtualISO();
       carregandoObservabilidade = true;
       google.script.run
         .withSuccessHandler(payload => {
           carregandoObservabilidade = false;
-          renderObservabilidadeCard(payload || {}, key);
+          const data = payload || {};
+          const ts = Date.now();
+          const hashNovo = gerarResumoHash(data);
+
+          salvarComposicaoCacheLocal(referencia, key, data);
+          salvarComposicaoPersistida(referencia, key, data, ts, hashNovo);
+          limparComposicaoPersistidaForaDaJanela(referencia);
+          setModoSomenteLeitura(false);
+          renderObservabilidadeCard(data, key);
         })
         .withFailureHandler(err => {
           carregandoObservabilidade = false;
@@ -976,7 +1175,7 @@
             return;
           }
           mostrarToast('Pagamento removido');
-          limparCacheDashboardLocal();
+          invalidarCacheMeses(coletarMesesImpactados(item, getMesReferenciaAtiva()));
           atualizar(true);
           if (cardAtual) abrirObservabilidadeCard(cardAtual);
         })
@@ -1170,6 +1369,7 @@
         fixo: !!f.despesaFixo?.checked,
         observacao: String(f.despesaObservacao?.value || '').trim()
       };
+      const despesaAnterior = despesaEditandoId ? getById(despesaEditandoId) : null;
 
       setSalvandoDespesa(true);
       const runner = google.script.run
@@ -1181,7 +1381,7 @@
           setSalvandoDespesa(false);
           cancelarFormularioDespesa();
           mostrarToast('Despesa salva');
-          limparCacheDashboardLocal();
+          invalidarCacheMeses(coletarMesesImpactados(despesaAnterior, payload));
           atualizar(true);
         });
 
@@ -1251,6 +1451,7 @@
       const despesaId = String(id || '').trim();
       if (!despesaId) return;
       if (!confirm('Deseja remover esta despesa geral?')) return;
+      const despesaAtual = getById(despesaId);
 
       google.script.run
         .withFailureHandler(() => {
@@ -1258,7 +1459,7 @@
         })
         .withSuccessHandler(() => {
           mostrarToast('Despesa removida');
-          limparCacheDashboardLocal();
+          invalidarCacheMeses(coletarMesesImpactados(despesaAtual));
           atualizar(true);
         })
         .deletarDespesaGeral(despesaId);
@@ -1411,6 +1612,7 @@
         mostrarToast('Valor pago invalido', 'erro');
         return;
       }
+      const despesaAtual = getById(despesaPagamentoId);
 
       setSalvandoPagamentoDespesa(true);
       google.script.run
@@ -1422,7 +1624,9 @@
           setSalvandoPagamentoDespesa(false);
           cancelarPagamentoDespesa();
           mostrarToast('Pagamento registrado');
-          limparCacheDashboardLocal();
+          invalidarCacheMeses(coletarMesesImpactados(despesaAtual, {
+            data_pagamento: dataPagamento
+          }));
           atualizar(true);
         })
         .registrarPagamentoDespesaGeral(despesaPagamentoId, {
@@ -1450,6 +1654,8 @@
     return {
       init,
       atualizar,
+      invalidarCacheMeses,
+      coletarMesesImpactados,
       handleCardClick,
       handleCardKeydown,
       abrirObservabilidadeCard,
