@@ -28,6 +28,7 @@
         </button>
 
         <div id="navbarMenu" class="navbar-menu hidden">
+          <button type="button" data-aba="despesas" onclick="trocarAba('despesas')">Despesas</button>
           <button type="button" data-aba="estoque" onclick="trocarAba('estoque')">Estoque</button>
           <button type="button" data-aba="compras" onclick="trocarAba('compras')">Compras</button>
           <button type="button" data-aba="vendas" onclick="trocarAba('vendas')">Vendas</button>
@@ -72,6 +73,12 @@
       <button id="btnFiltroVendas" type="button">Filtrar</button>
     </div>
 
+    <!-- BUSCA (DESPESAS) -->
+    <div id="topBarDespesas" class="top-bar hidden">
+      <input id="buscaDespesas" type="text" placeholder="Buscar...">
+      <button id="btnFiltroDespesas" type="button">Filtrar</button>
+    </div>
+
     <div id="painelFiltroCompras" class="hidden" style="margin: 0 0 12px 0;">
       <select id="filtroTipoCompras">
         <option value="">Tipo (todos)</option>
@@ -103,6 +110,10 @@
     <!-- ABAS -->
     <div id="aba-dashboard" class="aba">
       <?!= include('dashboard'); ?>
+    </div>
+
+    <div id="aba-despesas" class="aba hidden">
+      <?!= include('despesas'); ?>
     </div>
 
     <div id="aba-estoque" class="aba hidden">
@@ -153,6 +164,7 @@
     <?!= include('producaoStore'); ?>
     <?!= include('producaoUI'); ?>
     <?!= include('producaoController'); ?>
+    <?!= include('despesasController'); ?>
     <?!= include('dashboardController'); ?>
 
   </body>

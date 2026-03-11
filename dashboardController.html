@@ -309,19 +309,11 @@
         if (f.mesReferencia && !String(f.mesReferencia.value || '').trim()) {
           f.mesReferencia.value = getMesAtualISO();
         }
-        if (f.despesaDataCompetencia && !f.despesaDataCompetencia.value) {
-          f.despesaDataCompetencia.value = getHojeISO();
-        }
-        setDespesasVisiveis(false);
-
-        carregarValidacoes(() => {
-          atualizar(false);
-        });
+        atualizar(false);
         iniciado = true;
         return;
       }
 
-      const f = el();
       atualizar(false);
     }
 
@@ -440,9 +432,7 @@
     function atualizar(forcarRecarregar = false) {
       setCarregandoDashboard(true);
       carregarResumo(!!forcarRecarregar, () => {
-        carregarDespesas(!!forcarRecarregar, () => {
-          setCarregandoDashboard(false);
-        });
+        setCarregandoDashboard(false);
       });
     }
 
@@ -620,12 +610,13 @@
           window.ComprasController.editar(id);
           return true;
         }
-        if (aba === 'dashboard' && window.DashboardController?.editarDespesa) {
-          const existe = Array.isArray(despesas)
-            ? despesas.some(d => String(d.ID || '').trim() === id)
-            : false;
-          if (!existe) return false;
-          window.DashboardController.editarDespesa(id);
+        if (aba === 'despesas' && window.DespesasController?.editar) {
+          const existe = window.DespesasController?.getById ? window.DespesasController.getById(id) : null;
+          if (!existe && window.DespesasController?.syncFromBackend) {
+            window.DespesasController.syncFromBackend();
+            return false;
+          }
+          window.DespesasController.editar(id);
           return true;
         }
         if (aba === 'vendas' && window.VendasController?.editar) {
@@ -666,12 +657,13 @@
           window.ComprasController.excluir(id);
           return true;
         }
-        if (aba === 'dashboard' && window.DashboardController?.excluirDespesa) {
-          const existe = Array.isArray(despesas)
-            ? despesas.some(d => String(d.ID || '').trim() === id)
-            : false;
-          if (!existe) return false;
-          window.DashboardController.excluirDespesa(id);
+        if (aba === 'despesas' && window.DespesasController?.excluir) {
+          const existe = window.DespesasController?.getById ? window.DespesasController.getById(id) : null;
+          if (!existe && window.DespesasController?.syncFromBackend) {
+            window.DespesasController.syncFromBackend();
+            return false;
+          }
+          window.DespesasController.excluir(id);
           return true;
         }
         if (aba === 'vendas' && window.VendasController?.excluir) {

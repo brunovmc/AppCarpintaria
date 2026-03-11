@@ -2,7 +2,7 @@
   /* =========================
      NAV / ABAS
   ========================== */
-  const ABAS_MENU_HAMBURGER = ['estoque', 'compras', 'vendas', 'produtos', 'producao'];
+  const ABAS_MENU_HAMBURGER = ['despesas', 'estoque', 'compras', 'vendas', 'produtos', 'producao'];
   let listenerFecharMenuNavbarAtivo = false;
 
   function getNavbarHamburgerEls() {
@@ -239,6 +239,7 @@
 
   const ABA_REFRESH_INTERVAL_MS = {
     dashboard: 15000,
+    despesas: 30000,
     estoque: 30000,
     compras: 30000,
     vendas: 30000,
@@ -306,6 +307,22 @@
           window.AppPerf?.measure('tab.dashboard.refresh', () => DashboardController.init());
         }
       }
+      return;
+    }
+
+    if (nome === 'despesas') {
+      const loaded = !!window.DespesasController?.isLoaded?.();
+      const recarregar = deveRecarregarAba(nome, !loaded);
+      if (window.DespesasController) {
+        if (!loaded || recarregar) {
+          if (recarregar && loaded && typeof window.DespesasController.syncFromBackend === 'function') {
+            window.AppPerf?.measure('tab.despesas.sync', () => DespesasController.syncFromBackend());
+          } else {
+            window.AppPerf?.measure('tab.despesas.init', () => DespesasController.init());
+          }
+        }
+      }
+      if (typeof aplicarBuscaDespesas === 'function') aplicarBuscaDespesas();
       return;
     }
 
@@ -394,6 +411,7 @@
     const topEstoque = document.getElementById('topBarEstoque');
     const topCompras = document.getElementById('topBarCompras');
     const topVendas = document.getElementById('topBarVendas');
+    const topDespesas = document.getElementById('topBarDespesas');
     const topProdutos = document.getElementById('topBarProdutos');
     const topProducao = document.getElementById('topBarProducao');
     const bottomBar = document.querySelector('.bottom-bar');
@@ -401,6 +419,7 @@
     if (topEstoque) topEstoque.classList.toggle('hidden', nome !== 'estoque');
     if (topCompras) topCompras.classList.toggle('hidden', nome !== 'compras');
     if (topVendas) topVendas.classList.toggle('hidden', nome !== 'vendas');
+    if (topDespesas) topDespesas.classList.toggle('hidden', nome !== 'despesas');
     if (topProdutos) topProdutos.classList.toggle('hidden', nome !== 'produtos');
     if (topProducao) topProducao.classList.toggle('hidden', nome !== 'producao');
     if (bottomBar) bottomBar.classList.toggle('hidden', nome === 'dashboard');
@@ -443,10 +462,17 @@
       } else if (window.ProducaoUI?.abrirFormulario) {
         ProducaoUI.abrirFormulario();
       }
-    } else if (abaAtiva.id === 'aba-dashboard') {
-      if (window.DashboardController?.abrirFormularioDespesa) {
-        DashboardController.abrirFormularioDespesa();
+    } else if (abaAtiva.id === 'aba-despesas') {
+      if (window.DespesasController?.abrirFormularioDespesa) {
+        DespesasController.abrirFormularioDespesa();
       }
+    } else if (abaAtiva.id === 'aba-dashboard') {
+      if (typeof trocarAba === 'function') trocarAba('despesas');
+      setTimeout(() => {
+        if (window.DespesasController?.abrirFormularioDespesa) {
+          DespesasController.abrirFormularioDespesa();
+        }
+      }, 120);
     }
   }
 
@@ -483,6 +509,10 @@
   };
 
   const buscaStateVendas = {
+    texto: ''
+  };
+
+  const buscaStateDespesas = {
     texto: ''
   };
 
@@ -554,6 +584,11 @@
   function vendasEstaAtivo() {
     const abaVendas = document.getElementById('aba-vendas');
     return abaVendas && !abaVendas.classList.contains('hidden');
+  }
+
+  function despesasEstaAtivo() {
+    const abaDespesas = document.getElementById('aba-despesas');
+    return abaDespesas && !abaDespesas.classList.contains('hidden');
   }
 
   function producaoEstaAtivo() {
@@ -673,6 +708,21 @@
   }
 
   const aplicarBuscaVendasDebounced = debounce(aplicarBuscaVendas, 350);
+
+  function aplicarBuscaDespesas() {
+    if (!despesasEstaAtivo()) return;
+    if (!window.DespesasController || typeof window.DespesasController.setFiltroTexto !== 'function') return;
+    if (window.DespesasController.isLoaded && !window.DespesasController.isLoaded()) return;
+
+    const perf = window.AppPerf?.start('busca.despesas.aplicar');
+    const texto = (buscaStateDespesas.texto || '').trim();
+    window.DespesasController.setFiltroTexto(texto);
+    window.AppPerf?.end(perf, {
+      texto_len: texto.length
+    });
+  }
+
+  const aplicarBuscaDespesasDebounced = debounce(aplicarBuscaDespesas, 350);
 
   function aplicarBuscaProdutos() {
     if (!produtosEstaAtivo()) return;
@@ -1134,6 +1184,24 @@
     }
   }
 
+  function initBuscaDespesas() {
+    const input = document.getElementById('buscaDespesas');
+    const btnFiltro = document.getElementById('btnFiltroDespesas');
+
+    if (input) {
+      input.addEventListener('input', () => {
+        buscaStateDespesas.texto = input.value || '';
+        aplicarBuscaDespesasDebounced();
+      });
+    }
+
+    if (btnFiltro) {
+      btnFiltro.addEventListener('click', () => {
+        mostrarToast('Filtro avancado em breve');
+      });
+    }
+  }
+
   function initBuscaProducao() {
     const input = document.getElementById('buscaProducao');
     const btnFiltro = document.getElementById('btnFiltroProducao');
@@ -1158,6 +1226,7 @@
     initBuscaEFiltroEstoque();
     initBuscaEFiltroCompras();
     initBuscaVendas();
+    initBuscaDespesas();
     initBuscaProdutos();
     initBuscaProducao();
   });

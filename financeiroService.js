@@ -1822,7 +1822,7 @@ function getRotuloCardDashboardFinanceiro(cardKey) {
 function getAbaOrigemDashboardFinanceiro(origemTipo) {
   const tipo = String(origemTipo || '').trim().toUpperCase();
   if (tipo === ORIGEM_TIPO_COMPRA) return 'compras';
-  if (tipo === ORIGEM_TIPO_DESPESA) return 'dashboard';
+  if (tipo === ORIGEM_TIPO_DESPESA) return 'despesas';
   if (tipo === ORIGEM_TIPO_VENDA) return 'vendas';
   if (tipo === ORIGEM_TIPO_ESTOQUE) return 'estoque';
   return '';
