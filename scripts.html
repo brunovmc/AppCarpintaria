@@ -298,11 +298,11 @@
     if (nome === 'dashboard') {
       const refMes = document.getElementById('dashMesReferencia');
       const mesAtual = getMesAtualReferencia();
-      const mudouMes = !!refMes && String(refMes.value || '').trim() !== mesAtual;
-      if (refMes) refMes.value = mesAtual;
-      const recarregar = deveRecarregarAba(nome, mudouMes);
+      const referenciaVazia = !!refMes && !String(refMes.value || '').trim();
+      if (refMes && referenciaVazia) refMes.value = mesAtual;
+      const recarregar = deveRecarregarAba(nome, referenciaVazia);
       if (window.DashboardController) {
-        if (recarregar || mudouMes) {
+        if (recarregar || referenciaVazia) {
           window.AppPerf?.measure('tab.dashboard.refresh', () => DashboardController.init());
         }
       }

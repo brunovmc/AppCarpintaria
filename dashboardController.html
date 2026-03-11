@@ -306,7 +306,7 @@
     function init() {
       if (!iniciado) {
         const f = el();
-        if (f.mesReferencia) {
+        if (f.mesReferencia && !String(f.mesReferencia.value || '').trim()) {
           f.mesReferencia.value = getMesAtualISO();
         }
         if (f.despesaDataCompetencia && !f.despesaDataCompetencia.value) {
@@ -322,9 +322,6 @@
       }
 
       const f = el();
-      if (f.mesReferencia) {
-        f.mesReferencia.value = getMesAtualISO();
-      }
       atualizar(false);
     }
 
