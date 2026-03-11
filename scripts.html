@@ -94,44 +94,223 @@
     });
   }
 
+  /* =========================
+     PERF + CICLO DE ABAS
+  ========================== */
+  function createPerfHelper() {
+    const historico = [];
+    let ativo = true;
+    const LIMITE_HIST = 300;
+    const MIN_LOG_MS = 16;
+
+    function agora() {
+      if (typeof performance !== 'undefined' && performance.now) {
+        return performance.now();
+      }
+      return Date.now();
+    }
+
+    function start(label, meta) {
+      return {
+        label: String(label || '').trim() || 'sem-label',
+        t0: agora(),
+        meta: meta || {}
+      };
+    }
+
+    function end(token, extra) {
+      if (!token || !token.label) return 0;
+      const ms = agora() - Number(token.t0 || 0);
+      const entrada = {
+        ts: new Date().toISOString(),
+        label: token.label,
+        ms: Number(ms.toFixed(2)),
+        meta: { ...(token.meta || {}), ...(extra || {}) }
+      };
+      historico.push(entrada);
+      if (historico.length > LIMITE_HIST) historico.shift();
+
+      if (ativo && ms >= MIN_LOG_MS && typeof console !== 'undefined' && console.log) {
+        console.log(`[perf] ${entrada.label}: ${entrada.ms}ms`, entrada.meta);
+      }
+      return ms;
+    }
+
+    function measure(label, fn, meta) {
+      const token = start(label, meta);
+      try {
+        const out = fn();
+        end(token);
+        return out;
+      } catch (error) {
+        end(token, { erro: true, mensagem: error?.message || '' });
+        throw error;
+      }
+    }
+
+    function setEnabled(v) {
+      ativo = !!v;
+    }
+
+    function getHistory() {
+      return historico.slice();
+    }
+
+    function clear() {
+      historico.length = 0;
+    }
+
+    return {
+      start,
+      end,
+      measure,
+      setEnabled,
+      getHistory,
+      clear
+    };
+  }
+
+  window.AppPerf = window.AppPerf || createPerfHelper();
+
+  const ABA_REFRESH_INTERVAL_MS = {
+    dashboard: 15000,
+    estoque: 30000,
+    compras: 30000,
+    vendas: 30000,
+    produtos: 30000,
+    producao: 20000
+  };
+  const abaRefreshState = {};
+
+  function obterNomeAbaAtiva() {
+    const ativa = document.querySelector('.aba:not(.hidden)');
+    const id = String(ativa?.id || '').trim();
+    return id.startsWith('aba-') ? id.slice(4) : '';
+  }
+
+  function deveRecarregarAba(nome, force = false) {
+    const aba = String(nome || '').trim();
+    if (!aba) return false;
+    const agoraMs = Date.now();
+    const state = abaRefreshState[aba] || { last: 0, initialized: false };
+    const ttl = Number(ABA_REFRESH_INTERVAL_MS[aba] || 30000);
+
+    if (force || !state.initialized) {
+      abaRefreshState[aba] = { initialized: true, last: agoraMs };
+      return true;
+    }
+
+    if (agoraMs - Number(state.last || 0) >= ttl) {
+      abaRefreshState[aba] = { initialized: true, last: agoraMs };
+      return true;
+    }
+
+    return false;
+  }
+
+  function executarCicloAba(nome) {
+    if (nome === 'estoque') {
+      const loaded = !!window.EstoqueStore?.isLoaded?.();
+      const recarregar = deveRecarregarAba(nome, !loaded);
+      if (window.EstoqueController) {
+        if (recarregar && loaded && typeof window.EstoqueController.syncFromBackend === 'function') {
+          window.AppPerf?.measure('tab.estoque.sync', () => EstoqueController.syncFromBackend());
+        } else if (!loaded || recarregar) {
+          window.AppPerf?.measure('tab.estoque.init', () => EstoqueController.init());
+        }
+      }
+      if (typeof aplicarBuscaEstoque === 'function') aplicarBuscaEstoque();
+      return;
+    }
+
+    if (nome === 'dashboard') {
+      const recarregar = deveRecarregarAba(nome, false);
+      if (window.DashboardController) {
+        if (recarregar) {
+          window.AppPerf?.measure('tab.dashboard.refresh', () => DashboardController.init());
+        }
+      }
+      return;
+    }
+
+    if (nome === 'compras') {
+      const loaded = !!window.ComprasStore?.isLoaded?.();
+      const recarregar = deveRecarregarAba(nome, !loaded);
+      if (window.ComprasController) {
+        if (recarregar && loaded && typeof window.ComprasController.syncFromBackend === 'function') {
+          window.AppPerf?.measure('tab.compras.sync', () => ComprasController.syncFromBackend());
+        } else if (!loaded || recarregar) {
+          window.AppPerf?.measure('tab.compras.init', () => ComprasController.init());
+        }
+      }
+      if (typeof aplicarBuscaCompras === 'function') aplicarBuscaCompras();
+      return;
+    }
+
+    if (nome === 'vendas') {
+      const loaded = !!window.VendasStore?.isLoaded?.();
+      const recarregar = deveRecarregarAba(nome, !loaded);
+      if (window.VendasController) {
+        if (recarregar && loaded && typeof window.VendasController.syncFromBackend === 'function') {
+          window.AppPerf?.measure('tab.vendas.sync', () => VendasController.syncFromBackend());
+        } else if (!loaded || recarregar) {
+          window.AppPerf?.measure('tab.vendas.init', () => VendasController.init());
+        }
+      }
+      if (typeof aplicarBuscaVendas === 'function') aplicarBuscaVendas();
+      return;
+    }
+
+    if (nome === 'produtos') {
+      const loaded = !!window.ProdutosStore?.isLoaded?.();
+      const recarregar = deveRecarregarAba(nome, !loaded);
+      if (window.ProdutosController) {
+        if (recarregar && loaded && typeof window.ProdutosController.syncFromBackend === 'function') {
+          window.AppPerf?.measure('tab.produtos.sync', () => ProdutosController.syncFromBackend());
+        } else if (!loaded || recarregar) {
+          window.AppPerf?.measure('tab.produtos.init', () => ProdutosController.init());
+        }
+      }
+      if (typeof aplicarBuscaProdutos === 'function') aplicarBuscaProdutos();
+      return;
+    }
+
+    if (nome === 'producao') {
+      const loaded = !!window.ProducaoStore?.isLoaded?.();
+      const recarregar = deveRecarregarAba(nome, !loaded);
+      if (window.ProducaoController) {
+        if (recarregar && loaded && typeof window.ProducaoController.syncFromBackend === 'function') {
+          window.AppPerf?.measure('tab.producao.sync', () => ProducaoController.syncFromBackend());
+        } else if (!loaded || recarregar) {
+          window.AppPerf?.measure('tab.producao.init', () => ProducaoController.init());
+        }
+      }
+      if (typeof aplicarBuscaProducao === 'function') aplicarBuscaProducao();
+    }
+  }
+
   function trocarAba(nome) {
-    document.querySelectorAll('.aba')
-      .forEach(a => a.classList.add('hidden'));
+    window.AppPerf?.measure('nav.trocarAba', () => {
+      const alvo = String(nome || '').trim();
+      if (!alvo) return;
+      const atual = obterNomeAbaAtiva();
+      if (atual && atual === alvo) {
+        fecharMenuNavbar();
+        atualizarEstadoNavbar(alvo);
+        setTopBars(alvo);
+        return;
+      }
 
-    const aba = document.getElementById('aba-' + nome);
-    if (aba) aba.classList.remove('hidden');
-    fecharMenuNavbar();
-    atualizarEstadoNavbar(nome);
-    setTopBars(nome);
+      document.querySelectorAll('.aba')
+        .forEach(a => a.classList.add('hidden'));
 
-    if (nome === 'estoque' && window.EstoqueController) {
-      EstoqueController.init();
-      aplicarBuscaEstoque(); // reaplica filtros ao voltar pra aba
-    }
-
-    if (nome === 'dashboard' && window.DashboardController) {
-      DashboardController.init();
-    }
-
-    if (nome === 'compras' && window.ComprasController) {
-      ComprasController.init();
-      aplicarBuscaCompras();
-    }
-
-    if (nome === 'vendas' && window.VendasController) {
-      VendasController.init();
-      aplicarBuscaVendas();
-    }
-
-    if (nome === 'produtos' && window.ProdutosController) {
-      ProdutosController.init();
-      aplicarBuscaProdutos();
-    }
-
-    if (nome === 'producao' && window.ProducaoController) {
-      ProducaoController.init();
-      aplicarBuscaProducao();
-    }
+      const aba = document.getElementById('aba-' + alvo);
+      if (aba) aba.classList.remove('hidden');
+      fecharMenuNavbar();
+      atualizarEstadoNavbar(alvo);
+      setTopBars(alvo);
+      executarCicloAba(alvo);
+    }, { aba: String(nome || '') });
   }
 
   function setTopBars(nome) {
@@ -339,6 +518,8 @@
     if (!window.EstoqueStore || !window.EstoqueUI) return;
     if (!EstoqueStore.isLoaded()) return;
 
+    const perf = window.AppPerf?.start('busca.estoque.aplicar');
+
     const texto = (buscaState.texto || '').trim();
     const tipo = (buscaState.tipo || '').trim();
     const categoria = (buscaState.categoria || '').trim();
@@ -352,6 +533,13 @@
     });
 
     EstoqueUI.renderLista(lista);
+    window.AppPerf?.end(perf, {
+      total: Array.isArray(lista) ? lista.length : 0,
+      texto_len: texto.length,
+      tipo,
+      categoria,
+      unidade
+    });
   }
 
   const aplicarBuscaEstoqueDebounced = debounce(aplicarBuscaEstoque, 350);
@@ -361,6 +549,8 @@
 
     if (!window.ComprasStore || !window.ComprasUI) return;
     if (!ComprasStore.isLoaded()) return;
+
+    const perf = window.AppPerf?.start('busca.compras.aplicar');
 
     const texto = (buscaStateCompras.texto || '').trim();
     const tipo = (buscaStateCompras.tipo || '').trim();
@@ -375,6 +565,13 @@
     });
 
     ComprasUI.renderLista(lista);
+    window.AppPerf?.end(perf, {
+      total: Array.isArray(lista) ? lista.length : 0,
+      texto_len: texto.length,
+      tipo,
+      categoria,
+      unidade
+    });
   }
 
   const aplicarBuscaComprasDebounced = debounce(aplicarBuscaCompras, 350);
@@ -385,11 +582,17 @@
     if (!window.VendasStore || !window.VendasUI) return;
     if (!VendasStore.isLoaded()) return;
 
+    const perf = window.AppPerf?.start('busca.vendas.aplicar');
+
     const texto = (buscaStateVendas.texto || '').trim();
     const lista = VendasStore.filter({
       texto: texto || undefined
     });
     VendasUI.renderLista(lista);
+    window.AppPerf?.end(perf, {
+      total: Array.isArray(lista) ? lista.length : 0,
+      texto_len: texto.length
+    });
   }
 
   const aplicarBuscaVendasDebounced = debounce(aplicarBuscaVendas, 350);
@@ -400,6 +603,8 @@
     if (!window.ProdutosStore || !window.ProdutosUI) return;
     if (!ProdutosStore.isLoaded()) return;
 
+    const perf = window.AppPerf?.start('busca.produtos.aplicar');
+
     const texto = (buscaStateProdutos.texto || '').trim();
 
     const lista = ProdutosStore.filter({
@@ -407,6 +612,10 @@
     });
 
     ProdutosUI.renderLista(lista);
+    window.AppPerf?.end(perf, {
+      total: Array.isArray(lista) ? lista.length : 0,
+      texto_len: texto.length
+    });
   }
 
   const aplicarBuscaProdutosDebounced = debounce(aplicarBuscaProdutos, 350);
@@ -417,6 +626,8 @@
     if (!window.ProducaoStore || !window.ProducaoUI) return;
     if (!ProducaoStore.isLoaded()) return;
 
+    const perf = window.AppPerf?.start('busca.producao.aplicar');
+
     const texto = (buscaStateProducao.texto || '').trim();
 
     const lista = ProducaoStore.filter({
@@ -424,6 +635,10 @@
     });
 
     ProducaoUI.renderLista(lista);
+    window.AppPerf?.end(perf, {
+      total: Array.isArray(lista) ? lista.length : 0,
+      texto_len: texto.length
+    });
   }
 
   const aplicarBuscaProducaoDebounced = debounce(aplicarBuscaProducao, 350);

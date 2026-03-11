@@ -194,6 +194,12 @@
         .listarProducao();
     }
 
+    function syncFromBackend() {
+      carregarProdutos();
+      carregarEstoqueOpcoes();
+      carregarProducao();
+    }
+
     function salvar() {
       const get = id => document.getElementById(id)?.value || '';
 
@@ -862,6 +868,7 @@
 
     return {
       init,
+      syncFromBackend,
       salvar,
       editar,
       abrirFormularioComModelo,

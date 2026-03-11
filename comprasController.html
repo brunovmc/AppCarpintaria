@@ -11,6 +11,14 @@
 
     let validacoes = null;
 
+    function perfStart(label, meta) {
+      return window.AppPerf?.start(label, meta);
+    }
+
+    function perfEnd(token, extra) {
+      window.AppPerf?.end(token, extra);
+    }
+
     function getDataHojeISO() {
       const agora = new Date();
       const yyyy = agora.getFullYear();
@@ -50,8 +58,10 @@
     }
 
     function carregarValidacoes() {
+      const perf = perfStart('rpc.compras.obterValidacoes');
       google.script.run
         .withSuccessHandler(data => {
+          perfEnd(perf, { ok: true });
           validacoes = data || {};
 
           validacoes.tipos ||= [];
@@ -84,6 +94,10 @@
             popularFiltrosDoPainelCompras();
           }
         })
+        .withFailureHandler(() => {
+          perfEnd(perf, { ok: false });
+          mostrarToast('Falha ao carregar validacoes', 'erro');
+        })
         .obterValidacoes();
     }
 
@@ -111,12 +125,22 @@
     }
 
     function carregarCompras() {
+      const perf = perfStart('rpc.compras.listarCompras');
       google.script.run
         .withSuccessHandler(lista => {
+          perfEnd(perf, { ok: true, total: Array.isArray(lista) ? lista.length : 0 });
           ComprasStore.set(lista);
           renderListaAtual();
         })
+        .withFailureHandler(() => {
+          perfEnd(perf, { ok: false });
+          mostrarToast('Erro ao carregar compras', 'erro');
+        })
         .listarCompras();
+    }
+
+    function syncFromBackend() {
+      carregarCompras();
     }
 
     function salvar() {
@@ -503,6 +527,7 @@
 
     return {
       init,
+      syncFromBackend,
       salvar,
       editar,
       refazer,

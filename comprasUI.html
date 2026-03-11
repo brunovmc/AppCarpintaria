@@ -9,8 +9,10 @@
     let qtdRenderizada = 0;
     let carregandoMais = false;
     let indiceSeparadorAdicionadas = -1;
+    let renderJobSeq = 0;
 
     const PAGE_SIZE = 30;
+    const RENDER_CHUNK_SIZE = 8;
 
     /* =========================
        HELPERS
@@ -79,6 +81,14 @@
       if (s === '') return 0;
       const n = Number(s.replace(',', '.'));
       return isNaN(n) ? 0 : n;
+    }
+
+    function proximoFrame(fn) {
+      if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+        window.requestAnimationFrame(fn);
+        return;
+      }
+      setTimeout(fn, 16);
     }
 
     function formatarMoeda(valor) {
@@ -661,7 +671,7 @@
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'btn-carregar-mais';
-      btn.textContent = `Carregar mais (${restante})`;
+      btn.textContent = carregandoMais ? 'Carregando...' : `Carregar mais (${restante})`;
       btn.disabled = carregandoMais;
       btn.addEventListener('click', () => {
         renderMaisItens();
@@ -670,32 +680,60 @@
       listaControles.appendChild(btn);
     }
 
-    function renderMaisItens() {
+    function renderMaisItens(onDone) {
       const { lista } = el();
       if (!lista || carregandoMais) return;
       if (qtdRenderizada >= listaFiltradaAtual.length) {
         renderControlesLista();
+        if (typeof onDone === 'function') onDone();
         return;
       }
 
       carregandoMais = true;
+      renderControlesLista();
+
       const inicio = qtdRenderizada;
       const fim = Math.min(inicio + PAGE_SIZE, listaFiltradaAtual.length);
-      const fragment = document.createDocumentFragment();
+      const jobId = ++renderJobSeq;
+      const perf = window.AppPerf?.start('ui.compras.renderMais', {
+        inicio,
+        fim,
+        total: listaFiltradaAtual.length
+      });
+      let idx = inicio;
 
-      for (let idx = inicio; idx < fim; idx++) {
-        if (idx === indiceSeparadorAdicionadas) {
-          fragment.appendChild(criarSeparadorAdicionadas());
+      const processarChunk = () => {
+        if (jobId !== renderJobSeq) return;
+
+        const limite = Math.min(idx + RENDER_CHUNK_SIZE, fim);
+        const fragment = document.createDocumentFragment();
+
+        for (; idx < limite; idx++) {
+          if (idx === indiceSeparadorAdicionadas) {
+            fragment.appendChild(criarSeparadorAdicionadas());
+          }
+          fragment.appendChild(montarCardResumo(listaFiltradaAtual[idx]));
         }
-        fragment.appendChild(montarCardResumo(listaFiltradaAtual[idx]));
-      }
 
-      lista.appendChild(fragment);
-      qtdRenderizada = fim;
-      carregandoMais = false;
+        lista.appendChild(fragment);
 
-      renderControlesLista();
-      initDelegation();
+        if (idx < fim) {
+          proximoFrame(processarChunk);
+          return;
+        }
+
+        qtdRenderizada = fim;
+        carregandoMais = false;
+        renderControlesLista();
+        initDelegation();
+        window.AppPerf?.end(perf, {
+          renderizados: fim - inicio,
+          renderizados_total: qtdRenderizada
+        });
+        if (typeof onDone === 'function') onDone();
+      };
+
+      proximoFrame(processarChunk);
     }
 
     function normalizarTipos(lista) {
@@ -753,7 +791,11 @@
       const { lista, listaControles } = el();
       if (!lista) return;
 
+      const perf = window.AppPerf?.start('ui.compras.renderLista', {
+        total: Array.isArray(itens) ? itens.length : 0
+      });
       fecharCard();
+      renderJobSeq += 1;
       lista.innerHTML = '';
       if (listaControles) listaControles.innerHTML = '';
 
@@ -765,10 +807,16 @@
 
       if (listaFiltradaAtual.length === 0) {
         lista.innerHTML = '<p>Nenhum item em compras.</p>';
+        window.AppPerf?.end(perf, { vazio: true });
         return;
       }
 
-      renderMaisItens();
+      renderMaisItens(() => {
+        window.AppPerf?.end(perf, {
+          renderizados_iniciais: qtdRenderizada,
+          total: listaFiltradaAtual.length
+        });
+      });
     }
 
     /* =========================

@@ -9,6 +9,14 @@
 
     let destinosProducao = [];
 
+    function perfStart(label, meta) {
+      return window.AppPerf?.start(label, meta);
+    }
+
+    function perfEnd(token, extra) {
+      window.AppPerf?.end(token, extra);
+    }
+
     function normalizarTextoSemAcento(valor) {
       return String(valor || '')
         .normalize('NFD')
@@ -42,19 +50,26 @@
 
 
     function carregarDestinosAdicao() {
+      const perf = perfStart('rpc.estoque.listarProducao');
       google.script.run
         .withSuccessHandler(lista => {
+          perfEnd(perf, { ok: true, total: Array.isArray(lista) ? lista.length : 0 });
           destinosProducao = Array.isArray(lista) ? lista : [];
           EstoqueUI.setOpcoesAdicao?.({
             producao: destinosProducao
           });
         })
+        .withFailureHandler(() => {
+          perfEnd(perf, { ok: false });
+        })
         .listarProducao();
     }
 
     function carregarValidacoes() {
+      const perf = perfStart('rpc.estoque.obterValidacoes');
       google.script.run
         .withSuccessHandler(data => {
+          perfEnd(perf, { ok: true });
           validacoes = data || {};
 
           validacoes.tipos ||= [];
@@ -90,6 +105,10 @@
             popularFiltrosDoPainel();
           }
         })
+        .withFailureHandler(() => {
+          perfEnd(perf, { ok: false });
+          mostrarToast('Falha ao carregar validacoes', 'erro');
+        })
         .obterValidacoes();
     }
 
@@ -109,14 +128,20 @@
     }
 
     function carregarEstoque() {
+      const perf = perfStart('rpc.estoque.listarEstoque');
       google.script.run
         .withSuccessHandler(lista => {
+          perfEnd(perf, { ok: true, total: Array.isArray(lista) ? lista.length : 0 });
           EstoqueStore.set(lista);
           if (typeof aplicarBuscaEstoque === 'function') {
             aplicarBuscaEstoque();
           } else {
             EstoqueUI.renderLista(EstoqueStore.get());
           }
+        })
+        .withFailureHandler(() => {
+          perfEnd(perf, { ok: false });
+          mostrarToast('Erro ao carregar estoque', 'erro');
         })
         .listarEstoque();
     }
