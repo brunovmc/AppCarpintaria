@@ -188,6 +188,13 @@
     return id.startsWith('aba-') ? id.slice(4) : '';
   }
 
+  function getMesAtualReferencia() {
+    const d = new Date();
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    return `${yyyy}-${mm}`;
+  }
+
   function deveRecarregarAba(nome, force = false) {
     const aba = String(nome || '').trim();
     if (!aba) return false;
@@ -224,9 +231,13 @@
     }
 
     if (nome === 'dashboard') {
-      const recarregar = deveRecarregarAba(nome, false);
+      const refMes = document.getElementById('dashMesReferencia');
+      const mesAtual = getMesAtualReferencia();
+      const mudouMes = !!refMes && String(refMes.value || '').trim() !== mesAtual;
+      if (refMes) refMes.value = mesAtual;
+      const recarregar = deveRecarregarAba(nome, mudouMes);
       if (window.DashboardController) {
-        if (recarregar) {
+        if (recarregar || mudouMes) {
           window.AppPerf?.measure('tab.dashboard.refresh', () => DashboardController.init());
         }
       }
@@ -298,6 +309,7 @@
         fecharMenuNavbar();
         atualizarEstadoNavbar(alvo);
         setTopBars(alvo);
+        executarCicloAba(alvo);
         return;
       }
 

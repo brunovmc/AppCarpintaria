@@ -3,7 +3,7 @@
     <span class="campo-ajuda-tag">Mes de referencia</span>
     <input id="dashMesReferencia" type="month">
   </div>
-  <button class="dashboard-btn-inline" onclick="DashboardController.atualizar()">Atualizar</button>
+  <button class="dashboard-btn-inline" onclick="DashboardController.atualizar(true)">Atualizar</button>
 </div>
 
 <div id="dashboardCards" class="dash-cards"></div>
@@ -33,10 +33,13 @@
 <div class="card">
   <div class="dash-despesa-header">
     <strong>Despesas gerais</strong>
-    <button class="dashboard-btn-inline" onclick="DashboardController.abrirFormularioDespesa()">Nova despesa</button>
+    <div class="dash-despesa-acoes">
+      <button id="btnToggleDespesas" class="dashboard-btn-inline" onclick="DashboardController.toggleDespesas()" aria-expanded="false">Ver despesas</button>
+      <button class="dashboard-btn-inline" onclick="DashboardController.abrirFormularioDespesa()">Nova despesa</button>
+    </div>
   </div>
 
-  <div id="listaDespesasGerais" style="margin-top: 12px;"></div>
+  <div id="listaDespesasGerais" class="hidden" style="margin-top: 12px;"></div>
 </div>
 
 <div id="formularioDespesaGeral" class="modal hidden">

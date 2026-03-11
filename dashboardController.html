@@ -11,6 +11,12 @@
     let cardObservabilidadeAberto = '';
     let cardObservabilidadeItens = [];
     let carregandoObservabilidade = false;
+    let despesasVisiveis = false;
+    let cacheResumoLocal = {};
+    let cacheDespesasLocal = { ts: 0, data: null };
+
+    const DASHBOARD_CACHE_TTL_RESUMO_MS = 30000;
+    const DASHBOARD_CACHE_TTL_DESPESAS_MS = 30000;
 
     function el() {
       return {
@@ -23,6 +29,7 @@
         evolucaoMensal: document.getElementById('dashEvolucaoMensal'),
 
         listaDespesas: document.getElementById('listaDespesasGerais'),
+        btnToggleDespesas: document.getElementById('btnToggleDespesas'),
         formDespesa: document.getElementById('formularioDespesaGeral'),
         despesaFormTitulo: document.getElementById('despesaFormTitulo'),
         btnSalvarDespesa: document.getElementById('btnSalvarDespesaGeral'),
@@ -73,6 +80,42 @@
       const yyyy = d.getFullYear();
       const mm = String(d.getMonth() + 1).padStart(2, '0');
       return `${yyyy}-${mm}`;
+    }
+
+    function limparCacheDashboardLocal() {
+      cacheResumoLocal = {};
+      cacheDespesasLocal = { ts: 0, data: null };
+    }
+
+    function lerResumoCacheLocal(referencia) {
+      const ref = String(referencia || '').trim();
+      if (!ref) return null;
+      const entry = cacheResumoLocal[ref];
+      if (!entry) return null;
+      if ((Date.now() - Number(entry.ts || 0)) > DASHBOARD_CACHE_TTL_RESUMO_MS) return null;
+      return entry.data || null;
+    }
+
+    function salvarResumoCacheLocal(referencia, resumo) {
+      const ref = String(referencia || '').trim();
+      if (!ref) return;
+      cacheResumoLocal[ref] = {
+        ts: Date.now(),
+        data: resumo || {}
+      };
+    }
+
+    function lerDespesasCacheLocal() {
+      if (!cacheDespesasLocal?.data) return null;
+      if ((Date.now() - Number(cacheDespesasLocal.ts || 0)) > DASHBOARD_CACHE_TTL_DESPESAS_MS) return null;
+      return cacheDespesasLocal.data;
+    }
+
+    function salvarDespesasCacheLocal(lista) {
+      cacheDespesasLocal = {
+        ts: Date.now(),
+        data: Array.isArray(lista) ? lista : []
+      };
     }
 
     function parseNumeroInput(valor) {
@@ -244,21 +287,42 @@
     function init() {
       if (!iniciado) {
         const f = el();
-        if (f.mesReferencia && !f.mesReferencia.value) {
+        if (f.mesReferencia) {
           f.mesReferencia.value = getMesAtualISO();
         }
         if (f.despesaDataCompetencia && !f.despesaDataCompetencia.value) {
           f.despesaDataCompetencia.value = getHojeISO();
         }
+        setDespesasVisiveis(false);
 
         carregarValidacoes(() => {
-          atualizar();
+          atualizar(false);
         });
         iniciado = true;
         return;
       }
 
-      atualizar();
+      const f = el();
+      if (f.mesReferencia) {
+        f.mesReferencia.value = getMesAtualISO();
+      }
+      atualizar(false);
+    }
+
+    function setDespesasVisiveis(visivel) {
+      despesasVisiveis = !!visivel;
+      const f = el();
+      if (f.listaDespesas) {
+        f.listaDespesas.classList.toggle('hidden', !despesasVisiveis);
+      }
+      if (f.btnToggleDespesas) {
+        f.btnToggleDespesas.textContent = despesasVisiveis ? 'Ocultar despesas' : 'Ver despesas';
+        f.btnToggleDespesas.setAttribute('aria-expanded', despesasVisiveis ? 'true' : 'false');
+      }
+    }
+
+    function toggleDespesas() {
+      setDespesasVisiveis(!despesasVisiveis);
     }
 
     function renderListaAgregada(container, itens) {
@@ -324,28 +388,43 @@
       `).join('');
     }
 
-    function carregarResumo() {
+    function carregarResumo(forcarRecarregar = false, onDone) {
       const f = el();
       const referencia = String(f.mesReferencia?.value || getMesAtualISO()).trim() || getMesAtualISO();
+      const resumoCache = !forcarRecarregar ? lerResumoCacheLocal(referencia) : null;
+      if (resumoCache) {
+        renderCards(resumoCache?.cards || {});
+        renderListaAgregada(f.gastoPorTipo, resumoCache?.agregados?.gasto_por_tipo);
+        renderListaAgregada(f.gastoPorCategoria, resumoCache?.agregados?.gasto_por_categoria);
+        renderListaAgregada(f.gastoPorFornecedor, resumoCache?.agregados?.gasto_por_fornecedor);
+        renderListaAgregada(f.estoquePorTipo, resumoCache?.agregados?.valor_estoque_por_tipo);
+        renderEvolucaoMensal(f.evolucaoMensal, resumoCache?.evolucao_mensal);
+        if (typeof onDone === 'function') onDone();
+        return;
+      }
 
       google.script.run
         .withSuccessHandler(resumo => {
+          salvarResumoCacheLocal(referencia, resumo || {});
           renderCards(resumo?.cards || {});
           renderListaAgregada(f.gastoPorTipo, resumo?.agregados?.gasto_por_tipo);
           renderListaAgregada(f.gastoPorCategoria, resumo?.agregados?.gasto_por_categoria);
           renderListaAgregada(f.gastoPorFornecedor, resumo?.agregados?.gasto_por_fornecedor);
           renderListaAgregada(f.estoquePorTipo, resumo?.agregados?.valor_estoque_por_tipo);
           renderEvolucaoMensal(f.evolucaoMensal, resumo?.evolucao_mensal);
+          if (typeof onDone === 'function') onDone();
         })
         .withFailureHandler(() => {
           mostrarToast('Erro ao carregar dashboard', 'erro');
+          if (typeof onDone === 'function') onDone();
         })
-        .obterResumoDashboardFinanceiro(referencia);
+        .obterResumoDashboardFinanceiro(referencia, !!forcarRecarregar);
     }
 
-    function atualizar() {
-      carregarResumo();
-      carregarDespesas();
+    function atualizar(forcarRecarregar = false) {
+      carregarResumo(!!forcarRecarregar, () => {
+        carregarDespesas(!!forcarRecarregar);
+      });
     }
 
     function handleCardKeydown(event, cardKey) {
@@ -601,7 +680,8 @@
             return;
           }
           mostrarToast('Pagamento removido');
-          atualizar();
+          limparCacheDashboardLocal();
+          atualizar(true);
           if (cardAtual) abrirObservabilidadeCard(cardAtual);
         })
         .removerPagamento(pagamentoId);
@@ -785,7 +865,8 @@
           setSalvandoDespesa(false);
           cancelarFormularioDespesa();
           mostrarToast('Despesa salva');
-          atualizar();
+          limparCacheDashboardLocal();
+          atualizar(true);
         });
 
       if (despesaEditandoId) {
@@ -795,16 +876,24 @@
       }
     }
 
-    function carregarDespesas() {
+    function carregarDespesas(forcarRecarregar = false) {
+      const despesasCache = !forcarRecarregar ? lerDespesasCacheLocal() : null;
+      if (Array.isArray(despesasCache)) {
+        despesas = despesasCache;
+        renderDespesas();
+        return;
+      }
+
       google.script.run
         .withFailureHandler(() => {
           mostrarToast('Erro ao carregar despesas gerais', 'erro');
         })
         .withSuccessHandler(lista => {
           despesas = Array.isArray(lista) ? lista : [];
+          salvarDespesasCacheLocal(despesas);
           renderDespesas();
         })
-        .listarDespesasGerais();
+        .listarDespesasGerais(!!forcarRecarregar);
     }
 
     function renderDespesas() {
@@ -849,7 +938,8 @@
         })
         .withSuccessHandler(() => {
           mostrarToast('Despesa removida');
-          atualizar();
+          limparCacheDashboardLocal();
+          atualizar(true);
         })
         .deletarDespesaGeral(despesaId);
     }
@@ -1001,7 +1091,8 @@
           setSalvandoPagamentoDespesa(false);
           cancelarPagamentoDespesa();
           mostrarToast('Pagamento registrado');
-          atualizar();
+          limparCacheDashboardLocal();
+          atualizar(true);
         })
         .registrarPagamentoDespesaGeral(despesaPagamentoId, {
           data_pagamento: dataPagamento,
@@ -1034,6 +1125,7 @@
       editarOrigemObservabilidade,
       excluirOrigemObservabilidade,
       removerPagamentoObservabilidade,
+      toggleDespesas,
       abrirFormularioDespesa,
       cancelarFormularioDespesa,
       editarDespesa,
