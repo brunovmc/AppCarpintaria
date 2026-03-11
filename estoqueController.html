@@ -35,7 +35,11 @@
       const btn = document.getElementById('btnSalvarEstoque');
       if (!btn) return;
       btn.disabled = salvando;
-      btn.textContent = salvando ? 'Salvando...' : 'Salvar';
+      if (window.AppLoading?.setButtonLoading) {
+        window.AppLoading.setButtonLoading(btn, salvando, 'Salvar', 'Salvando');
+      } else {
+        btn.textContent = salvando ? 'Salvando...' : 'Salvar';
+      }
     }
 
     function init() {

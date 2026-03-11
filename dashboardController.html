@@ -11,6 +11,7 @@
     let cardObservabilidadeAberto = '';
     let cardObservabilidadeItens = [];
     let carregandoObservabilidade = false;
+    let carregandoDashboard = false;
     let despesasVisiveis = false;
     let cacheResumoLocal = {};
     let cacheDespesasLocal = { ts: 0, data: null };
@@ -21,6 +22,7 @@
     function el() {
       return {
         mesReferencia: document.getElementById('dashMesReferencia'),
+        btnAtualizar: document.getElementById('btnDashboardAtualizar'),
         cards: document.getElementById('dashboardCards'),
         gastoPorTipo: document.getElementById('dashGastoPorTipo'),
         gastoPorCategoria: document.getElementById('dashGastoPorCategoria'),
@@ -116,6 +118,23 @@
         ts: Date.now(),
         data: Array.isArray(lista) ? lista : []
       };
+    }
+
+    function setCarregandoDashboard(ativo) {
+      carregandoDashboard = !!ativo;
+      const f = el();
+      if (!f.btnAtualizar) return;
+      f.btnAtualizar.disabled = carregandoDashboard;
+      if (window.AppLoading?.setButtonLoading) {
+        window.AppLoading.setButtonLoading(
+          f.btnAtualizar,
+          carregandoDashboard,
+          'Atualizar',
+          'Atualizando'
+        );
+      } else {
+        f.btnAtualizar.textContent = carregandoDashboard ? 'Atualizando...' : 'Atualizar';
+      }
     }
 
     function parseNumeroInput(valor) {
@@ -422,8 +441,11 @@
     }
 
     function atualizar(forcarRecarregar = false) {
+      setCarregandoDashboard(true);
       carregarResumo(!!forcarRecarregar, () => {
-        carregarDespesas(!!forcarRecarregar);
+        carregarDespesas(!!forcarRecarregar, () => {
+          setCarregandoDashboard(false);
+        });
       });
     }
 
@@ -506,8 +528,11 @@
 
       f.modalObservabilidadeCard.classList.remove('hidden');
       f.obsCardTitulo.textContent = 'Composicao do card';
-      f.obsCardResumo.innerHTML = '<span>Carregando...</span>';
-      f.obsCardLista.innerHTML = '<p class="dash-empty">Carregando...</p>';
+      const loadingHtml = window.AppLoading?.inlineHtml
+        ? window.AppLoading.inlineHtml('Carregando')
+        : 'Carregando...';
+      f.obsCardResumo.innerHTML = `<span>${loadingHtml}</span>`;
+      f.obsCardLista.innerHTML = `<p class="dash-empty">${loadingHtml}</p>`;
 
       const referencia = String(f.mesReferencia?.value || getMesAtualISO()).trim() || getMesAtualISO();
       carregandoObservabilidade = true;
@@ -784,9 +809,26 @@
       if (f.btnSalvarDespesa) {
         f.btnSalvarDespesa.disabled = salvandoDespesa;
         if (salvandoDespesa) {
-          f.btnSalvarDespesa.textContent = 'Salvando...';
+          if (window.AppLoading?.setButtonLoading) {
+            window.AppLoading.setButtonLoading(
+              f.btnSalvarDespesa,
+              true,
+              despesaEditandoId ? 'Salvar alteracoes' : 'Salvar despesa',
+              'Salvando'
+            );
+          } else {
+            f.btnSalvarDespesa.textContent = 'Salvando...';
+          }
         } else {
-          f.btnSalvarDespesa.textContent = despesaEditandoId ? 'Salvar alteracoes' : 'Salvar despesa';
+          if (window.AppLoading?.setButtonLoading) {
+            window.AppLoading.setButtonLoading(
+              f.btnSalvarDespesa,
+              false,
+              despesaEditandoId ? 'Salvar alteracoes' : 'Salvar despesa'
+            );
+          } else {
+            f.btnSalvarDespesa.textContent = despesaEditandoId ? 'Salvar alteracoes' : 'Salvar despesa';
+          }
         }
       }
     }
@@ -876,22 +918,25 @@
       }
     }
 
-    function carregarDespesas(forcarRecarregar = false) {
+    function carregarDespesas(forcarRecarregar = false, onDone) {
       const despesasCache = !forcarRecarregar ? lerDespesasCacheLocal() : null;
       if (Array.isArray(despesasCache)) {
         despesas = despesasCache;
         renderDespesas();
+        if (typeof onDone === 'function') onDone();
         return;
       }
 
       google.script.run
         .withFailureHandler(() => {
           mostrarToast('Erro ao carregar despesas gerais', 'erro');
+          if (typeof onDone === 'function') onDone();
         })
         .withSuccessHandler(lista => {
           despesas = Array.isArray(lista) ? lista : [];
           salvarDespesasCacheLocal(despesas);
           renderDespesas();
+          if (typeof onDone === 'function') onDone();
         })
         .listarDespesasGerais(!!forcarRecarregar);
     }
@@ -952,9 +997,18 @@
           if (input) input.disabled = salvandoPagamentoDespesa;
         });
       if (f.btnConfirmarPagDespesa) {
-        f.btnConfirmarPagDespesa.textContent = salvandoPagamentoDespesa
-          ? 'Salvando...'
-          : 'Confirmar pagamento';
+        if (window.AppLoading?.setButtonLoading) {
+          window.AppLoading.setButtonLoading(
+            f.btnConfirmarPagDespesa,
+            salvandoPagamentoDespesa,
+            'Confirmar pagamento',
+            'Salvando'
+          );
+        } else {
+          f.btnConfirmarPagDespesa.textContent = salvandoPagamentoDespesa
+            ? 'Salvando...'
+            : 'Confirmar pagamento';
+        }
       }
     }
 

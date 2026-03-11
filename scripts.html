@@ -95,6 +95,71 @@
   }
 
   /* =========================
+     LOADING UI
+  ========================== */
+  function createLoadingHelper() {
+    function escapeHtml(valor) {
+      return String(valor ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    function criarInlineNode(label) {
+      const wrap = document.createElement('span');
+      wrap.className = 'loading-inline';
+
+      const text = document.createElement('span');
+      text.className = 'loading-label';
+      text.textContent = String(label || 'Carregando');
+      wrap.appendChild(text);
+
+      const dots = document.createElement('span');
+      dots.className = 'loading-dots';
+      dots.setAttribute('aria-hidden', 'true');
+      for (let i = 0; i < 3; i++) {
+        const dot = document.createElement('span');
+        dot.textContent = '.';
+        dots.appendChild(dot);
+      }
+      wrap.appendChild(dots);
+      return wrap;
+    }
+
+    function inlineHtml(label) {
+      const texto = escapeHtml(String(label || 'Carregando'));
+      return `<span class="loading-inline"><span class="loading-label">${texto}</span><span class="loading-dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span></span>`;
+    }
+
+    function setButtonLoading(button, ativo, labelIdle, labelLoading = 'Carregando') {
+      const btn = button || null;
+      if (!btn) return;
+      if (ativo) {
+        btn.innerHTML = '';
+        btn.appendChild(criarInlineNode(labelLoading));
+      } else {
+        btn.textContent = String(labelIdle || '');
+      }
+    }
+
+    function setContainerLoading(el, label = 'Carregando') {
+      if (!el) return;
+      el.innerHTML = inlineHtml(label);
+    }
+
+    return {
+      criarInlineNode,
+      inlineHtml,
+      setButtonLoading,
+      setContainerLoading
+    };
+  }
+
+  window.AppLoading = window.AppLoading || createLoadingHelper();
+
+  /* =========================
      PERF + CICLO DE ABAS
   ========================== */
   function createPerfHelper() {

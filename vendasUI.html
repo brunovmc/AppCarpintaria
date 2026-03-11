@@ -525,7 +525,16 @@
           if (input) input.disabled = on;
         });
       if (f.btnConfirmarRecebimento) {
-        f.btnConfirmarRecebimento.textContent = on ? 'Salvando...' : 'Confirmar recebimento';
+        if (window.AppLoading?.setButtonLoading) {
+          window.AppLoading.setButtonLoading(
+            f.btnConfirmarRecebimento,
+            on,
+            'Confirmar recebimento',
+            'Salvando'
+          );
+        } else {
+          f.btnConfirmarRecebimento.textContent = on ? 'Salvando...' : 'Confirmar recebimento';
+        }
       }
     }
 

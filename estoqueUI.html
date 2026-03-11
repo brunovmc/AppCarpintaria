@@ -577,7 +577,12 @@
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'btn-carregar-mais';
-      btn.textContent = carregandoMais ? 'Carregando...' : `Carregar mais (${restante})`;
+      const labelIdle = `Carregar mais (${restante})`;
+      if (window.AppLoading?.setButtonLoading) {
+        window.AppLoading.setButtonLoading(btn, carregandoMais, labelIdle, 'Carregando');
+      } else {
+        btn.textContent = carregandoMais ? 'Carregando...' : labelIdle;
+      }
       btn.disabled = carregandoMais;
       btn.addEventListener('click', () => {
         renderMaisItens();
