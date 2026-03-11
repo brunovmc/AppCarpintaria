@@ -73,6 +73,12 @@
       return isNaN(n) ? 0 : n;
     }
 
+    function formatarMoeda(valor) {
+      const n = Number(valor || 0);
+      const seguro = isNaN(n) ? 0 : n;
+      return `R$ ${seguro.toFixed(2)}`;
+    }
+
     function proximoFrame(fn) {
       if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
         window.requestAnimationFrame(fn);
@@ -481,6 +487,7 @@
       div.className = 'card';
       div.dataset.id = i.ID;
       const isMadeira = String(i.tipo || '').toUpperCase() === 'MADEIRA';
+      const valorTotal = Number(i.quantidade || 0) * Number(i.custo_unitario ?? i.valor_unit ?? 0);
 
       div.innerHTML = `
         <div class="card-resumo">
@@ -488,12 +495,12 @@
           ${i.tipo} - ${i.categoria || '-'}<br>
           ${i.quantidade || 0} ${i.unidade || ''}
           ${isMadeira ? `<br><span>(${i.comprimento_cm || '-'} x ${i.largura_cm || '-'} x ${i.espessura_cm || '-'}) cm</span>` : ''}
+          <div class="card-resumo-valor">Valor: ${formatarMoeda(valorTotal)}</div>
         </div>
 
         <button class="ver-mais">Ver mais</button>
 
         <div class="card-detalhes" data-loaded="0">
-          <button class="fechar-card">X</button>
           <div class="card-detalhes-body"></div>
         </div>
       `;
@@ -740,13 +747,12 @@
 
         if (e.target.classList.contains('ver-mais')) {
           e.stopPropagation();
-          abrirCard(card);
-          return;
-        }
-
-        if (e.target.classList.contains('fechar-card')) {
-          e.stopPropagation();
-          fecharCard();
+          if (!card) return;
+          if (card.classList.contains('aberto')) {
+            fecharCard();
+          } else {
+            abrirCard(card);
+          }
           return;
         }
 
@@ -768,6 +774,13 @@
 
     }
 
+    function atualizarTextoBotaoCard(card, aberto) {
+      if (!card) return;
+      const btn = card.querySelector('.ver-mais');
+      if (!btn) return;
+      btn.textContent = aberto ? 'Ver menos' : 'Ver mais';
+    }
+
     function abrirCard(card) {
       if (!card) return;
 
@@ -776,12 +789,14 @@
       }
       garantirDetalhesCard(card);
       card.classList.add('aberto');
+      atualizarTextoBotaoCard(card, true);
       cardAberto = card;
     }
 
     function fecharCard() {
       if (!cardAberto) return;
       cardAberto.classList.remove('aberto');
+      atualizarTextoBotaoCard(cardAberto, false);
       cardAberto = null;
     }
 

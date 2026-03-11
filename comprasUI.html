@@ -5,10 +5,13 @@
     let categoriasBaseValidacao = [];
     let categoriasPorTipoValidacao = {};
     let listaFiltradaAtual = [];
+    let listaFiltradaCompletaAtual = [];
     let itensPorId = {};
     let qtdRenderizada = 0;
     let carregandoMais = false;
     let indiceSeparadorAdicionadas = -1;
+    let mostrarAdicionadasAoEstoque = false;
+    let toggleAdicionadasInit = false;
     let renderJobSeq = 0;
 
     const PAGE_SIZE = 30;
@@ -22,6 +25,7 @@
         formulario: document.getElementById('formularioCompra'),
         lista: document.getElementById('listaCompras'),
         listaControles: document.getElementById('listaControlesCompras'),
+        btnToggleAdicionadas: document.getElementById('btnToggleComprasAdicionadas'),
 
         // Form
         tipo: document.getElementById('compraTipo'),
@@ -197,11 +201,71 @@
       return String(item?.adicionado_estoque ?? '').trim().toLowerCase() === 'true';
     }
 
-    function calcularIndiceSeparadorAdicionadas(lista) {
+    function separarComprasPorStatus(lista) {
       const arr = Array.isArray(lista) ? lista : [];
-      const idxPrimeiraAdicionada = arr.findIndex(item => compraJaAdicionadaAoEstoque(item));
-      if (idxPrimeiraAdicionada <= 0) return -1;
-      return idxPrimeiraAdicionada;
+      const pendentes = [];
+      const adicionadas = [];
+
+      arr.forEach(item => {
+        if (compraJaAdicionadaAoEstoque(item)) {
+          adicionadas.push(item);
+          return;
+        }
+        pendentes.push(item);
+      });
+
+      return { pendentes, adicionadas };
+    }
+
+    function obterListaVisivelCompras(lista) {
+      const grupos = separarComprasPorStatus(lista);
+      return {
+        ...grupos,
+        visivel: mostrarAdicionadasAoEstoque
+          ? [...grupos.pendentes, ...grupos.adicionadas]
+          : grupos.pendentes
+      };
+    }
+
+    function atualizarBotaoAdicionadas(listaBase) {
+      const { btnToggleAdicionadas } = el();
+      if (!btnToggleAdicionadas) return;
+
+      const { adicionadas } = separarComprasPorStatus(listaBase);
+      const qtdAdicionadas = adicionadas.length;
+      if (qtdAdicionadas === 0) {
+        mostrarAdicionadasAoEstoque = false;
+        btnToggleAdicionadas.classList.add('hidden');
+        btnToggleAdicionadas.disabled = true;
+        btnToggleAdicionadas.textContent = 'Ver adicionadas';
+        return;
+      }
+
+      btnToggleAdicionadas.classList.remove('hidden');
+      btnToggleAdicionadas.disabled = false;
+      btnToggleAdicionadas.textContent = mostrarAdicionadasAoEstoque
+        ? `Ocultar adicionadas (${qtdAdicionadas})`
+        : `Ver adicionadas (${qtdAdicionadas})`;
+    }
+
+    function alternarExibicaoAdicionadas() {
+      mostrarAdicionadasAoEstoque = !mostrarAdicionadasAoEstoque;
+      renderLista(listaFiltradaCompletaAtual);
+    }
+
+    function inicializarToggleAdicionadasSeNecessario() {
+      if (toggleAdicionadasInit) return;
+      toggleAdicionadasInit = true;
+
+      const { btnToggleAdicionadas } = el();
+      if (!btnToggleAdicionadas) return;
+      btnToggleAdicionadas.addEventListener('click', alternarExibicaoAdicionadas);
+    }
+
+    function calcularIndiceSeparadorAdicionadas(quantidadePendentes, quantidadeAdicionadas) {
+      if (!mostrarAdicionadasAoEstoque) return -1;
+      if (quantidadePendentes <= 0 || quantidadeAdicionadas <= 0) return -1;
+      return quantidadePendentes;
     }
 
     function criarSeparadorAdicionadas() {
@@ -567,9 +631,12 @@
     function montarCardResumo(i) {
       const div = document.createElement('div');
       div.className = 'card';
+      const jaAdicionada = compraJaAdicionadaAoEstoque(i);
+      if (jaAdicionada) div.classList.add('card-adicionado-estoque');
       div.dataset.id = i.ID;
       const isMadeira = String(i.tipo || '').toUpperCase() === 'MADEIRA';
-      const status = compraJaAdicionadaAoEstoque(i) ? 'Ja adicionada ao estoque' : 'Pendente para estoque';
+      const status = jaAdicionada ? 'Ja adicionada ao estoque' : 'Pendente para estoque';
+      const valorTotal = Number(i.total_previsto || (Number(i.quantidade || 0) * Number(i.valor_unit || 0)));
 
       div.innerHTML = `
         <div class="card-resumo">
@@ -578,12 +645,12 @@
           ${i.quantidade || 0} ${i.unidade || ''}
           ${isMadeira ? `<br><span>(${i.comprimento_cm || '-'} x ${i.largura_cm || '-'} x ${i.espessura_cm || '-'}) cm</span>` : ''}
           <br><span>${status}</span>
+          <div class="card-resumo-valor">Valor: ${formatarMoeda(valorTotal)}</div>
         </div>
 
         <button class="ver-mais">Ver mais</button>
 
         <div class="card-detalhes" data-loaded="0">
-          <button class="fechar-card">X</button>
           <div class="card-detalhes-body"></div>
         </div>
       `;
@@ -799,19 +866,29 @@
       const perf = window.AppPerf?.start('ui.compras.renderLista', {
         total: Array.isArray(itens) ? itens.length : 0
       });
+      inicializarToggleAdicionadasSeNecessario();
       fecharCard();
       renderJobSeq += 1;
       lista.innerHTML = '';
       if (listaControles) listaControles.innerHTML = '';
 
-      listaFiltradaAtual = Array.isArray(itens) ? itens : [];
+      listaFiltradaCompletaAtual = Array.isArray(itens) ? itens : [];
+      atualizarBotaoAdicionadas(listaFiltradaCompletaAtual);
+      const visao = obterListaVisivelCompras(listaFiltradaCompletaAtual);
+      listaFiltradaAtual = visao.visivel;
       construirIndiceItens(listaFiltradaAtual);
       qtdRenderizada = 0;
       carregandoMais = false;
-      indiceSeparadorAdicionadas = calcularIndiceSeparadorAdicionadas(listaFiltradaAtual);
+      indiceSeparadorAdicionadas = calcularIndiceSeparadorAdicionadas(
+        visao.pendentes.length,
+        visao.adicionadas.length
+      );
 
       if (listaFiltradaAtual.length === 0) {
-        lista.innerHTML = '<p>Nenhum item em compras.</p>';
+        const semPendentesComOcultas = !mostrarAdicionadasAoEstoque && visao.adicionadas.length > 0;
+        lista.innerHTML = semPendentesComOcultas
+          ? '<p>Nenhuma compra pendente. Use "Ver adicionadas" para abrir as compras ja adicionadas ao estoque.</p>'
+          : '<p>Nenhum item em compras.</p>';
         window.AppPerf?.end(perf, { vazio: true });
         return;
       }
@@ -839,13 +916,12 @@
 
         if (e.target.classList.contains('ver-mais')) {
           e.stopPropagation();
-          abrirCard(card);
-          return;
-        }
-
-        if (e.target.classList.contains('fechar-card')) {
-          e.stopPropagation();
-          fecharCard();
+          if (!card) return;
+          if (card.classList.contains('aberto')) {
+            fecharCard();
+          } else {
+            abrirCard(card);
+          }
           return;
         }
 
@@ -853,6 +929,13 @@
           fecharCard();
         }
       });
+    }
+
+    function atualizarTextoBotaoCard(card, aberto) {
+      if (!card) return;
+      const btn = card.querySelector('.ver-mais');
+      if (!btn) return;
+      btn.textContent = aberto ? 'Ver menos' : 'Ver mais';
     }
 
     function abrirCard(card) {
@@ -863,12 +946,14 @@
       }
       garantirDetalhesCard(card);
       card.classList.add('aberto');
+      atualizarTextoBotaoCard(card, true);
       cardAberto = card;
     }
 
     function fecharCard() {
       if (!cardAberto) return;
       cardAberto.classList.remove('aberto');
+      atualizarTextoBotaoCard(cardAberto, false);
       cardAberto = null;
     }
 
