@@ -580,19 +580,6 @@
     margin: 8px 0 14px 0;
   }
 
-  .compras-toolbar {
-    display: flex;
-    justify-content: flex-start;
-    margin: -4px 0 10px 0;
-  }
-
-  .compras-toggle-adicionadas {
-    width: auto;
-    margin: 0;
-    padding: 8px 12px;
-    font-size: 13px;
-  }
-
   .btn-carregar-mais {
     width: auto;
     min-width: 160px;
@@ -656,14 +643,28 @@
   }
 
   .compras-separador-grupo {
-    margin: 4px 0 14px;
+    margin: 6px 0 14px;
     padding-top: 10px;
     border-top: 1px solid #e5e7eb;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+  }
+
+  .compras-separador-label {
     color: #6b7280;
     font-size: 12px;
     font-weight: 600;
     letter-spacing: 0.04em;
     text-transform: uppercase;
+  }
+
+  .compras-separador-acao {
+    width: auto;
+    margin: 0;
+    padding: 6px 10px;
+    font-size: 12px;
   }
 
   /* Botão "Ver mais" */

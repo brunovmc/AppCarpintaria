@@ -10,8 +10,9 @@
     let qtdRenderizada = 0;
     let carregandoMais = false;
     let indiceSeparadorAdicionadas = -1;
+    let qtdAdicionadasFiltradas = 0;
+    let separadorAdicionadasRenderizado = false;
     let mostrarAdicionadasAoEstoque = false;
-    let toggleAdicionadasInit = false;
     let renderJobSeq = 0;
 
     const PAGE_SIZE = 30;
@@ -25,7 +26,6 @@
         formulario: document.getElementById('formularioCompra'),
         lista: document.getElementById('listaCompras'),
         listaControles: document.getElementById('listaControlesCompras'),
-        btnToggleAdicionadas: document.getElementById('btnToggleComprasAdicionadas'),
 
         // Form
         tipo: document.getElementById('compraTipo'),
@@ -227,51 +227,34 @@
       };
     }
 
-    function atualizarBotaoAdicionadas(listaBase) {
-      const { btnToggleAdicionadas } = el();
-      if (!btnToggleAdicionadas) return;
-
-      const { adicionadas } = separarComprasPorStatus(listaBase);
-      const qtdAdicionadas = adicionadas.length;
-      if (qtdAdicionadas === 0) {
-        mostrarAdicionadasAoEstoque = false;
-        btnToggleAdicionadas.classList.add('hidden');
-        btnToggleAdicionadas.disabled = true;
-        btnToggleAdicionadas.textContent = 'Ver adicionadas';
-        return;
-      }
-
-      btnToggleAdicionadas.classList.remove('hidden');
-      btnToggleAdicionadas.disabled = false;
-      btnToggleAdicionadas.textContent = mostrarAdicionadasAoEstoque
-        ? `Ocultar adicionadas (${qtdAdicionadas})`
-        : `Ver adicionadas (${qtdAdicionadas})`;
-    }
-
-    function alternarExibicaoAdicionadas() {
+    function toggleAdicionadasAoEstoque() {
       mostrarAdicionadasAoEstoque = !mostrarAdicionadasAoEstoque;
       renderLista(listaFiltradaCompletaAtual);
     }
 
-    function inicializarToggleAdicionadasSeNecessario() {
-      if (toggleAdicionadasInit) return;
-      toggleAdicionadasInit = true;
-
-      const { btnToggleAdicionadas } = el();
-      if (!btnToggleAdicionadas) return;
-      btnToggleAdicionadas.addEventListener('click', alternarExibicaoAdicionadas);
-    }
-
     function calcularIndiceSeparadorAdicionadas(quantidadePendentes, quantidadeAdicionadas) {
-      if (!mostrarAdicionadasAoEstoque) return -1;
-      if (quantidadePendentes <= 0 || quantidadeAdicionadas <= 0) return -1;
-      return quantidadePendentes;
+      if (quantidadeAdicionadas <= 0) return -1;
+      return Math.max(0, Number(quantidadePendentes || 0));
     }
 
     function criarSeparadorAdicionadas() {
       const div = document.createElement('div');
       div.className = 'compras-separador-grupo';
-      div.textContent = 'Ja adicionadas ao estoque';
+
+      const label = document.createElement('span');
+      label.className = 'compras-separador-label';
+      label.textContent = 'Ja adicionadas ao estoque';
+
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'compras-separador-acao';
+      btn.textContent = mostrarAdicionadasAoEstoque
+        ? `Ocultar (${qtdAdicionadasFiltradas})`
+        : `Ver adicionadas (${qtdAdicionadasFiltradas})`;
+      btn.onclick = () => toggleAdicionadasAoEstoque();
+
+      div.appendChild(label);
+      div.appendChild(btn);
       return div;
     }
 
@@ -781,8 +764,9 @@
         const fragment = document.createDocumentFragment();
 
         for (; idx < limite; idx++) {
-          if (idx === indiceSeparadorAdicionadas) {
+          if (!separadorAdicionadasRenderizado && idx === indiceSeparadorAdicionadas) {
             fragment.appendChild(criarSeparadorAdicionadas());
+            separadorAdicionadasRenderizado = true;
           }
           fragment.appendChild(montarCardResumo(listaFiltradaAtual[idx]));
         }
@@ -792,6 +776,11 @@
         if (idx < fim) {
           proximoFrame(processarChunk);
           return;
+        }
+
+        if (!separadorAdicionadasRenderizado && indiceSeparadorAdicionadas === fim && qtdAdicionadasFiltradas > 0) {
+          lista.appendChild(criarSeparadorAdicionadas());
+          separadorAdicionadasRenderizado = true;
         }
 
         qtdRenderizada = fim;
@@ -866,19 +855,22 @@
       const perf = window.AppPerf?.start('ui.compras.renderLista', {
         total: Array.isArray(itens) ? itens.length : 0
       });
-      inicializarToggleAdicionadasSeNecessario();
       fecharCard();
       renderJobSeq += 1;
       lista.innerHTML = '';
       if (listaControles) listaControles.innerHTML = '';
 
       listaFiltradaCompletaAtual = Array.isArray(itens) ? itens : [];
-      atualizarBotaoAdicionadas(listaFiltradaCompletaAtual);
       const visao = obterListaVisivelCompras(listaFiltradaCompletaAtual);
       listaFiltradaAtual = visao.visivel;
+      qtdAdicionadasFiltradas = visao.adicionadas.length;
+      if (qtdAdicionadasFiltradas === 0) {
+        mostrarAdicionadasAoEstoque = false;
+      }
       construirIndiceItens(listaFiltradaAtual);
       qtdRenderizada = 0;
       carregandoMais = false;
+      separadorAdicionadasRenderizado = false;
       indiceSeparadorAdicionadas = calcularIndiceSeparadorAdicionadas(
         visao.pendentes.length,
         visao.adicionadas.length
@@ -886,9 +878,11 @@
 
       if (listaFiltradaAtual.length === 0) {
         const semPendentesComOcultas = !mostrarAdicionadasAoEstoque && visao.adicionadas.length > 0;
-        lista.innerHTML = semPendentesComOcultas
-          ? '<p>Nenhuma compra pendente. Use "Ver adicionadas" para abrir as compras ja adicionadas ao estoque.</p>'
-          : '<p>Nenhum item em compras.</p>';
+        if (semPendentesComOcultas) {
+          lista.appendChild(criarSeparadorAdicionadas());
+        } else {
+          lista.innerHTML = '<p>Nenhum item em compras.</p>';
+        }
         window.AppPerf?.end(perf, { vazio: true });
         return;
       }
@@ -1089,6 +1083,7 @@
       renderFormasPagamento,
       renderFiltroRapidoTipos,
       marcarTipoRapidoAtivo,
+      toggleAdicionadasAoEstoque,
       atualizarQuantidadeMadeira,
       definirTituloFormulario,
       abrirModalPagamentoCompra,
