@@ -398,7 +398,7 @@
           class="dash-card dash-card-click"
           role="button"
           tabindex="0"
-          onclick="DashboardController.abrirObservabilidadeCard('${escapeHtml(def.key)}')"
+          onclick="DashboardController.handleCardClick('${escapeHtml(def.key)}')"
           onkeydown="DashboardController.handleCardKeydown(event, '${escapeHtml(def.key)}')"
         >
           <div class="dash-card-label">${escapeHtml(def.label)}</div>
@@ -453,7 +453,19 @@
       const tecla = String(event?.key || '').toLowerCase();
       if (tecla !== 'enter' && tecla !== ' ' && tecla !== 'spacebar') return;
       if (event?.preventDefault) event.preventDefault();
-      abrirObservabilidadeCard(cardKey);
+      handleCardClick(cardKey);
+    }
+
+    function handleCardClick(cardKey) {
+      const key = String(cardKey || '').trim();
+      if (!key) return;
+      if (key === 'valor_estoque_total') {
+        if (typeof window.trocarAba === 'function') {
+          window.trocarAba('estoque');
+        }
+        return;
+      }
+      abrirObservabilidadeCard(key);
     }
 
     function renderObservabilidadeCard(payload, fallbackCardKey) {
@@ -527,7 +539,7 @@
       if (!f.modalObservabilidadeCard || !f.obsCardLista || !f.obsCardResumo || !f.obsCardTitulo) return;
 
       f.modalObservabilidadeCard.classList.remove('hidden');
-      f.obsCardTitulo.textContent = 'Composicao do card';
+      f.obsCardTitulo.textContent = 'Buscando dados';
       const loadingHtml = window.AppLoading?.inlineHtml
         ? window.AppLoading.inlineHtml('Carregando')
         : 'Carregando...';
@@ -543,7 +555,7 @@
         })
         .withFailureHandler(err => {
           carregandoObservabilidade = false;
-          f.obsCardTitulo.textContent = 'Composicao do card';
+          f.obsCardTitulo.textContent = 'Buscando dados';
           f.obsCardResumo.innerHTML = '<span>Falha ao carregar.</span>';
           f.obsCardLista.innerHTML = '<p class="dash-empty">Nao foi possivel carregar os dados deste card.</p>';
           mostrarToast(err?.message || 'Erro ao carregar composicao do card', 'erro');
@@ -1173,6 +1185,7 @@
     return {
       init,
       atualizar,
+      handleCardClick,
       handleCardKeydown,
       abrirObservabilidadeCard,
       fecharObservabilidadeCard,

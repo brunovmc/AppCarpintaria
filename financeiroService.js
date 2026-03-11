@@ -1698,9 +1698,12 @@ function obterResumoDashboardFinanceiro(referenciaYm, forcarRecarregar) {
   pendentes.forEach(item => {
     const pendente = round2Financeiro(parseNumeroBR(item.total_pendente));
     if (pendente <= 0) return;
-
-    pendenteTotal = round2Financeiro(pendenteTotal + pendente);
     const vencimento = inicioDoDiaFinanceiro(item.data_vencimento);
+    const pendenciaDoMesReferencia = !!vencimento && vencimento >= inicio && vencimento < fim;
+
+    if (pendenciaDoMesReferencia) {
+      pendenteTotal = round2Financeiro(pendenteTotal + pendente);
+    }
     if (!vencimento) return;
     if (vencimento.getTime() < hoje.getTime()) {
       vencidoTotal = round2Financeiro(vencidoTotal + pendente);
@@ -2126,6 +2129,8 @@ function obterComposicaoCardDashboardFinanceiro(referenciaYm, cardKey, forcarRec
         if (!dataVenc || dataVenc.getTime() >= hoje.getTime()) return;
       } else if (chave === 'avencer_7_dias') {
         if (!dataVenc || dataVenc.getTime() < hoje.getTime() || dataVenc.getTime() > limite7.getTime()) return;
+      } else if (chave === 'pendente_total') {
+        if (!dataVenc || dataVenc < inicio || dataVenc >= fim) return;
       }
 
       const meta = obterMetaOrigem(entry.origem_tipo, item.ID);
