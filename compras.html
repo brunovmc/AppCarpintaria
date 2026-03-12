@@ -19,7 +19,7 @@
 
   <div class="campo-ajuda-wrap">
     <span class="campo-ajuda-tag">Quantidade</span>
-    <input id="compraQuantidade" type="number" oninput="ComprasUI.handleParcelasConfigChange()">
+    <input id="compraQuantidade" type="number" oninput="ComprasUI.handleQuantidadeInput()">
   </div>
 
   <div class="campo-ajuda-wrap">
@@ -58,8 +58,13 @@
   </div>
 
   <div class="campo-ajuda-wrap">
+    <span class="campo-ajuda-tag">Valor total item (R$)</span>
+    <input id="compraValorTotalItem" type="number" step="0.01" min="0" oninput="ComprasUI.handleValorTotalInput()">
+  </div>
+
+  <div class="campo-ajuda-wrap">
     <span class="campo-ajuda-tag">Valor unitario (R$)</span>
-    <input id="compraValorUnit" type="number" oninput="ComprasUI.handleParcelasConfigChange()">
+    <input id="compraValorUnit" type="number" oninput="ComprasUI.handleValorUnitInput()">
   </div>
 
   <div class="campo-ajuda-wrap">

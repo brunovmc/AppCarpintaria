@@ -35,6 +35,7 @@
         categoria: document.getElementById('compraCategoria'),
         fornecedor: document.getElementById('compraFornecedor'),
         pago_por: document.getElementById('compraPagoPor'),
+        valor_total_item: document.getElementById('compraValorTotalItem'),
         valor_unit: document.getElementById('compraValorUnit'),
         observacao: document.getElementById('compraObservacao'),
 
@@ -83,7 +84,35 @@
     function parseNumeroInput(valor) {
       const s = String(valor ?? '').trim();
       if (s === '') return 0;
-      const n = Number(s.replace(',', '.'));
+
+      const limpo = s.replace(/\s+/g, '').replace(/[^\d,.\-]/g, '');
+      if (!limpo || limpo === '-') return 0;
+
+      const negativo = limpo.startsWith('-');
+      const semSinal = limpo.replace(/-/g, '');
+      const temVirgula = semSinal.includes(',');
+      const temPonto = semSinal.includes('.');
+      let normalizado = semSinal;
+
+      if (temVirgula && temPonto) {
+        if (semSinal.lastIndexOf(',') > semSinal.lastIndexOf('.')) {
+          normalizado = semSinal.replace(/\./g, '').replace(',', '.');
+        } else {
+          normalizado = semSinal.replace(/,/g, '');
+        }
+      } else if (temVirgula) {
+        const partes = semSinal.split(',');
+        normalizado = partes.length > 2
+          ? partes.join('')
+          : `${partes[0] || '0'}.${partes[1] || '0'}`;
+      } else if (temPonto) {
+        const partes = semSinal.split('.');
+        normalizado = partes.length > 2
+          ? partes.join('')
+          : semSinal;
+      }
+
+      const n = Number(`${negativo ? '-' : ''}${normalizado}`);
       return isNaN(n) ? 0 : n;
     }
 
@@ -116,9 +145,82 @@
 
     function getValorTotalCompraFormulario() {
       const f = el();
+      const valorTotalInformadoBruto = String(f.valor_total_item?.value || '').trim();
+      const valorTotalInformado = parseNumeroInput(valorTotalInformadoBruto);
+      if (valorTotalInformadoBruto !== '' && valorTotalInformado >= 0) {
+        return Number(valorTotalInformado.toFixed(2));
+      }
+
       const quantidade = parseNumeroInput(f.quantidade?.value || 0);
       const valorUnit = parseNumeroInput(f.valor_unit?.value || 0);
       return Number((quantidade * valorUnit).toFixed(2));
+    }
+
+    function sincronizarValorCompra(origem) {
+      const f = el();
+      if (!f.quantidade || !f.valor_unit || !f.valor_total_item) return;
+
+      const qtd = parseNumeroInput(f.quantidade.value || 0);
+      const valorUnit = parseNumeroInput(f.valor_unit.value || 0);
+      const valorTotal = parseNumeroInput(f.valor_total_item.value || 0);
+      const valorUnitRaw = String(f.valor_unit.value || '').trim();
+      const valorTotalRaw = String(f.valor_total_item.value || '').trim();
+
+      if (origem === 'total') {
+        if (!valorTotalRaw) {
+          if (qtd > 0 && valorUnitRaw !== '') {
+            f.valor_total_item.value = Number((qtd * valorUnit).toFixed(2));
+          }
+          handleParcelasConfigChange();
+          return;
+        }
+
+        if (qtd > 0) {
+          const novoUnit = valorTotal / qtd;
+          f.valor_unit.value = Number(novoUnit.toFixed(6));
+        } else {
+          f.valor_unit.value = '';
+        }
+        handleParcelasConfigChange();
+        return;
+      }
+
+      if (origem === 'unit') {
+        if (!valorUnitRaw) {
+          f.valor_total_item.value = '';
+          handleParcelasConfigChange();
+          return;
+        }
+        if (qtd > 0) {
+          f.valor_total_item.value = Number((qtd * valorUnit).toFixed(2));
+        }
+        handleParcelasConfigChange();
+        return;
+      }
+
+      if (origem === 'quantidade') {
+        if (valorTotalRaw && qtd > 0) {
+          const novoUnit = valorTotal / qtd;
+          f.valor_unit.value = Number(novoUnit.toFixed(6));
+        } else if (valorUnitRaw && qtd > 0) {
+          f.valor_total_item.value = Number((qtd * valorUnit).toFixed(2));
+        } else if (qtd <= 0 && !valorTotalRaw) {
+          f.valor_total_item.value = '';
+        }
+        handleParcelasConfigChange();
+      }
+    }
+
+    function handleQuantidadeInput() {
+      sincronizarValorCompra('quantidade');
+    }
+
+    function handleValorUnitInput() {
+      sincronizarValorCompra('unit');
+    }
+
+    function handleValorTotalInput() {
+      sincronizarValorCompra('total');
     }
 
     function gerarParcelasPadrao(valorTotal, parcelas, dataBase) {
@@ -327,8 +429,8 @@
       }
 
       const m3 = (comp * larg * espes) / 1000000;
-      f.quantidade.value = m3.toFixed(2);
-      handleParcelasConfigChange();
+      f.quantidade.value = m3.toFixed(6);
+      sincronizarValorCompra('quantidade');
     }
 
     /* =========================
@@ -379,6 +481,11 @@
       if (f.pago_por) f.pago_por.value = data.pago_por || '';
 
       if (f.valor_unit) f.valor_unit.value = data.valor_unit || '';
+      if (f.valor_total_item) {
+        const qtd = parseNumeroInput(data.quantidade || 0);
+        const unit = parseNumeroInput(data.valor_unit || 0);
+        f.valor_total_item.value = (qtd > 0 && unit >= 0) ? Number((qtd * unit).toFixed(2)) : '';
+      }
       if (f.observacao) f.observacao.value = data.observacao || '';
 
       if (f.comprimento_cm) f.comprimento_cm.value = data.comprimento_cm || '';
@@ -419,6 +526,7 @@
         f.categoria,
         f.fornecedor,
         f.pago_por,
+        f.valor_total_item,
         f.valor_unit,
         f.observacao,
         f.comprimento_cm,
@@ -441,6 +549,7 @@
       if (f.parcelas_detalhe_wrap) f.parcelas_detalhe_wrap.classList.add('hidden');
       renderCategoriasDoTipo('', '');
       handleFormaPagamentoChange();
+      sincronizarValorCompra('quantidade');
       definirTituloFormulario('Nova Compra');
     }
 
@@ -480,7 +589,7 @@
         const inputs = madeiraFields.querySelectorAll('input');
         inputs.forEach(i => (i.value = ''));
       }
-      handleParcelasConfigChange();
+      sincronizarValorCompra('quantidade');
     }
 
     function handleFormaPagamentoChange() {
@@ -670,6 +779,7 @@
         <p><b>Parcelas:</b> ${Number(i.parcelas || 1)}</p>
         <p><b>Ultimo pagamento:</b> ${i.data_ultimo_pagamento || '-'}${i.forma_ultimo_pagamento ? ` (${i.forma_ultimo_pagamento})` : ''}</p>
         <p><b>Valor unitario:</b> R$ ${Number(i.valor_unit || 0).toFixed(2)}</p>
+        <p><b>Valor total item:</b> ${formatarMoeda(Number(i.quantidade || 0) * Number(i.valor_unit || 0))}</p>
         <p><b>Observacao:</b> ${i.observacao || '-'}</p>
 
         ${isMadeira ? `
@@ -1071,6 +1181,9 @@
       preencherFormulario,
       resetFormulario,
       handleTipoChange,
+      handleQuantidadeInput,
+      handleValorUnitInput,
+      handleValorTotalInput,
       handleFormaPagamentoChange,
       handleParcelasConfigChange,
       renderLista,

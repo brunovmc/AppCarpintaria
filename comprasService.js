@@ -82,7 +82,7 @@ function normalizarPayloadMadeiraCompra(payload) {
   dados.comprimento_cm = comprimento;
   dados.largura_cm = largura;
   dados.espessura_cm = espessura;
-  dados.quantidade = Number(((comprimento * largura * espessura) / 1000000).toFixed(2));
+  dados.quantidade = Number(((comprimento * largura * espessura) / 1000000).toFixed(6));
   dados.unidade = 'M3';
   return dados;
 }
@@ -104,13 +104,31 @@ function validarPagoPorCompra(pagoPor) {
 
 function normalizarCamposFinanceirosCompra(payload) {
   const dados = { ...(payload || {}) };
+  const quantidade = parseNumeroBR(dados.quantidade);
+  const valorTotalItem = parseNumeroBR(dados.valor_total_item);
+  let valorUnit = parseNumeroBR(dados.valor_unit);
+
+  if (valorTotalItem > 0) {
+    if (quantidade <= 0) {
+      throw new Error('Quantidade invalida para calcular valor unitario.');
+    }
+    valorUnit = Number((valorTotalItem / quantidade).toFixed(6));
+  }
+  if (valorUnit <= 0) {
+    throw new Error('Valor unitario deve ser maior que zero.');
+  }
+
+  dados.quantidade = quantidade;
+  dados.valor_unit = valorUnit;
+  delete dados.valor_total_item;
+
   dados.data_pagamento = normalizarDataFinanceiro(dados.data_pagamento, false, 'Data de pagamento');
   dados.data_vencimento = normalizarDataFinanceiro(dados.data_vencimento, false, 'Data de vencimento');
   const formaPagamento = validarFormaPagamentoFinanceiro(dados.forma_pagamento, false);
   dados.forma_pagamento = formaPagamento;
   dados.parcelas = normalizarParcelasFinanceiro(dados.parcelas, formaPagamento);
   const totalPrevisto = round2Financeiro(
-    parseNumeroBR(dados.quantidade) * parseNumeroBR(dados.valor_unit)
+    quantidade * valorUnit
   );
   if (totalPrevisto <= 0) {
     throw new Error('Valor total da compra deve ser maior que zero.');

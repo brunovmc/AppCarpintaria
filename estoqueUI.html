@@ -35,6 +35,7 @@
         forma_pagamento: document.getElementById('forma_pagamento'),
         parcelas_wrap: document.getElementById('parcelas_wrap'),
         parcelas: document.getElementById('parcelas'),
+        custo_total_item: document.getElementById('custo_total_item'),
         custo_unitario: document.getElementById('custo_unitario'),
         preco_venda: document.getElementById('preco_venda'),
         observacao: document.getElementById('observacao'),
@@ -68,7 +69,35 @@
     function parseNumeroInput(valor) {
       const s = String(valor ?? '').trim();
       if (s === '') return 0;
-      const n = Number(s.replace(',', '.'));
+
+      const limpo = s.replace(/\s+/g, '').replace(/[^\d,.\-]/g, '');
+      if (!limpo || limpo === '-') return 0;
+
+      const negativo = limpo.startsWith('-');
+      const semSinal = limpo.replace(/-/g, '');
+      const temVirgula = semSinal.includes(',');
+      const temPonto = semSinal.includes('.');
+      let normalizado = semSinal;
+
+      if (temVirgula && temPonto) {
+        if (semSinal.lastIndexOf(',') > semSinal.lastIndexOf('.')) {
+          normalizado = semSinal.replace(/\./g, '').replace(',', '.');
+        } else {
+          normalizado = semSinal.replace(/,/g, '');
+        }
+      } else if (temVirgula) {
+        const partes = semSinal.split(',');
+        normalizado = partes.length > 2
+          ? partes.join('')
+          : `${partes[0] || '0'}.${partes[1] || '0'}`;
+      } else if (temPonto) {
+        const partes = semSinal.split('.');
+        normalizado = partes.length > 2
+          ? partes.join('')
+          : semSinal;
+      }
+
+      const n = Number(`${negativo ? '-' : ''}${normalizado}`);
       return isNaN(n) ? 0 : n;
     }
 
@@ -168,7 +197,69 @@
       }
 
       const m3 = (comp * larg * espes) / 1000000;
-      f.quantidade.value = m3.toFixed(2);
+      f.quantidade.value = m3.toFixed(6);
+      sincronizarCustoPorQuantidade('quantidade');
+    }
+
+    function sincronizarCustoPorQuantidade(origem) {
+      const f = el();
+      if (!f.quantidade || !f.custo_unitario || !f.custo_total_item) return;
+
+      const qtd = parseNumeroInput(f.quantidade.value || 0);
+      const custoUnit = parseNumeroInput(f.custo_unitario.value || 0);
+      const custoTotal = parseNumeroInput(f.custo_total_item.value || 0);
+      const custoUnitRaw = String(f.custo_unitario.value || '').trim();
+      const custoTotalRaw = String(f.custo_total_item.value || '').trim();
+
+      if (origem === 'total') {
+        if (!custoTotalRaw) {
+          if (qtd > 0 && custoUnitRaw !== '') {
+            f.custo_total_item.value = Number((qtd * custoUnit).toFixed(2));
+          }
+          return;
+        }
+        if (qtd > 0) {
+          const novoUnit = custoTotal / qtd;
+          f.custo_unitario.value = Number(novoUnit.toFixed(6));
+        } else {
+          f.custo_unitario.value = '';
+        }
+        return;
+      }
+
+      if (origem === 'unit') {
+        if (!custoUnitRaw) {
+          f.custo_total_item.value = '';
+          return;
+        }
+        if (qtd > 0) {
+          f.custo_total_item.value = Number((qtd * custoUnit).toFixed(2));
+        }
+        return;
+      }
+
+      if (origem === 'quantidade') {
+        if (custoTotalRaw && qtd > 0) {
+          const novoUnit = custoTotal / qtd;
+          f.custo_unitario.value = Number(novoUnit.toFixed(6));
+        } else if (custoUnitRaw && qtd > 0) {
+          f.custo_total_item.value = Number((qtd * custoUnit).toFixed(2));
+        } else if (qtd <= 0 && !custoTotalRaw) {
+          f.custo_total_item.value = '';
+        }
+      }
+    }
+
+    function handleQuantidadeInput() {
+      sincronizarCustoPorQuantidade('quantidade');
+    }
+
+    function handleCustoUnitarioInput() {
+      sincronizarCustoPorQuantidade('unit');
+    }
+
+    function handleCustoTotalInput() {
+      sincronizarCustoPorQuantidade('total');
     }
 
     /* =========================
@@ -213,6 +304,11 @@
       if (f.parcelas) f.parcelas.value = data.parcelas || '1';
 
       if (f.custo_unitario) f.custo_unitario.value = data.custo_unitario ?? data.valor_unit ?? '';
+      if (f.custo_total_item) {
+        const qtd = parseNumeroInput(data.quantidade || 0);
+        const unit = parseNumeroInput(data.custo_unitario ?? data.valor_unit ?? 0);
+        f.custo_total_item.value = (qtd > 0 && unit >= 0) ? Number((qtd * unit).toFixed(2)) : '';
+      }
       if (f.preco_venda) f.preco_venda.value = data.preco_venda ?? '';
       if (f.observacao) f.observacao.value = data.observacao || '';
 
@@ -228,6 +324,7 @@
       if (f.formTitulo) f.formTitulo.innerText = 'Editar Item';
       handleTipoChange();
       handleFormaPagamentoChange();
+      sincronizarCustoPorQuantidade('quantidade');
     }
 
     function resetFormulario() {
@@ -244,6 +341,7 @@
         f.data_pagamento,
         f.forma_pagamento,
         f.parcelas,
+        f.custo_total_item,
         f.custo_unitario,
         f.preco_venda,
         f.observacao,
@@ -261,6 +359,7 @@
       if (f.quantidade) f.quantidade.readOnly = false;
       renderCategoriasDoTipo('', '');
       handleFormaPagamentoChange();
+      sincronizarCustoPorQuantidade('quantidade');
       if (f.formTitulo) f.formTitulo.innerText = 'Novo Item';
     }
 
@@ -300,6 +399,7 @@
         const inputs = madeiraFields.querySelectorAll('input');
         inputs.forEach(i => (i.value = ''));
       }
+      sincronizarCustoPorQuantidade('quantidade');
     }
 
     function handleFormaPagamentoChange() {
@@ -487,6 +587,7 @@
         <p><b>Forma de pagamento:</b> ${i.forma_pagamento || '-'}</p>
         <p><b>Parcelas:</b> ${Number(i.parcelas || 1)}</p>
         <p><b>Custo unitario:</b> R$ ${Number(i.custo_unitario ?? i.valor_unit ?? 0).toFixed(2)}</p>
+        <p><b>Custo total item:</b> ${formatarMoeda(Number(i.quantidade || 0) * Number(i.custo_unitario ?? i.valor_unit ?? 0))}</p>
         <p><b>Preco de venda:</b> ${String(i.preco_venda ?? '').trim() === '' ? '-' : `R$ ${Number(i.preco_venda || 0).toFixed(2)}`}</p>
         <p><b>Observacao:</b> ${i.observacao || '-'}</p>
 
@@ -751,6 +852,9 @@
       preencherFormulario,
       resetFormulario,
       handleTipoChange,
+      handleQuantidadeInput,
+      handleCustoUnitarioInput,
+      handleCustoTotalInput,
       renderLista,
 
       renderTipos,

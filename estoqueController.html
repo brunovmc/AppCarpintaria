@@ -152,7 +152,35 @@
       const parseNumeroInput = valor => {
         const s = String(valor ?? '').trim();
         if (s === '') return '';
-        const n = Number(s.replace(',', '.'));
+
+        const limpo = s.replace(/\s+/g, '').replace(/[^\d,.\-]/g, '');
+        if (!limpo || limpo === '-') return '';
+
+        const negativo = limpo.startsWith('-');
+        const semSinal = limpo.replace(/-/g, '');
+        const temVirgula = semSinal.includes(',');
+        const temPonto = semSinal.includes('.');
+        let normalizado = semSinal;
+
+        if (temVirgula && temPonto) {
+          if (semSinal.lastIndexOf(',') > semSinal.lastIndexOf('.')) {
+            normalizado = semSinal.replace(/\./g, '').replace(',', '.');
+          } else {
+            normalizado = semSinal.replace(/,/g, '');
+          }
+        } else if (temVirgula) {
+          const partes = semSinal.split(',');
+          normalizado = partes.length > 2
+            ? partes.join('')
+            : `${partes[0] || '0'}.${partes[1] || '0'}`;
+        } else if (temPonto) {
+          const partes = semSinal.split('.');
+          normalizado = partes.length > 2
+            ? partes.join('')
+            : semSinal;
+        }
+
+        const n = Number(`${negativo ? '-' : ''}${normalizado}`);
         return isNaN(n) ? '' : n;
       };
 
@@ -187,17 +215,29 @@
       }
 
       const qtdMadeira = tipo === 'MADEIRA'
-        ? Number(((comprimento_cm * largura_cm * espessura_cm) / 1000000).toFixed(2))
+        ? Number(((comprimento_cm * largura_cm * espessura_cm) / 1000000).toFixed(6))
         : '';
+      const quantidadeFinal = tipo === 'MADEIRA'
+        ? qtdMadeira
+        : (parseNumeroInput(get('quantidade')) || 0);
+      if (!quantidadeFinal || quantidadeFinal <= 0) {
+        mostrarToast('Quantidade deve ser maior que zero', 'erro');
+        return;
+      }
+
       const custoUnitarioBruto = parseNumeroInput(get('custo_unitario'));
+      const custoTotalBruto = parseNumeroInput(get('custo_total_item'));
       const precoVendaBruto = parseNumeroInput(get('preco_venda'));
-      const custoUnitario = custoUnitarioBruto === '' ? 0 : custoUnitarioBruto;
+      let custoUnitario = custoUnitarioBruto === '' ? 0 : Number(custoUnitarioBruto);
+      if (custoTotalBruto !== '' && Number(custoTotalBruto) >= 0) {
+        custoUnitario = Number((Number(custoTotalBruto) / Number(quantidadeFinal)).toFixed(6));
+      }
       const precoVenda = precoVendaBruto === '' ? '' : precoVendaBruto;
 
       const dados = {
         tipo,
         item: get('item'),
-        quantidade: tipo === 'MADEIRA' ? qtdMadeira : parseNumeroInput(get('quantidade')) || 0,
+        quantidade: quantidadeFinal,
         unidade: tipo === 'MADEIRA' ? 'M3' : get('unidade'),
         categoria,
         fornecedor: get('fornecedor'),
@@ -206,6 +246,7 @@
         forma_pagamento: formaPagamento,
         parcelas,
         custo_unitario: custoUnitario,
+        custo_total_item: custoTotalBruto === '' ? '' : Number(custoTotalBruto),
         preco_venda: precoVenda,
         valor_unit: custoUnitario,
         observacao: get('observacao'),

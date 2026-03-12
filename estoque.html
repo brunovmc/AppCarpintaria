@@ -19,7 +19,7 @@
 
   <div class="campo-ajuda-wrap">
     <span class="campo-ajuda-tag">Quantidade</span>
-    <input id="quantidade" type="number">
+    <input id="quantidade" type="number" oninput="EstoqueUI.handleQuantidadeInput()">
   </div>
 
   <div class="campo-ajuda-wrap">
@@ -73,8 +73,13 @@
   </div>
 
   <div class="campo-ajuda-wrap">
+    <span class="campo-ajuda-tag">Custo total item (R$)</span>
+    <input id="custo_total_item" type="number" step="0.01" min="0" oninput="EstoqueUI.handleCustoTotalInput()">
+  </div>
+
+  <div class="campo-ajuda-wrap">
     <span class="campo-ajuda-tag">Custo unitario (R$)</span>
-    <input id="custo_unitario" type="number" step="0.01" min="0">
+    <input id="custo_unitario" type="number" step="0.01" min="0" oninput="EstoqueUI.handleCustoUnitarioInput()">
   </div>
 
   <div class="campo-ajuda-wrap">

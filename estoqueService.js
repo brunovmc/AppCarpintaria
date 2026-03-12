@@ -67,23 +67,6 @@ function categoriaValidaParaTipoEstoque(tipo, categoria) {
 function normalizarPayloadMadeiraEstoque(payload) {
   const dados = { ...(payload || {}) };
   const tipo = String(dados.tipo || '').trim().toUpperCase();
-  const custoBase = (dados.custo_unitario !== undefined && dados.custo_unitario !== null && String(dados.custo_unitario).trim() !== '')
-    ? dados.custo_unitario
-    : dados.valor_unit;
-  const custoUnitario = parseNumeroBR(custoBase);
-  if (custoUnitario < 0) {
-    throw new Error('Custo unitario nao pode ser negativo.');
-  }
-  const precoBruto = String(dados.preco_venda ?? '').trim();
-  const precoVenda = precoBruto === '' ? '' : parseNumeroBR(precoBruto);
-  if (precoVenda !== '' && precoVenda < 0) {
-    throw new Error('Preco de venda nao pode ser negativo.');
-  }
-
-  dados.custo_unitario = custoUnitario;
-  dados.preco_venda = precoVenda;
-  // Compatibilidade com partes do app que ainda usam valor_unit.
-  dados.valor_unit = custoUnitario;
   dados.origem_tipo = String(dados.origem_tipo || '').trim();
   dados.origem_id = String(dados.origem_id || '').trim();
   dados.op_id = String(dados.op_id || '').trim();
@@ -97,21 +80,55 @@ function normalizarPayloadMadeiraEstoque(payload) {
     throw new Error('Categoria invalida para o tipo selecionado.');
   }
 
-  if (tipo !== 'MADEIRA') return dados;
+  if (tipo === 'MADEIRA') {
+    const comprimento = parseNumeroBR(dados.comprimento_cm);
+    const largura = parseNumeroBR(dados.largura_cm);
+    const espessura = parseNumeroBR(dados.espessura_cm);
 
-  const comprimento = parseNumeroBR(dados.comprimento_cm);
-  const largura = parseNumeroBR(dados.largura_cm);
-  const espessura = parseNumeroBR(dados.espessura_cm);
+    if (comprimento <= 0 || largura <= 0 || espessura <= 0) {
+      throw new Error('Para MADEIRA, informe comprimento, largura e espessura validos.');
+    }
 
-  if (comprimento <= 0 || largura <= 0 || espessura <= 0) {
-    throw new Error('Para MADEIRA, informe comprimento, largura e espessura validos.');
+    dados.comprimento_cm = comprimento;
+    dados.largura_cm = largura;
+    dados.espessura_cm = espessura;
+    dados.quantidade = Number(((comprimento * largura * espessura) / 1000000).toFixed(6));
+    dados.unidade = 'M3';
+  } else {
+    const quantidade = parseNumeroBR(dados.quantidade);
+    if (quantidade <= 0) {
+      throw new Error('Quantidade deve ser maior que zero.');
+    }
+    dados.quantidade = quantidade;
   }
 
-  dados.comprimento_cm = comprimento;
-  dados.largura_cm = largura;
-  dados.espessura_cm = espessura;
-  dados.quantidade = Number(((comprimento * largura * espessura) / 1000000).toFixed(2));
-  dados.unidade = 'M3';
+  const quantidadeBase = parseNumeroBR(dados.quantidade);
+  const custoBase = (dados.custo_unitario !== undefined && dados.custo_unitario !== null && String(dados.custo_unitario).trim() !== '')
+    ? dados.custo_unitario
+    : dados.valor_unit;
+  const custoTotalItem = parseNumeroBR(dados.custo_total_item);
+  let custoUnitario = parseNumeroBR(custoBase);
+  if (custoTotalItem > 0) {
+    if (quantidadeBase <= 0) {
+      throw new Error('Quantidade invalida para calcular custo unitario.');
+    }
+    custoUnitario = Number((custoTotalItem / quantidadeBase).toFixed(6));
+  }
+  if (custoUnitario < 0) {
+    throw new Error('Custo unitario nao pode ser negativo.');
+  }
+
+  const precoBruto = String(dados.preco_venda ?? '').trim();
+  const precoVenda = precoBruto === '' ? '' : parseNumeroBR(precoBruto);
+  if (precoVenda !== '' && precoVenda < 0) {
+    throw new Error('Preco de venda nao pode ser negativo.');
+  }
+
+  dados.custo_unitario = Number(custoUnitario.toFixed(6));
+  dados.preco_venda = precoVenda;
+  // Compatibilidade com partes do app que ainda usam valor_unit.
+  dados.valor_unit = dados.custo_unitario;
+  delete dados.custo_total_item;
   return dados;
 }
 

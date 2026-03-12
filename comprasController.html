@@ -172,7 +172,35 @@
       const parseNumeroInput = valor => {
         const s = String(valor ?? '').trim();
         if (s === '') return '';
-        const n = Number(s.replace(',', '.'));
+
+        const limpo = s.replace(/\s+/g, '').replace(/[^\d,.\-]/g, '');
+        if (!limpo || limpo === '-') return '';
+
+        const negativo = limpo.startsWith('-');
+        const semSinal = limpo.replace(/-/g, '');
+        const temVirgula = semSinal.includes(',');
+        const temPonto = semSinal.includes('.');
+        let normalizado = semSinal;
+
+        if (temVirgula && temPonto) {
+          if (semSinal.lastIndexOf(',') > semSinal.lastIndexOf('.')) {
+            normalizado = semSinal.replace(/\./g, '').replace(',', '.');
+          } else {
+            normalizado = semSinal.replace(/,/g, '');
+          }
+        } else if (temVirgula) {
+          const partes = semSinal.split(',');
+          normalizado = partes.length > 2
+            ? partes.join('')
+            : `${partes[0] || '0'}.${partes[1] || '0'}`;
+        } else if (temPonto) {
+          const partes = semSinal.split('.');
+          normalizado = partes.length > 2
+            ? partes.join('')
+            : semSinal;
+        }
+
+        const n = Number(`${negativo ? '-' : ''}${normalizado}`);
         return isNaN(n) ? '' : n;
       };
 
@@ -214,14 +242,19 @@
       }
 
       const qtdMadeira = tipo === 'MADEIRA'
-        ? Number(((comprimento_cm * largura_cm * espessura_cm) / 1000000).toFixed(2))
+        ? Number(((comprimento_cm * largura_cm * espessura_cm) / 1000000).toFixed(6))
         : '';
       const qtdNaoMadeira = tipo !== 'MADEIRA'
         ? (parseNumeroInput(get('compraQuantidade')) || 0)
         : 0;
+      const quantidadeFinal = tipo === 'MADEIRA' ? qtdMadeira : qtdNaoMadeira;
 
       if (tipo !== 'MADEIRA' && qtdNaoMadeira <= 0) {
         mostrarToast('Quantidade deve ser maior que zero', 'erro');
+        return;
+      }
+      if (tipo === 'MADEIRA' && quantidadeFinal <= 0) {
+        mostrarToast('Volume de madeira invalido', 'erro');
         return;
       }
       if (formaExigeParcelas(formaPagamento) && (!isFinite(parcelas) || parcelas < 1)) {
@@ -246,15 +279,31 @@
         }
       }
 
+      const valorUnitInformado = parseNumeroInput(get('compraValorUnit'));
+      const valorTotalInformado = parseNumeroInput(get('compraValorTotalItem'));
+      let valorUnitFinal = valorUnitInformado === '' ? 0 : Number(valorUnitInformado);
+      if (valorTotalInformado !== '' && Number(valorTotalInformado) >= 0) {
+        if (!quantidadeFinal || quantidadeFinal <= 0) {
+          mostrarToast('Quantidade invalida para calcular valor unitario', 'erro');
+          return;
+        }
+        valorUnitFinal = Number((Number(valorTotalInformado) / Number(quantidadeFinal)).toFixed(6));
+      }
+      if (!isFinite(valorUnitFinal) || valorUnitFinal <= 0) {
+        mostrarToast('Informe valor unitario ou valor total valido', 'erro');
+        return;
+      }
+
       const dados = {
         tipo,
         item: get('compraItem'),
-        quantidade: tipo === 'MADEIRA' ? qtdMadeira : qtdNaoMadeira,
+        quantidade: quantidadeFinal,
         unidade: tipo === 'MADEIRA' ? 'M3' : get('compraUnidade'),
         categoria,
         fornecedor: get('compraFornecedor'),
         pago_por: get('compraPagoPor'),
-        valor_unit: parseNumeroInput(get('compraValorUnit')) || 0,
+        valor_unit: valorUnitFinal,
+        valor_total_item: valorTotalInformado === '' ? '' : Number(valorTotalInformado),
         observacao: get('compraObservacao'),
         comprimento_cm,
         largura_cm,
