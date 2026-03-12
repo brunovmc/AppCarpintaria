@@ -967,6 +967,8 @@
     justify-content: center;
     z-index: 1000;
     padding: 16px;
+    overscroll-behavior: contain;
+    touch-action: manipulation;
   }
 
   .modal-content {
@@ -975,12 +977,20 @@
     padding: 16px;
     width: 100%;
     max-width: 520px;
+    max-height: calc(100vh - 32px);
+    max-height: calc(100dvh - 32px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
   }
 
   .form-modal-content {
     max-width: 920px;
     max-height: calc(100vh - 32px);
+    max-height: calc(100dvh - 32px);
     overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
   }
 
   /* Toast */

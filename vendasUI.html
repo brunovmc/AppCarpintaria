@@ -3,6 +3,12 @@
     let cardAberto = null;
     let delegationInit = false;
     let estoqueVendavel = [];
+    let listaFiltradaAtual = [];
+    let qtdRenderizada = 0;
+    let renderJobSeq = 0;
+    let renderizandoLista = false;
+
+    const RENDER_CHUNK_SIZE = 12;
 
     function el() {
       return {
@@ -55,6 +61,19 @@
       if (!s) return 0;
       const n = Number(s.replace(',', '.'));
       return isNaN(n) ? 0 : n;
+    }
+
+    function proximoFrame(fn) {
+      let executado = false;
+      const run = () => {
+        if (executado) return;
+        executado = true;
+        fn();
+      };
+      if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+        window.requestAnimationFrame(run);
+      }
+      setTimeout(run, 80);
     }
 
     function getDataBaseParcelasVenda() {
@@ -355,40 +374,71 @@
       `;
     }
 
+    function montarCardResumo(v) {
+      const div = document.createElement('div');
+      div.className = 'card';
+      div.dataset.id = v.ID;
+      div.innerHTML = `
+        <div class="card-resumo">
+          <strong>${v.item || '-'}</strong><br>
+          ${Number(v.quantidade || 0).toFixed(2)} ${v.unidade || ''}<br>
+          ${formatarMoeda(v.valor_total_venda || 0)}<br>
+          ${String(v.status_pagamento || 'PENDENTE').toUpperCase()}
+        </div>
+        <button class="ver-mais">Ver mais</button>
+        <div class="card-detalhes">
+          <button class="fechar-card">X</button>
+          ${montarDetalhesCard(v)}
+        </div>
+      `;
+      return div;
+    }
+
     function renderLista(itens) {
       const f = el();
       if (!f.lista) return;
+      const abertoId = cardAberto ? cardAberto.dataset.id : '';
       fecharCard();
+      renderJobSeq += 1;
+      const jobId = renderJobSeq;
       f.lista.innerHTML = '';
       if (f.listaControles) f.listaControles.innerHTML = '';
 
-      const lista = Array.isArray(itens) ? itens : [];
-      if (lista.length === 0) {
+      listaFiltradaAtual = Array.isArray(itens) ? itens : [];
+      qtdRenderizada = 0;
+      renderizandoLista = false;
+
+      if (listaFiltradaAtual.length === 0) {
         f.lista.innerHTML = '<p>Nenhuma venda cadastrada.</p>';
         return;
       }
 
-      lista.forEach(v => {
-        const div = document.createElement('div');
-        div.className = 'card';
-        div.dataset.id = v.ID;
-        div.innerHTML = `
-          <div class="card-resumo">
-            <strong>${v.item || '-'}</strong><br>
-            ${Number(v.quantidade || 0).toFixed(2)} ${v.unidade || ''}<br>
-            ${formatarMoeda(v.valor_total_venda || 0)}<br>
-            ${String(v.status_pagamento || 'PENDENTE').toUpperCase()}
-          </div>
-          <button class="ver-mais">Ver mais</button>
-          <div class="card-detalhes">
-            <button class="fechar-card">X</button>
-            ${montarDetalhesCard(v)}
-          </div>
-        `;
-        f.lista.appendChild(div);
-      });
+      renderizandoLista = true;
+      let idx = 0;
+      const processarChunk = () => {
+        if (jobId !== renderJobSeq) return;
+        const limite = Math.min(idx + RENDER_CHUNK_SIZE, listaFiltradaAtual.length);
+        const fragment = document.createDocumentFragment();
+        for (; idx < limite; idx++) {
+          fragment.appendChild(montarCardResumo(listaFiltradaAtual[idx]));
+        }
+        f.lista.appendChild(fragment);
+        qtdRenderizada = idx;
 
-      initDelegation();
+        if (idx < listaFiltradaAtual.length) {
+          proximoFrame(processarChunk);
+          return;
+        }
+
+        renderizandoLista = false;
+        initDelegation();
+        if (abertoId) {
+          const alvo = f.lista.querySelector(`.card[data-id="${abertoId}"]`);
+          if (alvo) abrirCard(alvo);
+        }
+      };
+
+      proximoFrame(processarChunk);
     }
 
     function initDelegation() {

@@ -108,11 +108,16 @@
     }
 
     function proximoFrame(fn) {
+      let executado = false;
+      const run = () => {
+        if (executado) return;
+        executado = true;
+        fn();
+      };
       if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
-        window.requestAnimationFrame(fn);
-        return;
+        window.requestAnimationFrame(run);
       }
-      setTimeout(fn, 16);
+      setTimeout(run, 80);
     }
 
     function normalizarFormaPagamento(valor) {

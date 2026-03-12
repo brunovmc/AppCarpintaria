@@ -2,6 +2,9 @@
   window.ProdutosUI = (() => {
     let cardAberto = null;
     let delegationInit = false;
+    let listaFiltradaAtual = [];
+    let qtdRenderizada = 0;
+    let renderJobSeq = 0;
 
     let opcoesEstoque = [];
     let opcoesProdutos = [];
@@ -10,6 +13,8 @@
     let unidadesValidacao = [];
     let categoriasValidacao = [];
     let categoriasPorTipoValidacao = {};
+
+    const RENDER_CHUNK_SIZE = 10;
 
     /* =========================
        HELPERS
@@ -88,6 +93,19 @@
       const n = Number(valor || 0);
       if (isNaN(n)) return '-';
       return n.toFixed(casas);
+    }
+
+    function proximoFrame(fn) {
+      let executado = false;
+      const run = () => {
+        if (executado) return;
+        executado = true;
+        fn();
+      };
+      if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+        window.requestAnimationFrame(run);
+      }
+      setTimeout(run, 80);
     }
 
     function getTiposEstoque() {
@@ -779,75 +797,98 @@
     /* =========================
        LISTA + CARDS
     ========================== */
+    function montarCardProduto(i) {
+      const div = document.createElement('div');
+      div.className = 'card';
+      div.dataset.id = i.produto_id;
+
+      const receitas = Array.isArray(i.receitas) ? i.receitas : [];
+      const receitasCarregadas = !!i.receitasCarregadas;
+      const entradasDoCache = receitasCarregadas && receitas[0] && Array.isArray(receitas[0].entradas)
+        ? receitas[0].entradas.length
+        : 0;
+      const saidasDoCache = receitasCarregadas && receitas[0] && Array.isArray(receitas[0].saidas)
+        ? receitas[0].saidas.length
+        : 0;
+
+      const entradasTotal = Number(i.modelo_entradas_total || entradasDoCache || 0);
+      const saidasTotal = Number(i.modelo_saidas_total || saidasDoCache || 0);
+      const etapasTotal = Number(i.modelo_etapas_total || 0);
+      const resumoModelo = (entradasTotal + saidasTotal + etapasTotal) > 0
+        ? `Modelo: ${entradasTotal} entradas, ${saidasTotal} saidas, ${etapasTotal} etapas`
+        : 'Modelo: nao configurado';
+
+      div.innerHTML = `
+        <div class="card-resumo">
+          <strong>${i.nome_produto || i.produto_id}</strong><br>
+          ${resumoModelo}
+        </div>
+
+        <button class="ver-mais">Ver mais</button>
+
+        <div class="card-detalhes">
+          <button class="fechar-card">X</button>
+
+          <div class="bloco">
+            <p><b>Receitas</b></p>
+            ${renderReceitas(receitas, receitasCarregadas, i.produto_id)}
+          </div>
+
+          <div class="acoes">
+            <button onclick="ProdutosController.enviarParaProducao('${i.produto_id}')">Criar OP</button>
+            <button onclick="ProdutosController.editar('${i.produto_id}')">Editar</button>
+            <button onclick="ProdutosController.excluir('${i.produto_id}')">Excluir</button>
+          </div>
+        </div>
+      `;
+
+      return div;
+    }
+
     function renderLista(itens) {
       const { lista } = el();
       if (!lista) return;
 
       const abertoId = cardAberto ? cardAberto.dataset.id : null;
       cardAberto = null;
+      renderJobSeq += 1;
+      const jobId = renderJobSeq;
       lista.innerHTML = '';
 
-      if (!Array.isArray(itens) || itens.length === 0) {
+      listaFiltradaAtual = Array.isArray(itens) ? itens : [];
+      qtdRenderizada = 0;
+
+      if (listaFiltradaAtual.length === 0) {
         lista.innerHTML = '<p>Nenhum produto cadastrado.</p>';
         return;
       }
 
-      itens.forEach(i => {
-        const div = document.createElement('div');
-        div.className = 'card';
-        div.dataset.id = i.produto_id;
-
-        const receitas = Array.isArray(i.receitas) ? i.receitas : [];
-        const receitasCarregadas = !!i.receitasCarregadas;
-        const entradasDoCache = receitasCarregadas && receitas[0] && Array.isArray(receitas[0].entradas)
-          ? receitas[0].entradas.length
-          : 0;
-        const saidasDoCache = receitasCarregadas && receitas[0] && Array.isArray(receitas[0].saidas)
-          ? receitas[0].saidas.length
-          : 0;
-
-        const entradasTotal = Number(i.modelo_entradas_total || entradasDoCache || 0);
-        const saidasTotal = Number(i.modelo_saidas_total || saidasDoCache || 0);
-        const etapasTotal = Number(i.modelo_etapas_total || 0);
-        const resumoModelo = (entradasTotal + saidasTotal + etapasTotal) > 0
-          ? `Modelo: ${entradasTotal} entradas, ${saidasTotal} saidas, ${etapasTotal} etapas`
-          : 'Modelo: nao configurado';
-
-        div.innerHTML = `
-          <div class="card-resumo">
-            <strong>${i.nome_produto || i.produto_id}</strong><br>
-            ${resumoModelo}
-          </div>
-
-          <button class="ver-mais">Ver mais</button>
-
-          <div class="card-detalhes">
-            <button class="fechar-card">X</button>
-
-            <div class="bloco">
-              <p><b>Receitas</b></p>
-              ${renderReceitas(receitas, receitasCarregadas, i.produto_id)}
-            </div>
-
-            <div class="acoes">
-              <button onclick="ProdutosController.enviarParaProducao('${i.produto_id}')">Criar OP</button>
-              <button onclick="ProdutosController.editar('${i.produto_id}')">Editar</button>
-              <button onclick="ProdutosController.excluir('${i.produto_id}')">Excluir</button>
-            </div>
-          </div>
-        `;
-
-        lista.appendChild(div);
-      });
-
-      initDelegation();
-
-      if (abertoId) {
-        const alvo = lista.querySelector(`.card[data-id="${abertoId}"]`);
-        if (alvo) {
-          abrirCard(alvo);
+      let idx = 0;
+      const processarChunk = () => {
+        if (jobId !== renderJobSeq) return;
+        const limite = Math.min(idx + RENDER_CHUNK_SIZE, listaFiltradaAtual.length);
+        const fragment = document.createDocumentFragment();
+        for (; idx < limite; idx++) {
+          fragment.appendChild(montarCardProduto(listaFiltradaAtual[idx]));
         }
-      }
+        lista.appendChild(fragment);
+        qtdRenderizada = idx;
+
+        if (idx < listaFiltradaAtual.length) {
+          proximoFrame(processarChunk);
+          return;
+        }
+
+        initDelegation();
+        if (abertoId) {
+          const alvo = lista.querySelector(`.card[data-id="${abertoId}"]`);
+          if (alvo) {
+            abrirCard(alvo);
+          }
+        }
+      };
+
+      proximoFrame(processarChunk);
     }
 
     /* =========================

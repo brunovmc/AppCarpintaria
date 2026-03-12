@@ -152,6 +152,9 @@
           perfEnd(perf, { ok: true, total: Array.isArray(lista) ? lista.length : 0 });
           ComprasStore.set(lista);
           renderListaAtual();
+          if (typeof popularFiltrosDoPainelCompras === 'function') {
+            popularFiltrosDoPainelCompras();
+          }
         })
         .withFailureHandler(() => {
           perfEnd(perf, { ok: false });

@@ -4,6 +4,11 @@
     let delegationInit = false;
     let estoqueOpcoes = [];
     let tiposValidacao = [];
+    let listaFiltradaAtual = [];
+    let qtdRenderizada = 0;
+    let renderJobSeq = 0;
+
+    const RENDER_CHUNK_SIZE = 8;
 
     /* =========================
        HELPERS
@@ -52,6 +57,19 @@
       if (s === '') return 0;
       const n = Number(s.replace(',', '.'));
       return isNaN(n) ? 0 : n;
+    }
+
+    function proximoFrame(fn) {
+      let executado = false;
+      const run = () => {
+        if (executado) return;
+        executado = true;
+        fn();
+      };
+      if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+        window.requestAnimationFrame(run);
+      }
+      setTimeout(run, 80);
     }
 
     function setEstoqueOpcoes(lista) {
@@ -362,6 +380,83 @@
       }).join('');
     }
 
+    function montarCardProducao(i) {
+      const div = document.createElement('div');
+      div.className = 'card';
+      div.dataset.id = i.producao_id;
+
+      const nome = i.nome_ordem || i.nome_produto || i.producao_id;
+      const unidade = i.unidade_produto || '';
+      const custoPrevisto = formatMoeda(i.custo_previsto || 0);
+      const status = String(i.status || '');
+      const concluido = status === 'Concluido' || status === 'Concluida';
+      const estoqueAtualizado = !!i.estoque_atualizado;
+      const podeAtualizarEstoque = concluido && !estoqueAtualizado;
+      const labelEstoque = estoqueAtualizado ? 'Estoque atualizado' : 'Atualizar estoque';
+      const saidasHtml = !estoqueAtualizado
+        ? '<p>As saidas serao geradas ao atualizar o estoque.</p>'
+        : (Array.isArray(i.saidasLotes)
+          ? renderSaidasLotes(i.saidasLotes, i.producao_id, true)
+          : '<p>Carregando saidas geradas...</p>');
+
+      div.innerHTML = `
+        <div class="card-resumo">
+          <strong>${nome}</strong><br>
+          ${i.status || ''}<br>
+          ${i.qtd_planejada || 0} ${unidade}
+        </div>
+
+        <button class="ver-mais">Ver mais</button>
+
+        <div class="card-detalhes">
+          <button class="fechar-card">X</button>
+
+          <p><b>Produto:</b> ${i.nome_produto || '-'}</p>
+          <p><b>Receita:</b> ${i.receita_nome || '-'}</p>
+          <p><b>Inicio:</b> ${i.data_inicio || '-'}</p>
+          <p><b>Previsto:</b> ${i.data_prevista_termino || '-'}</p>
+          <p><b>Custo previsto:</b> R$ ${custoPrevisto}</p>
+          <p><b>Observacao:</b> ${i.observacao || '-'}</p>
+          ${estoqueAtualizado ? `<p><b>Estoque atualizado:</b> ${i.data_estoque_atualizado || '-'}</p>` : ''}
+
+          <div class="bloco">
+            <p><b>Materiais previstos</b></p>
+            ${i.materiaisPrevistos ? renderMateriais(i.materiaisPrevistos) : '<p>Carregando materiais...</p>'}
+          </div>
+
+          <div class="bloco">
+            <p><b>Vinculos com estoque</b></p>
+            ${i.vinculosMateriais ? renderVinculos(i.vinculosMateriais, i.producao_id) : '<p>Carregando vinculos...</p>'}
+          </div>
+
+          <div class="bloco">
+            <p><b>Saidas geradas</b></p>
+            ${saidasHtml}
+          </div>
+
+          <div class="bloco">
+            <p><b>Checklist</b></p>
+            ${renderChecklist(i.etapas || [], i.producao_id)}
+            <div class="linha-etapa-add">
+              <input id="novaEtapa_${i.producao_id}" placeholder="Nova etapa">
+              <button class="btn-add-etapa" data-producao-id="${i.producao_id}">Adicionar etapa</button>
+            </div>
+          </div>
+
+          <div class="acoes">
+            <button
+              ${podeAtualizarEstoque ? '' : 'disabled'}
+              onclick="ProducaoController.abrirAtualizarEstoque('${i.producao_id}')"
+            >${labelEstoque}</button>
+            <button onclick="ProducaoController.editar('${i.producao_id}')">Editar</button>
+            <button onclick="ProducaoController.excluir('${i.producao_id}')">Excluir</button>
+          </div>
+        </div>
+      `;
+
+      return div;
+    }
+
     function renderLista(itens) {
       const { lista } = el();
       if (!lista) return;
@@ -377,98 +472,43 @@
 
       const abertoId = cardAberto ? cardAberto.dataset.id : null;
       cardAberto = null;
+      renderJobSeq += 1;
+      const jobId = renderJobSeq;
       lista.innerHTML = '';
+      listaFiltradaAtual = Array.isArray(listaItens) ? listaItens : [];
+      qtdRenderizada = 0;
 
-      if (listaItens.length === 0) {
+      if (listaFiltradaAtual.length === 0) {
         lista.innerHTML = '<p>Nenhuma ordem de producao.</p>';
         return;
       }
 
-      listaItens.forEach(i => {
-        const div = document.createElement('div');
-        div.className = 'card';
-        div.dataset.id = i.producao_id;
-
-        const nome = i.nome_ordem || i.nome_produto || i.producao_id;
-        const unidade = i.unidade_produto || '';
-        const custoPrevisto = formatMoeda(i.custo_previsto || 0);
-        const status = String(i.status || '');
-        const concluido = status === 'Concluido' || status === 'Concluida';
-        const estoqueAtualizado = !!i.estoque_atualizado;
-        const podeAtualizarEstoque = concluido && !estoqueAtualizado;
-        const labelEstoque = estoqueAtualizado ? 'Estoque atualizado' : 'Atualizar estoque';
-        const saidasHtml = !estoqueAtualizado
-          ? '<p>As saidas serao geradas ao atualizar o estoque.</p>'
-          : (Array.isArray(i.saidasLotes)
-            ? renderSaidasLotes(i.saidasLotes, i.producao_id, true)
-            : '<p>Carregando saidas geradas...</p>');
-
-        div.innerHTML = `
-          <div class="card-resumo">
-            <strong>${nome}</strong><br>
-            ${i.status || ''}<br>
-            ${i.qtd_planejada || 0} ${unidade}
-          </div>
-
-          <button class="ver-mais">Ver mais</button>
-
-          <div class="card-detalhes">
-            <button class="fechar-card">X</button>
-
-            <p><b>Produto:</b> ${i.nome_produto || '-'}</p>
-            <p><b>Receita:</b> ${i.receita_nome || '-'}</p>
-            <p><b>Inicio:</b> ${i.data_inicio || '-'}</p>
-            <p><b>Previsto:</b> ${i.data_prevista_termino || '-'}</p>
-            <p><b>Custo previsto:</b> R$ ${custoPrevisto}</p>
-            <p><b>Observacao:</b> ${i.observacao || '-'}</p>
-            ${estoqueAtualizado ? `<p><b>Estoque atualizado:</b> ${i.data_estoque_atualizado || '-'}</p>` : ''}
-
-            <div class="bloco">
-              <p><b>Materiais previstos</b></p>
-              ${i.materiaisPrevistos ? renderMateriais(i.materiaisPrevistos) : '<p>Carregando materiais...</p>'}
-            </div>
-
-            <div class="bloco">
-              <p><b>Vinculos com estoque</b></p>
-              ${i.vinculosMateriais ? renderVinculos(i.vinculosMateriais, i.producao_id) : '<p>Carregando vinculos...</p>'}
-            </div>
-
-            <div class="bloco">
-              <p><b>Saidas geradas</b></p>
-              ${saidasHtml}
-            </div>
-
-            <div class="bloco">
-              <p><b>Checklist</b></p>
-              ${renderChecklist(i.etapas || [], i.producao_id)}
-              <div class="linha-etapa-add">
-                <input id="novaEtapa_${i.producao_id}" placeholder="Nova etapa">
-                <button class="btn-add-etapa" data-producao-id="${i.producao_id}">Adicionar etapa</button>
-              </div>
-            </div>
-
-            <div class="acoes">
-              <button
-                ${podeAtualizarEstoque ? '' : 'disabled'}
-                onclick="ProducaoController.abrirAtualizarEstoque('${i.producao_id}')"
-              >${labelEstoque}</button>
-              <button onclick="ProducaoController.editar('${i.producao_id}')">Editar</button>
-              <button onclick="ProducaoController.excluir('${i.producao_id}')">Excluir</button>
-            </div>
-          </div>
-        `;
-
-        lista.appendChild(div);
-      });
-
-      initDelegation();
-
-      if (abertoId) {
-        const alvo = lista.querySelector(`.card[data-id="${abertoId}"]`);
-        if (alvo) {
-          abrirCard(alvo);
+      let idx = 0;
+      const processarChunk = () => {
+        if (jobId !== renderJobSeq) return;
+        const limite = Math.min(idx + RENDER_CHUNK_SIZE, listaFiltradaAtual.length);
+        const fragment = document.createDocumentFragment();
+        for (; idx < limite; idx++) {
+          fragment.appendChild(montarCardProducao(listaFiltradaAtual[idx]));
         }
-      }
+        lista.appendChild(fragment);
+        qtdRenderizada = idx;
+
+        if (idx < listaFiltradaAtual.length) {
+          proximoFrame(processarChunk);
+          return;
+        }
+
+        initDelegation();
+        if (abertoId) {
+          const alvo = lista.querySelector(`.card[data-id="${abertoId}"]`);
+          if (alvo) {
+            abrirCard(alvo);
+          }
+        }
+      };
+
+      proximoFrame(processarChunk);
     }
 
     /* =========================

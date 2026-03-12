@@ -215,7 +215,28 @@
   ========================== */
   function createPerfHelper() {
     const historico = [];
-    let ativo = true;
+    function lerFlagDebugPerf() {
+      try {
+        const params = new URLSearchParams(window.location.search || '');
+        const q = String(params.get('debugPerf') || params.get('perf') || '').trim().toLowerCase();
+        if (q === '1' || q === 'true' || q === 'on' || q === 'yes') return true;
+        if (q === '0' || q === 'false' || q === 'off' || q === 'no') return false;
+      } catch (error) {
+        // sem acao
+      }
+
+      try {
+        if (!window.localStorage) return false;
+        const raw = window.localStorage.getItem('APP_DEBUG_PERF');
+        if (raw === null) return false;
+        const v = String(raw || '').trim().toLowerCase();
+        return v === '1' || v === 'true' || v === 'on' || v === 'yes';
+      } catch (error) {
+        return false;
+      }
+    }
+
+    let ativo = lerFlagDebugPerf();
     const LIMITE_HIST = 300;
     const MIN_LOG_MS = 16;
 
@@ -227,6 +248,7 @@
     }
 
     function start(label, meta) {
+      if (!ativo) return null;
       return {
         label: String(label || '').trim() || 'sem-label',
         t0: agora(),
@@ -235,7 +257,7 @@
     }
 
     function end(token, extra) {
-      if (!token || !token.label) return 0;
+      if (!ativo || !token || !token.label) return 0;
       const ms = agora() - Number(token.t0 || 0);
       const entrada = {
         ts: new Date().toISOString(),
@@ -253,6 +275,9 @@
     }
 
     function measure(label, fn, meta) {
+      if (!ativo) {
+        return fn();
+      }
       const token = start(label, meta);
       try {
         const out = fn();
@@ -268,6 +293,10 @@
       ativo = !!v;
     }
 
+    function isEnabled() {
+      return !!ativo;
+    }
+
     function getHistory() {
       return historico.slice();
     }
@@ -281,12 +310,34 @@
       end,
       measure,
       setEnabled,
+      isEnabled,
       getHistory,
       clear
     };
   }
 
   window.AppPerf = window.AppPerf || createPerfHelper();
+
+  window.setAppPerfDebug = function setAppPerfDebug(ativo) {
+    const on = !!ativo;
+    try {
+      if (window.localStorage) {
+        if (on) {
+          window.localStorage.setItem('APP_DEBUG_PERF', '1');
+        } else {
+          window.localStorage.removeItem('APP_DEBUG_PERF');
+        }
+      }
+    } catch (error) {
+      // sem acao
+    }
+    if (window.AppPerf?.setEnabled) {
+      window.AppPerf.setEnabled(on);
+    }
+    if (typeof mostrarToast === 'function') {
+      mostrarToast(`Perf debug ${on ? 'ativado' : 'desativado'}`);
+    }
+  };
 
   const ABA_REFRESH_INTERVAL_MS = {
     dashboard: 15000,
@@ -475,8 +526,14 @@
     if (topProducao) topProducao.classList.toggle('hidden', nome !== 'producao');
     if (bottomBar) bottomBar.classList.toggle('hidden', nome === 'dashboard');
 
-    if (nome !== 'estoque') fecharPainelFiltro();
-    if (nome !== 'compras') fecharPainelFiltroCompras();
+    if (nome !== 'estoque') {
+      fecharPainelFiltro();
+      pararPollFiltros();
+    }
+    if (nome !== 'compras') {
+      fecharPainelFiltroCompras();
+      pararPollFiltrosCompras();
+    }
   }
 
   function acaoPrimaria() {
@@ -1035,20 +1092,50 @@
   }
 
   // espera o EstoqueStore carregar (sem travar nada)
+  const FILTRO_RETRY_MS = 300;
+  const FILTRO_RETRY_MAX_TENTATIVAS = 20;
   let filtroPoll = null;
+  let filtroPollTentativas = 0;
+  let filtroPollToken = 0;
+
+  function pararPollFiltros() {
+    filtroPollToken += 1;
+    filtroPollTentativas = 0;
+    if (filtroPoll) {
+      clearTimeout(filtroPoll);
+      filtroPoll = null;
+    }
+  }
   function iniciarPollFiltros() {
     if (!painelFiltroExiste()) return;
+    if (window.EstoqueStore && EstoqueStore.isLoaded()) {
+      popularFiltrosDoPainel();
+      pararPollFiltros();
+      return;
+    }
 
     // evita múltiplos polls
     if (filtroPoll) return;
 
-    filtroPoll = setInterval(() => {
+    const token = ++filtroPollToken;
+    filtroPollTentativas = 0;
+    const tentar = () => {
+      if (token !== filtroPollToken) return;
       if (window.EstoqueStore && EstoqueStore.isLoaded()) {
         popularFiltrosDoPainel();
-        clearInterval(filtroPoll);
+        filtroPollTentativas = 0;
         filtroPoll = null;
+        return;
       }
-    }, 300);
+      filtroPollTentativas += 1;
+      if (filtroPollTentativas >= FILTRO_RETRY_MAX_TENTATIVAS) {
+        filtroPoll = null;
+        return;
+      }
+      filtroPoll = setTimeout(tentar, FILTRO_RETRY_MS);
+    };
+
+    filtroPoll = setTimeout(tentar, 0);
   }
 
   function popularFiltrosDoPainelCompras() {
@@ -1088,17 +1175,46 @@
   }
 
   let filtroPollCompras = null;
+  let filtroPollComprasTentativas = 0;
+  let filtroPollComprasToken = 0;
+
+  function pararPollFiltrosCompras() {
+    filtroPollComprasToken += 1;
+    filtroPollComprasTentativas = 0;
+    if (filtroPollCompras) {
+      clearTimeout(filtroPollCompras);
+      filtroPollCompras = null;
+    }
+  }
+
   function iniciarPollFiltrosCompras() {
     if (!painelFiltroComprasExiste()) return;
+    if (window.ComprasStore && ComprasStore.isLoaded()) {
+      popularFiltrosDoPainelCompras();
+      pararPollFiltrosCompras();
+      return;
+    }
     if (filtroPollCompras) return;
 
-    filtroPollCompras = setInterval(() => {
+    const token = ++filtroPollComprasToken;
+    filtroPollComprasTentativas = 0;
+    const tentar = () => {
+      if (token !== filtroPollComprasToken) return;
       if (window.ComprasStore && ComprasStore.isLoaded()) {
         popularFiltrosDoPainelCompras();
-        clearInterval(filtroPollCompras);
+        filtroPollComprasTentativas = 0;
         filtroPollCompras = null;
+        return;
       }
-    }, 300);
+      filtroPollComprasTentativas += 1;
+      if (filtroPollComprasTentativas >= FILTRO_RETRY_MAX_TENTATIVAS) {
+        filtroPollCompras = null;
+        return;
+      }
+      filtroPollCompras = setTimeout(tentar, FILTRO_RETRY_MS);
+    };
+
+    filtroPollCompras = setTimeout(tentar, 0);
   }
 
   /* =========================
@@ -1273,7 +1389,25 @@
     }
   }
 
+  function initLongTaskMonitor() {
+    if (!window.AppPerf?.isEnabled?.()) return;
+    if (typeof window === 'undefined' || typeof window.PerformanceObserver === 'undefined') return;
+    try {
+      const observer = new PerformanceObserver(list => {
+        const entries = list.getEntries();
+        entries.forEach(entry => {
+          const dur = Number(entry.duration || 0).toFixed(1);
+          console.warn(`[longtask] ${dur}ms`);
+        });
+      });
+      observer.observe({ entryTypes: ['longtask'] });
+    } catch (error) {
+      // sem acao
+    }
+  }
+
   document.addEventListener('DOMContentLoaded', () => {
+    initLongTaskMonitor();
     initNavbarHamburger();
     trocarAba('dashboard');
     initBuscaEFiltroEstoque();
