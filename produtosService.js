@@ -75,8 +75,10 @@ function getResumoModeloProduto(produtoId) {
   const entradasTotal = Array.isArray(modelo?.entradas) ? modelo.entradas.length : 0;
   const saidasTotal = Array.isArray(modelo?.saidas) ? modelo.saidas.length : 0;
   const etapasTotal = Array.isArray(modelo?.etapas) ? modelo.etapas.length : 0;
+  const modeloNome = String(modelo?.dados?.nome_receita || 'Modelo principal').trim() || 'Modelo principal';
 
   return {
+    modelo_nome: modeloNome,
     modelo_entradas_total: entradasTotal,
     modelo_saidas_total: saidasTotal,
     modelo_etapas_total: etapasTotal,

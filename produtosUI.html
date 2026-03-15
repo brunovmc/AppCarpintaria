@@ -537,8 +537,7 @@
     function renderLinhaEtapaModelo(etapa = {}) {
       return `
         <div class="linha-etapa">
-          <input class="input-etapa-edit etapa-nome" value="${etapa.nome_etapa || ''}">
-          <input class="etapa-ordem" type="number" step="1" min="1" value="${etapa.ordem ?? ''}">
+          <input class="input-etapa-edit etapa-nome" placeholder="Descreva a etapa" value="${etapa.nome_etapa || ''}">
           <button type="button" class="btn-modelo-remover-etapa">Remover</button>
         </div>
       `;
@@ -623,7 +622,7 @@
       const etapas = [...document.querySelectorAll('#produtoModeloEtapas .linha-etapa')]
         .map((row, idx) => ({
           nome_etapa: row.querySelector('.etapa-nome')?.value || '',
-          ordem: row.querySelector('.etapa-ordem')?.value || (idx + 1)
+          ordem: idx + 1
         }))
         .filter(et => String(et.nome_etapa || '').trim() !== '');
 
@@ -879,8 +878,9 @@
       const entradasTotal = Number(i.modelo_entradas_total || entradasDoCache || 0);
       const saidasTotal = Number(i.modelo_saidas_total || saidasDoCache || 0);
       const etapasTotal = Number(i.modelo_etapas_total || 0);
+      const nomeModelo = String(i.modelo_nome || (receitas[0]?.nome_receita || 'Modelo principal')).trim() || 'Modelo principal';
       const resumoModelo = (entradasTotal + saidasTotal + etapasTotal) > 0
-        ? `Modelo: ${entradasTotal} entradas, ${saidasTotal} saidas, ${etapasTotal} etapas`
+        ? `Modelo: ${nomeModelo} | ${entradasTotal} entradas, ${saidasTotal} saidas, ${etapasTotal} etapas`
         : 'Modelo: nao configurado';
 
       div.innerHTML = `

@@ -758,6 +758,14 @@
     margin-bottom: 6px;
   }
 
+  #formularioProduto #produtoModeloEtapas .linha-etapa {
+    margin-bottom: 10px;
+    padding: 10px;
+    border: 1px solid #e9e9e9;
+    border-radius: 8px;
+    background: #fff;
+  }
+
   .linha-etapa input[type="checkbox"] {
     width: 24px;
     height: 24px;
@@ -766,6 +774,11 @@
 
   .etapa-nome {
     flex: 1;
+  }
+
+  #formularioProduto #produtoModeloEtapas .etapa-nome {
+    flex: 1 1 100%;
+    min-width: 0;
   }
 
   .input-etapa-edit {
@@ -894,6 +907,22 @@
     gap: 8px;
     flex-wrap: wrap;
     margin-top: 8px;
+  }
+
+  #formularioProduto .receita-entradas,
+  #formularioProduto .receita-saidas {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  #formularioProduto .linha-receita-entrada,
+  #formularioProduto .linha-receita-saida {
+    margin-top: 0;
+    padding: 10px;
+    border: 1px solid #e9e9e9;
+    border-radius: 8px;
+    background: #fff;
   }
 
   .linha-receita-entrada select,
