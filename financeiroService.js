@@ -1660,34 +1660,44 @@ function obterResumoDashboardFinanceiro(referenciaYm, forcarRecarregar) {
   let compromissoPrevistoMes = 0;
   const origensComParcelasPagamento = {};
   let pendenteTotal = 0;
+  let pendenteCompromissosMes = 0;
+  const origemAtivaResumo = (tipo, origemId) => {
+    if (!origemId) return false;
+    if (tipo === ORIGEM_TIPO_COMPRA) return !!comprasPorId[origemId];
+    if (tipo === ORIGEM_TIPO_DESPESA) return !!despesasPorId[origemId];
+    if (tipo === ORIGEM_TIPO_VENDA) return !!vendasPorId[origemId];
+    return false;
+  };
   const sheetParcelas = getSheet(ABA_PARCELAS_FINANCEIRAS);
   if (sheetParcelas) {
     rowsToObjects(sheetParcelas)
       .filter(i => String(i.ativo).toLowerCase() === 'true')
       .forEach(i => {
+        let origemTipo = '';
         let natureza = '';
         try {
-          natureza = normalizarNaturezaFinanceiro(i.natureza || getNaturezaOrigemFinanceiro(i.origem_tipo));
+          origemTipo = normalizarOrigemTipoFinanceiro(i.origem_tipo);
+          natureza = normalizarNaturezaFinanceiro(i.natureza || getNaturezaOrigemFinanceiro(origemTipo));
         } catch (error) {
           return;
         }
         if (natureza !== NATUREZA_PAGAMENTO) return;
-        const origemTipo = String(i.origem_tipo || '').trim().toUpperCase();
         const origemId = String(i.origem_id || '').trim();
+        if (!origemAtivaResumo(origemTipo, origemId)) return;
         if (origemTipo && origemId) {
           origensComParcelasPagamento[`${origemTipo}|${origemId}`] = true;
         }
         const dataPrevista = parseDataFinanceiro(i.data_prevista);
-        if (!dataPrevista || dataPrevista < inicio || dataPrevista >= fim) return;
+        if (!dataPrevista) return;
         const valorPrevisto = round2Financeiro(parseNumeroBR(i.valor_previsto));
         const valorPagoParcela = round2Financeiro(parseNumeroBR(i.valor_pago));
         const valorPendenteParcela = round2Financeiro(Math.max(0, valorPrevisto - valorPagoParcela));
-        compromissoPrevistoMes = round2Financeiro(
-          compromissoPrevistoMes + valorPrevisto
-        );
-        pendenteTotal = round2Financeiro(
-          pendenteTotal + valorPendenteParcela
-        );
+        if (dataPrevista >= inicio && dataPrevista < fim) {
+          pendenteTotal = round2Financeiro(pendenteTotal + valorPendenteParcela);
+        }
+        if (dataPrevista < fim && valorPendenteParcela > 0.009) {
+          pendenteCompromissosMes = round2Financeiro(pendenteCompromissosMes + valorPendenteParcela);
+        }
       });
   }
 
@@ -1719,6 +1729,10 @@ function obterResumoDashboardFinanceiro(referenciaYm, forcarRecarregar) {
     const vencimento = inicioDoDiaFinanceiro(item.data_vencimento);
 
     if (!origemComParcelas) {
+      const pendenciaAteMesReferencia = !!vencimento && vencimento < fim;
+      if (pendenciaAteMesReferencia) {
+        pendenteCompromissosMes = round2Financeiro(pendenteCompromissosMes + pendente);
+      }
       const pendenciaDoMesReferencia = !!vencimento && vencimento >= inicio && vencimento < fim;
       if (pendenciaDoMesReferencia) {
         pendenteTotal = round2Financeiro(pendenteTotal + pendente);
@@ -1733,6 +1747,8 @@ function obterResumoDashboardFinanceiro(referenciaYm, forcarRecarregar) {
       aVencer7Dias = round2Financeiro(aVencer7Dias + pendente);
     }
   });
+
+  compromissoPrevistoMes = round2Financeiro(gastoPagoMes + pendenteCompromissosMes);
 
   let valorEstoqueTotal = 0;
   const valorEstoquePorTipo = {};
@@ -2006,62 +2022,74 @@ function obterComposicaoCardDashboardFinanceiro(referenciaYm, cardKey, forcarRec
       });
   })();
 
+  const itensPagamentosMes = pagamentosValidos
+    .filter(p => {
+      const dataPag = parseDataFinanceiro(p.data_pagamento);
+      if (!dataPag || dataPag < inicio || dataPag >= fim) return false;
+      let natureza = '';
+      try {
+        natureza = normalizarNaturezaFinanceiro(p.natureza || getNaturezaOrigemFinanceiro(p.origem_tipo));
+      } catch (error) {
+        natureza = '';
+      }
+      return natureza === NATUREZA_PAGAMENTO;
+    })
+    .map(p => {
+      const tipo = String(p.origem_tipo || '').trim().toUpperCase();
+      const origemId = String(p.origem_id || '').trim();
+      const meta = obterMetaOrigem(tipo, origemId);
+      if (!meta) return null;
+      return {
+        linha_id: `PGT:${String(p.ID || '').trim()}`,
+        tipo_linha: 'pagamento',
+        titulo: meta.titulo,
+        detalhe: `${meta.detalhe} | Forma: ${String(p.forma_pagamento || '-').trim() || '-'}`,
+        data: formatarDataYmdFinanceiroSafe(p.data_pagamento),
+        valor: round2Financeiro(parseNumeroBR(p.valor_pago)),
+        origem_tipo: meta.origem_tipo,
+        origem_id: meta.origem_id,
+        origem_aba: meta.origem_aba,
+        pagamento_id: String(p.ID || '').trim(),
+        pode_editar_origem: true,
+        pode_excluir_origem: true,
+        pode_remover_pagamento: true,
+        eh_contagem: false
+      };
+    })
+    .filter(Boolean);
+
   let itens = [];
   let campoValor = 'valor';
 
   if (chave === 'gasto_pago_mes') {
-    itens = pagamentosValidos
-      .filter(p => {
-        const dataPag = parseDataFinanceiro(p.data_pagamento);
-        if (!dataPag || dataPag < inicio || dataPag >= fim) return false;
-        let natureza = '';
-        try {
-          natureza = normalizarNaturezaFinanceiro(p.natureza || getNaturezaOrigemFinanceiro(p.origem_tipo));
-        } catch (error) {
-          natureza = '';
-        }
-        return natureza === NATUREZA_PAGAMENTO;
-      })
-      .map(p => {
-        const tipo = String(p.origem_tipo || '').trim().toUpperCase();
-        const origemId = String(p.origem_id || '').trim();
-        const meta = obterMetaOrigem(tipo, origemId);
-        if (!meta) return null;
-        return {
-          linha_id: `PGT:${String(p.ID || '').trim()}`,
-          tipo_linha: 'pagamento',
-          titulo: meta.titulo,
-          detalhe: `${meta.detalhe} | Forma: ${String(p.forma_pagamento || '-').trim() || '-'}`,
-          data: formatarDataYmdFinanceiroSafe(p.data_pagamento),
-          valor: round2Financeiro(parseNumeroBR(p.valor_pago)),
-          origem_tipo: meta.origem_tipo,
-          origem_id: meta.origem_id,
-          origem_aba: meta.origem_aba,
-          pagamento_id: String(p.ID || '').trim(),
-          pode_editar_origem: true,
-          pode_excluir_origem: true,
-          pode_remover_pagamento: true,
-          eh_contagem: false
-        };
-      })
-      .filter(Boolean);
+    itens = itensPagamentosMes;
   } else if (chave === 'compromisso_previsto_mes') {
-    itens = parcelasAtivas
+    const origensComParcelasPagamento = {};
+    parcelasAtivas.forEach(parcela => {
+      if (parcela.natureza !== NATUREZA_PAGAMENTO) return;
+      const tipo = String(parcela.origem_tipo || '').trim().toUpperCase();
+      const origemId = String(parcela.origem_id || '').trim();
+      if (!tipo || !origemId) return;
+      origensComParcelasPagamento[`${tipo}|${origemId}`] = true;
+    });
+
+    const itensPendentesParcelas = parcelasAtivas
       .filter(parcela => {
         if (parcela.natureza !== NATUREZA_PAGAMENTO) return false;
         const dataPrev = parseDataFinanceiro(parcela.data_prevista);
-        return !!dataPrev && dataPrev >= inicio && dataPrev < fim;
+        if (!dataPrev || dataPrev >= fim) return false;
+        return round2Financeiro(parcela.valor_pendente) > 0.009;
       })
       .map(parcela => {
         const meta = obterMetaOrigem(parcela.origem_tipo, parcela.origem_id);
         if (!meta) return null;
         return {
-          linha_id: `PAR:${String(parcela.ID || '').trim()}`,
-          tipo_linha: 'parcela_prevista',
+          linha_id: `PAR_PEND:${String(parcela.ID || '').trim()}`,
+          tipo_linha: 'parcela_pendente',
           titulo: meta.titulo,
-          detalhe: `${meta.detalhe} | Parcela ${Number(parcela.parcela_numero || 0)}/${Number(parcela.parcelas_total || 0)}`,
+          detalhe: `${meta.detalhe} | Parcela ${Number(parcela.parcela_numero || 0)}/${Number(parcela.parcelas_total || 0)} | Pendente`,
           data: String(parcela.data_prevista || '').trim(),
-          valor: round2Financeiro(parcela.valor_previsto),
+          valor: round2Financeiro(parcela.valor_pendente),
           origem_tipo: meta.origem_tipo,
           origem_id: meta.origem_id,
           origem_aba: meta.origem_aba,
@@ -2073,6 +2101,45 @@ function obterComposicaoCardDashboardFinanceiro(referenciaYm, cardKey, forcarRec
         };
       })
       .filter(Boolean);
+
+    const itensPendentesSemParcelas = [];
+    const origensPendentes = [];
+    compras.forEach(item => origensPendentes.push({ origem_tipo: ORIGEM_TIPO_COMPRA, item }));
+    despesas.forEach(item => origensPendentes.push({ origem_tipo: ORIGEM_TIPO_DESPESA, item }));
+    origensPendentes.forEach(entry => {
+      const item = entry.item || {};
+      const pendente = round2Financeiro(parseNumeroBR(item.total_pendente));
+      if (pendente <= 0.009) return;
+      const origemId = String(item.ID || '').trim();
+      if (!origemId) return;
+      if (origensComParcelasPagamento[`${entry.origem_tipo}|${origemId}`]) return;
+      const vencimento = inicioDoDiaFinanceiro(item.data_vencimento);
+      if (!vencimento || vencimento >= fim) return;
+      const meta = obterMetaOrigem(entry.origem_tipo, origemId);
+      if (!meta) return;
+      itensPendentesSemParcelas.push({
+        linha_id: `ORIG_PEND:${entry.origem_tipo}:${origemId}`,
+        tipo_linha: 'origem_pendente',
+        titulo: meta.titulo,
+        detalhe: `${meta.detalhe} | Pendente`,
+        data: formatarDataYmdFinanceiroSafe(vencimento),
+        valor: pendente,
+        origem_tipo: meta.origem_tipo,
+        origem_id: meta.origem_id,
+        origem_aba: meta.origem_aba,
+        pagamento_id: '',
+        pode_editar_origem: true,
+        pode_excluir_origem: true,
+        pode_remover_pagamento: false,
+        eh_contagem: false
+      });
+    });
+
+    itens = [
+      ...itensPagamentosMes,
+      ...itensPendentesParcelas,
+      ...itensPendentesSemParcelas
+    ];
   } else if (chave === 'vendas_no_mes') {
     itens = vendas
       .filter(v => {
