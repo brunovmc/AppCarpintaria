@@ -414,9 +414,31 @@
       renderListaDespesas(lista);
     }
 
+    function salvarCacheDespesas() {
+      window.AppTabCache?.salvar?.('despesas', despesas);
+    }
+
+    function hidratarDespesasDoCache() {
+      const listaCache = window.AppTabCache?.ler?.('despesas');
+      if (!Array.isArray(listaCache)) return false;
+      despesas = [...listaCache];
+      carregado = true;
+      renderDespesas();
+      return true;
+    }
+
     function carregarDespesas(forcarRecarregar = false, onDone) {
+      const exibindoCache = !forcarRecarregar && hidratarDespesasDoCache();
       google.script.run
         .withFailureHandler(() => {
+          if (exibindoCache) {
+            if (window.AppRuntime?.setReadOnly) {
+              window.AppRuntime.setReadOnly(true, 'Sem conexao com backend - exibindo cache local');
+            }
+            mostrarToast('Exibindo ultimo snapshot em cache', 'erro');
+            if (typeof onDone === 'function') onDone();
+            return;
+          }
           mostrarToast('Erro ao carregar despesas gerais', 'erro');
           if (typeof onDone === 'function') onDone();
         })
@@ -427,6 +449,7 @@
           despesas = Array.isArray(lista) ? lista : [];
           carregado = true;
           renderDespesas();
+          salvarCacheDespesas();
           if (typeof onDone === 'function') onDone();
         })
         .listarDespesasGerais(!!forcarRecarregar);

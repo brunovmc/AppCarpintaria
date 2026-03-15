@@ -61,6 +61,14 @@
       ProducaoUI.renderLista(ProducaoStore.get());
     }
 
+    function hidratarProducaoDoCache() {
+      const listaCache = window.AppTabCache?.ler?.('producao');
+      if (!Array.isArray(listaCache)) return false;
+      ProducaoStore.set(listaCache);
+      renderListaAtual();
+      return true;
+    }
+
     function parseNumeroInput(valor) {
       const s = String(valor ?? '').trim();
       if (s === '') return 0;
@@ -192,7 +200,8 @@
         .listarReceitasProduto(produtoId);
     }
 
-    function carregarProducao() {
+    function carregarProducao(forcarRecarregar = false) {
+      const exibindoCache = !forcarRecarregar && hidratarProducaoDoCache();
       google.script.run
         .withSuccessHandler(lista => {
           if (window.AppRuntime?.setReadOnly) {
@@ -201,13 +210,24 @@
           ProducaoStore.set(lista);
           renderListaAtual();
         })
+        .withFailureHandler(err => {
+          if (exibindoCache) {
+            if (window.AppRuntime?.setReadOnly) {
+              window.AppRuntime.setReadOnly(true, 'Sem conexao com backend - exibindo cache local');
+            }
+            mostrarToast('Exibindo ultimo snapshot em cache', 'erro');
+            return;
+          }
+          const msg = err?.message || 'Erro ao carregar producao';
+          mostrarToast(msg, 'erro');
+        })
         .listarProducao();
     }
 
     function syncFromBackend() {
       carregarProdutos();
       carregarEstoqueOpcoes();
-      carregarProducao();
+      carregarProducao(true);
     }
 
     function salvar() {

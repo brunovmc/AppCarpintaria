@@ -118,7 +118,23 @@
         .some(v => String(v || '').trim().toUpperCase() === c);
     }
 
-    function carregarEstoque() {
+    function hidratarEstoqueDoCache() {
+      const listaCache = window.AppTabCache?.ler?.('estoque');
+      if (!Array.isArray(listaCache)) return false;
+      EstoqueStore.set(listaCache);
+      if (typeof aplicarBuscaEstoque === 'function') {
+        aplicarBuscaEstoque();
+      } else {
+        EstoqueUI.renderLista(EstoqueStore.get());
+      }
+      if (typeof popularFiltrosDoPainel === 'function') {
+        popularFiltrosDoPainel();
+      }
+      return true;
+    }
+
+    function carregarEstoque(forcarRecarregar = false) {
+      const exibindoCache = !forcarRecarregar && hidratarEstoqueDoCache();
       const perf = perfStart('rpc.estoque.listarEstoque');
       google.script.run
         .withSuccessHandler(lista => {
@@ -138,13 +154,20 @@
         })
         .withFailureHandler(() => {
           perfEnd(perf, { ok: false });
+          if (exibindoCache) {
+            if (window.AppRuntime?.setReadOnly) {
+              window.AppRuntime.setReadOnly(true, 'Sem conexao com backend - exibindo cache local');
+            }
+            mostrarToast('Exibindo ultimo snapshot em cache', 'erro');
+            return;
+          }
           mostrarToast('Erro ao carregar estoque', 'erro');
         })
         .listarEstoque();
     }
 
     function syncFromBackend() {
-      carregarEstoque();
+      carregarEstoque(true);
     }
 
     function salvar() {

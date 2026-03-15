@@ -3,6 +3,15 @@
 
     let itens = [];
     let carregado = false;
+    const CACHE_TAB = 'producao';
+
+    function salvarCache() {
+      window.AppTabCache?.salvar?.(CACHE_TAB, itens);
+    }
+
+    function removerCache() {
+      window.AppTabCache?.remover?.(CACHE_TAB);
+    }
 
     /* =========================
        BASICO
@@ -10,6 +19,7 @@
     function set(lista) {
       itens = Array.isArray(lista) ? [...lista] : [];
       carregado = true;
+      salvarCache();
     }
 
     function get() {
@@ -23,6 +33,7 @@
     function clear() {
       itens = [];
       carregado = false;
+      removerCache();
     }
 
     /* =========================
@@ -31,6 +42,7 @@
     function add(item) {
       if (!item || !item.producao_id) return;
       itens.unshift(item);
+      salvarCache();
     }
 
     function update(id, dados) {
@@ -41,10 +53,12 @@
         ...itens[idx],
         ...dados
       };
+      salvarCache();
     }
 
     function remove(id) {
       itens = itens.filter(i => i.producao_id !== id);
+      salvarCache();
     }
 
     function getById(id) {

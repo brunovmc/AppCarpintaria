@@ -84,7 +84,16 @@
       VendasUI.renderLista(VendasStore.get());
     }
 
-    function carregarVendas() {
+    function hidratarVendasDoCache() {
+      const listaCache = window.AppTabCache?.ler?.('vendas');
+      if (!Array.isArray(listaCache)) return false;
+      VendasStore.set(listaCache);
+      renderListaAtual();
+      return true;
+    }
+
+    function carregarVendas(forcarRecarregar = false) {
+      const exibindoCache = !forcarRecarregar && hidratarVendasDoCache();
       google.script.run
         .withSuccessHandler(lista => {
           if (window.AppRuntime?.setReadOnly) {
@@ -94,6 +103,13 @@
           renderListaAtual();
         })
         .withFailureHandler(err => {
+          if (exibindoCache) {
+            if (window.AppRuntime?.setReadOnly) {
+              window.AppRuntime.setReadOnly(true, 'Sem conexao com backend - exibindo cache local');
+            }
+            mostrarToast('Exibindo ultimo snapshot em cache', 'erro');
+            return;
+          }
           mostrarToast(err?.message || 'Erro ao carregar vendas', 'erro');
         })
         .listarVendas();
@@ -355,7 +371,7 @@
     }
 
     function syncFromBackend() {
-      carregarVendas();
+      carregarVendas(true);
       carregarEstoqueVendavel();
     }
 

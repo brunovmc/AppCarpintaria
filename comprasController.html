@@ -142,7 +142,19 @@
       ComprasUI.renderLista(ComprasStore.get());
     }
 
-    function carregarCompras() {
+    function hidratarComprasDoCache() {
+      const listaCache = window.AppTabCache?.ler?.('compras');
+      if (!Array.isArray(listaCache)) return false;
+      ComprasStore.set(listaCache);
+      renderListaAtual();
+      if (typeof popularFiltrosDoPainelCompras === 'function') {
+        popularFiltrosDoPainelCompras();
+      }
+      return true;
+    }
+
+    function carregarCompras(forcarRecarregar = false) {
+      const exibindoCache = !forcarRecarregar && hidratarComprasDoCache();
       const perf = perfStart('rpc.compras.listarCompras');
       google.script.run
         .withSuccessHandler(lista => {
@@ -158,13 +170,20 @@
         })
         .withFailureHandler(() => {
           perfEnd(perf, { ok: false });
+          if (exibindoCache) {
+            if (window.AppRuntime?.setReadOnly) {
+              window.AppRuntime.setReadOnly(true, 'Sem conexao com backend - exibindo cache local');
+            }
+            mostrarToast('Exibindo ultimo snapshot em cache', 'erro');
+            return;
+          }
           mostrarToast('Erro ao carregar compras', 'erro');
         })
         .listarCompras();
     }
 
     function syncFromBackend() {
-      carregarCompras();
+      carregarCompras(true);
     }
 
     function salvar() {

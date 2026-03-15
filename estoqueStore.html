@@ -2,6 +2,15 @@
   window.EstoqueStore = (() => {
     let itens = [];
     let carregado = false;
+    const CACHE_TAB = 'estoque';
+
+    function salvarCache() {
+      window.AppTabCache?.salvar?.(CACHE_TAB, itens);
+    }
+
+    function removerCache() {
+      window.AppTabCache?.remover?.(CACHE_TAB);
+    }
 
     /* =========================
        BÁSICO
@@ -9,6 +18,7 @@
     function set(lista) {
       itens = Array.isArray(lista) ? [...lista] : [];
       carregado = true;
+      salvarCache();
     }
 
     function get() {
@@ -22,6 +32,7 @@
     function clear() {
       itens = [];
       carregado = false;
+      removerCache();
     }
 
     /* =========================
@@ -30,6 +41,7 @@
     function add(item) {
       if (!item || !item.ID) return;
       itens.unshift(item); // novo no topo
+      salvarCache();
     }
 
     function update(id, dados) {
@@ -40,10 +52,12 @@
         ...itens[idx],
         ...dados,
       };
+      salvarCache();
     }
 
     function remove(id) {
       itens = itens.filter((i) => i.ID !== id);
+      salvarCache();
     }
 
     function getById(id) {

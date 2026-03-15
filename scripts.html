@@ -210,6 +210,92 @@
 
   window.AppRuntime = window.AppRuntime || createRuntimeState();
 
+  function createTabCacheHelper() {
+    const STORAGE_PREFIX = 'app:tabcache:v1:';
+    const TABS_PERMITIDAS = {
+      despesas: true,
+      estoque: true,
+      compras: true,
+      vendas: true,
+      produtos: true,
+      producao: true
+    };
+    const TTL_MS = 1000 * 60 * 60 * 24 * 7; // 7 dias
+
+    function normalizarTab(tab) {
+      const chave = String(tab || '').trim().toLowerCase();
+      return TABS_PERMITIDAS[chave] ? chave : '';
+    }
+
+    function storageDisponivel() {
+      try {
+        if (!window.localStorage) return false;
+        const key = `${STORAGE_PREFIX}__ping__`;
+        window.localStorage.setItem(key, '1');
+        window.localStorage.removeItem(key);
+        return true;
+      } catch (error) {
+        return false;
+      }
+    }
+
+    function lerBruto(tab) {
+      const chave = normalizarTab(tab);
+      if (!chave || !storageDisponivel()) return null;
+      try {
+        const raw = window.localStorage.getItem(`${STORAGE_PREFIX}${chave}`);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw);
+        if (!parsed || typeof parsed !== 'object') return null;
+        const updatedAt = Number(parsed.updatedAt || 0);
+        const data = parsed.data;
+        if (!updatedAt || (Date.now() - updatedAt) > TTL_MS) return null;
+        return { updatedAt, data };
+      } catch (error) {
+        return null;
+      }
+    }
+
+    function ler(tab) {
+      const entry = lerBruto(tab);
+      return entry ? entry.data : null;
+    }
+
+    function salvar(tab, data) {
+      const chave = normalizarTab(tab);
+      if (!chave || !storageDisponivel()) return false;
+      try {
+        const payload = {
+          updatedAt: Date.now(),
+          data: data ?? null
+        };
+        window.localStorage.setItem(`${STORAGE_PREFIX}${chave}`, JSON.stringify(payload));
+        return true;
+      } catch (error) {
+        return false;
+      }
+    }
+
+    function remover(tab) {
+      const chave = normalizarTab(tab);
+      if (!chave || !storageDisponivel()) return false;
+      try {
+        window.localStorage.removeItem(`${STORAGE_PREFIX}${chave}`);
+        return true;
+      } catch (error) {
+        return false;
+      }
+    }
+
+    return {
+      ler,
+      salvar,
+      remover
+    };
+  }
+
+  window.AppTabCache = window.AppTabCache || createTabCacheHelper();
+
   /* =========================
      PERF + CICLO DE ABAS
   ========================== */

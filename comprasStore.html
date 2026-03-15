@@ -3,6 +3,15 @@
 
     let itens = [];
     let carregado = false;
+    const CACHE_TAB = 'compras';
+
+    function salvarCache() {
+      window.AppTabCache?.salvar?.(CACHE_TAB, itens);
+    }
+
+    function removerCache() {
+      window.AppTabCache?.remover?.(CACHE_TAB);
+    }
 
     function jaAdicionadaAoEstoque(item) {
       return String(item?.adicionado_estoque ?? '').trim().toLowerCase() === 'true';
@@ -73,6 +82,7 @@
     function set(lista) {
       itens = ordenarCompras(lista);
       carregado = true;
+      salvarCache();
     }
 
     function get() {
@@ -86,6 +96,7 @@
     function clear() {
       itens = [];
       carregado = false;
+      removerCache();
     }
 
     /* =========================
@@ -95,6 +106,7 @@
       if (!item || !item.ID) return;
       itens.unshift(item);
       itens = ordenarCompras(itens);
+      salvarCache();
     }
 
     function update(id, dados) {
@@ -106,10 +118,12 @@
         ...dados
       };
       itens = ordenarCompras(itens);
+      salvarCache();
     }
 
     function remove(id) {
       itens = itens.filter(i => i.ID !== id);
+      salvarCache();
     }
 
     function getById(id) {

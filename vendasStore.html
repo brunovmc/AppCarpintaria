@@ -2,6 +2,15 @@
   window.VendasStore = (() => {
     let itens = [];
     let carregado = false;
+    const CACHE_TAB = 'vendas';
+
+    function salvarCache() {
+      window.AppTabCache?.salvar?.(CACHE_TAB, itens);
+    }
+
+    function removerCache() {
+      window.AppTabCache?.remover?.(CACHE_TAB);
+    }
 
     function parseData(valor) {
       if (!valor) return 0;
@@ -32,6 +41,7 @@
     function set(lista) {
       itens = ordenar(lista);
       carregado = true;
+      salvarCache();
     }
 
     function get() {
@@ -45,12 +55,14 @@
     function clear() {
       itens = [];
       carregado = false;
+      removerCache();
     }
 
     function add(item) {
       if (!item || !item.ID) return;
       itens.unshift(item);
       itens = ordenar(itens);
+      salvarCache();
     }
 
     function update(id, dados) {
@@ -58,10 +70,12 @@
       if (idx === -1) return;
       itens[idx] = { ...itens[idx], ...dados };
       itens = ordenar(itens);
+      salvarCache();
     }
 
     function remove(id) {
       itens = itens.filter(i => i.ID !== id);
+      salvarCache();
     }
 
     function getById(id) {

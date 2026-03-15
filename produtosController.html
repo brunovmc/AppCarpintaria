@@ -117,7 +117,17 @@
       ProdutosUI.renderLista(ProdutosStore.get());
     }
 
-    function carregarProdutos() {
+    function hidratarProdutosDoCache() {
+      const listaCache = window.AppTabCache?.ler?.('produtos');
+      if (!Array.isArray(listaCache)) return false;
+      ProdutosStore.set(listaCache);
+      atualizarOpcoesReceitas();
+      renderListaAtual();
+      return true;
+    }
+
+    function carregarProdutos(forcarRecarregar = false) {
+      const exibindoCache = !forcarRecarregar && hidratarProdutosDoCache();
       google.script.run
         .withSuccessHandler(lista => {
           if (window.AppRuntime?.setReadOnly) {
@@ -144,11 +154,21 @@
           atualizarOpcoesReceitas();
           renderListaAtual();
         })
+        .withFailureHandler(() => {
+          if (exibindoCache) {
+            if (window.AppRuntime?.setReadOnly) {
+              window.AppRuntime.setReadOnly(true, 'Sem conexao com backend - exibindo cache local');
+            }
+            mostrarToast('Exibindo ultimo snapshot em cache', 'erro');
+            return;
+          }
+          mostrarToast('Erro ao carregar produtos', 'erro');
+        })
         .listarProdutos();
     }
 
     function syncFromBackend() {
-      carregarProdutos();
+      carregarProdutos(true);
     }
 
     function carregarReceitas(produtoId, forcar = false) {
