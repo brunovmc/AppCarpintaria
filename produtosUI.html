@@ -922,6 +922,7 @@
 
       listaFiltradaAtual = Array.isArray(itens) ? itens : [];
       qtdRenderizada = 0;
+      initDelegation();
 
       if (listaFiltradaAtual.length === 0) {
         lista.innerHTML = '<p>Nenhum produto cadastrado.</p>';
@@ -944,7 +945,6 @@
           return;
         }
 
-        initDelegation();
         document.querySelectorAll('.linha-receita-entrada').forEach(sincronizarLinhaEntradaMadeira);
         if (abertoId) {
           const alvo = lista.querySelector(`.card[data-id="${abertoId}"]`);
