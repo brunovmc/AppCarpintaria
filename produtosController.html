@@ -295,9 +295,12 @@
         if (!unidade || !isUnidadeValidacao(unidade)) {
           return 'Unidade da entrada invalida';
         }
-        if (!qtd || qtd <= 0) return 'Qtd de pecas invalida';
-        if (tipo === 'MADEIRA' && (!comp || !larg || !esp)) {
-          return 'Dimensoes invalidas';
+        if (tipo === 'MADEIRA') {
+          if (!comp || !larg || !esp) return 'Dimensoes invalidas';
+          const volumeM3 = (comp * larg * esp) / 1000000;
+          if (!volumeM3 || volumeM3 <= 0) return 'Volume de madeira invalido';
+        } else if (!qtd || qtd <= 0) {
+          return 'Quantidade de entrada invalida';
         }
       }
 

@@ -79,6 +79,7 @@
         if (categoriaSel) {
           categoriaSel.innerHTML = renderOpcoesCategoria(categoriaAtual, tipo);
         }
+        sincronizarLinhaEntradaMadeira(row);
       });
     }
 
@@ -93,6 +94,62 @@
       const n = Number(valor || 0);
       if (isNaN(n)) return '-';
       return n.toFixed(casas);
+    }
+
+    function formatarNumeroInput(valor, casas = 6) {
+      const n = Number(valor || 0);
+      if (!isFinite(n) || n <= 0) return '';
+      return n.toFixed(casas).replace(/\.?0+$/, '');
+    }
+
+    function calcularVolumeM3(comp, larg, esp) {
+      const c = parseNumero(comp);
+      const l = parseNumero(larg);
+      const e = parseNumero(esp);
+      if (!c || !l || !e) return 0;
+      return (c * l * e) / 1000000;
+    }
+
+    function sincronizarLinhaEntradaMadeira(row) {
+      if (!row) return;
+      const tipo = String(row.querySelector('.entrada-tipo')?.value || '').toUpperCase();
+      const isMadeira = tipo === 'MADEIRA';
+
+      const unidadeInput = row.querySelector('.entrada-unidade');
+      const compInput = row.querySelector('.entrada-comp');
+      const largInput = row.querySelector('.entrada-larg');
+      const espInput = row.querySelector('.entrada-esp');
+      const qtdInput = row.querySelector('.entrada-qtd');
+
+      if (compInput) compInput.classList.toggle('hidden', !isMadeira);
+      if (largInput) largInput.classList.toggle('hidden', !isMadeira);
+      if (espInput) espInput.classList.toggle('hidden', !isMadeira);
+
+      if (qtdInput) {
+        const eraAutoMadeira = qtdInput.dataset.autoMadeira === '1';
+        qtdInput.dataset.autoMadeira = isMadeira ? '1' : '0';
+        qtdInput.readOnly = isMadeira;
+        qtdInput.step = isMadeira ? '0.000001' : '0.01';
+        qtdInput.placeholder = isMadeira ? 'Quantidade (m3)' : 'Quantidade';
+        if (!isMadeira && eraAutoMadeira) {
+          qtdInput.value = '';
+        }
+      }
+
+      if (unidadeInput) {
+        unidadeInput.disabled = isMadeira;
+        if (isMadeira) {
+          setSelectByValidation(unidadeInput, 'M3');
+        }
+      }
+
+      if (!isMadeira || !qtdInput) return;
+      const volumeM3 = calcularVolumeM3(
+        compInput?.value || '',
+        largInput?.value || '',
+        espInput?.value || ''
+      );
+      qtdInput.value = volumeM3 > 0 ? formatarNumeroInput(volumeM3, 6) : '';
     }
 
     function proximoFrame(fn) {
@@ -403,6 +460,11 @@
       const tipo = String(entrada.tipo_item || '').toUpperCase();
       const isMadeira = tipo === 'MADEIRA';
       const dimsHidden = isMadeira ? '' : 'hidden';
+      const qtdPlaceholder = isMadeira ? 'Quantidade (m3)' : 'Quantidade';
+      const qtdStep = isMadeira ? '0.000001' : '0.01';
+      const qtdReadonly = isMadeira ? 'readonly' : '';
+      const qtdAutoData = isMadeira ? '1' : '0';
+      const unidadeDisabled = isMadeira ? 'disabled' : '';
 
       return `
         <div class="linha-receita-entrada">
@@ -413,14 +475,14 @@
           <select class="entrada-categoria">
             ${renderOpcoesCategoria(entrada.categoria || '', tipo)}
           </select>
-          <select class="entrada-unidade">
+          <select class="entrada-unidade" ${unidadeDisabled}>
             ${renderOpcoesUnidade(entrada.unidade || '')}
           </select>
-          <input class="entrada-qtd" type="number" step="0.01" min="0" placeholder="Quantidade" value="${entrada.qtd_pecas ?? ''}">
+          <input class="entrada-qtd" type="number" step="${qtdStep}" min="0" placeholder="${qtdPlaceholder}" value="${entrada.qtd_pecas ?? ''}" ${qtdReadonly} data-auto-madeira="${qtdAutoData}">
           <input class="entrada-comp ${dimsHidden}" type="number" step="0.01" min="0" placeholder="Comp (cm)" value="${entrada.comprimento_cm ?? ''}">
           <input class="entrada-larg ${dimsHidden}" type="number" step="0.01" min="0" placeholder="Larg (cm)" value="${entrada.largura_cm ?? ''}">
           <input class="entrada-esp ${dimsHidden}" type="number" step="0.01" min="0" placeholder="Esp (cm)" value="${entrada.espessura_cm ?? ''}">
-          <input class="entrada-custo" type="number" step="0.01" min="0" placeholder="Custo/peca" value="${entrada.custo_manual ?? ''}">
+          <input class="entrada-custo" type="number" step="0.01" min="0" placeholder="Custo unit" value="${entrada.custo_manual ?? ''}">
           <button class="btn-receita-remover-entrada">Remover</button>
         </div>
       `;
@@ -486,6 +548,8 @@
       const { modeloEntradas } = el();
       if (!modeloEntradas) return;
       modeloEntradas.insertAdjacentHTML('beforeend', renderEntradaEditRow(entrada, 'FORM'));
+      const row = modeloEntradas.querySelector('.linha-receita-entrada:last-child');
+      sincronizarLinhaEntradaMadeira(row);
     }
 
     function adicionarSaidaModeloForm(saida = {}) {
@@ -598,15 +662,16 @@
         const dims = `${e.comprimento_cm || '-'} x ${e.largura_cm || '-'} x ${e.espessura_cm || '-'} cm`;
         const qtd = e.qtd_pecas ?? '-';
         const tipo = String(e.tipo_item || '').toUpperCase() || '-';
+        const qtdLabel = tipo === 'MADEIRA' ? 'Volume (m3)' : 'Quantidade';
         const custo = parseNumero(e.custo_manual) > 0
-          ? `Custo/peca: R$ ${formatNumero(e.custo_manual)}`
-          : 'Custo/peca: -';
+          ? `Custo unit: R$ ${formatNumero(e.custo_manual)}`
+          : 'Custo unit: -';
         const titulo = e.nome_item || '-';
 
         return `
           <div class="linha-receita">
             <div><strong>${titulo}</strong></div>
-            <div class="comp-meta">Tipo: ${tipo} | Quantidade: ${qtd}</div>
+            <div class="comp-meta">Tipo: ${tipo} | ${qtdLabel}: ${qtd}</div>
             <div class="comp-meta">Categoria: ${e.categoria || '-'}</div>
             <div class="comp-meta">Unidade: ${e.unidade || '-'}</div>
             ${tipo === 'MADEIRA' ? `<div class="comp-meta">Dimensoes: ${dims}</div>` : ''}
@@ -880,6 +945,7 @@
         }
 
         initDelegation();
+        document.querySelectorAll('.linha-receita-entrada').forEach(sincronizarLinhaEntradaMadeira);
         if (abertoId) {
           const alvo = lista.querySelector(`.card[data-id="${abertoId}"]`);
           if (alvo) {
@@ -961,6 +1027,8 @@
           const container = cardReceita?.querySelector('.receita-entradas');
           if (container) {
             container.insertAdjacentHTML('beforeend', renderEntradaEditRow({}));
+            const row = container.querySelector('.linha-receita-entrada:last-child');
+            sincronizarLinhaEntradaMadeira(row);
           }
           return;
         }
@@ -1009,10 +1077,6 @@
           const largInput = row.querySelector('.entrada-larg');
           const espInput = row.querySelector('.entrada-esp');
 
-          if (compInput) compInput.classList.toggle('hidden', !isMadeira);
-          if (largInput) largInput.classList.toggle('hidden', !isMadeira);
-          if (espInput) espInput.classList.toggle('hidden', !isMadeira);
-
           if (!isMadeira) {
             if (compInput) compInput.value = '';
             if (largInput) largInput.value = '';
@@ -1024,8 +1088,20 @@
           }
           if (unidadeInput) unidadeInput.value = '';
           if (categoriaInput) categoriaInput.value = '';
+          sincronizarLinhaEntradaMadeira(row);
 
           return;
+        }
+      });
+
+      document.addEventListener('input', e => {
+        if (
+          e.target.classList.contains('entrada-comp') ||
+          e.target.classList.contains('entrada-larg') ||
+          e.target.classList.contains('entrada-esp')
+        ) {
+          const row = e.target.closest('.linha-receita-entrada');
+          sincronizarLinhaEntradaMadeira(row);
         }
       });
 

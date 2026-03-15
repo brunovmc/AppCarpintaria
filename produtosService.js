@@ -570,7 +570,15 @@ function salvarEntradasReceita(receitaId, linhas) {
   linhasValidas.forEach(l => {
     const tipoItem = String(l.tipo_item || '').toUpperCase();
     const nomeItem = String(l.nome_item || '').trim();
-    const qtdPecas = parseNumeroBR(l.qtd_pecas);
+    const comprimentoCm = parseNumeroBR(l.comprimento_cm);
+    const larguraCm = parseNumeroBR(l.largura_cm);
+    const espessuraCm = parseNumeroBR(l.espessura_cm);
+    const volumeM3 = (comprimentoCm > 0 && larguraCm > 0 && espessuraCm > 0)
+      ? ((comprimentoCm * larguraCm * espessuraCm) / 1000000)
+      : 0;
+    const qtdPecas = tipoItem === 'MADEIRA'
+      ? volumeM3
+      : parseNumeroBR(l.qtd_pecas);
 
     if (!tipoItem || !nomeItem || !qtdPecas || qtdPecas <= 0) {
       return;
@@ -586,11 +594,11 @@ function salvarEntradasReceita(receitaId, linhas) {
       produto_ref_id: '',
       receita_ref_id: '',
       categoria: l.categoria || '',
-      unidade: l.unidade || '',
+      unidade: tipoItem === 'MADEIRA' ? 'M3' : (l.unidade || ''),
       qtd_pecas: qtdPecas,
-      comprimento_cm: parseNumeroBR(l.comprimento_cm),
-      largura_cm: parseNumeroBR(l.largura_cm),
-      espessura_cm: parseNumeroBR(l.espessura_cm),
+      comprimento_cm: comprimentoCm,
+      largura_cm: larguraCm,
+      espessura_cm: espessuraCm,
       custo_manual: parseNumeroBR(l.custo_manual),
       observacao: l.observacao || '',
       ativo: true
@@ -890,8 +898,13 @@ function explodirReceitaDetalhada(produtoId, receitaId, qtdPlanejada) {
       const esp = parseNumeroBR(e.espessura_cm);
       const volumeM3 = (comp > 0 && larg > 0 && esp > 0)
         ? ((comp * larg * esp) / 1000000)
-        : 1;
-      quantidade = qtdBase * volumeM3 * fator;
+        : 0;
+      const unidadeEntrada = String(e.unidade || '').trim().toUpperCase();
+      const qtdInteira = Math.abs(qtdBase - Math.round(qtdBase)) < 0.000001;
+      const modoLegadoQtdPecas = unidadeEntrada !== 'M3' && volumeM3 > 0 && qtdInteira;
+      quantidade = modoLegadoQtdPecas
+        ? (qtdBase * volumeM3 * fator)
+        : (qtdBase * fator);
       unidade = unidade || 'M3';
     } else {
       quantidade = qtdBase * fator;
