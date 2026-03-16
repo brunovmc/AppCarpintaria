@@ -3,7 +3,35 @@
      NAV / ABAS
   ========================== */
   const ABAS_MENU_HAMBURGER = ['despesas', 'estoque', 'compras', 'vendas', 'produtos', 'producao'];
+  const ABAS_APP = ['dashboard', ...ABAS_MENU_HAMBURGER];
+  const ABA_INICIAL_PADRAO = 'dashboard';
+  const LAST_TAB_STORAGE_KEY = 'app:lasttab:v1';
   let listenerFecharMenuNavbarAtivo = false;
+
+  function normalizarNomeAba(valor) {
+    const aba = String(valor || '').trim().toLowerCase();
+    return ABAS_APP.includes(aba) ? aba : '';
+  }
+
+  function salvarUltimaAba(valor) {
+    const aba = normalizarNomeAba(valor);
+    if (!aba) return;
+    try {
+      if (!window.localStorage) return;
+      window.localStorage.setItem(LAST_TAB_STORAGE_KEY, aba);
+    } catch (error) {
+      // sem acao
+    }
+  }
+
+  function lerUltimaAba() {
+    try {
+      if (!window.localStorage) return '';
+      return normalizarNomeAba(window.localStorage.getItem(LAST_TAB_STORAGE_KEY));
+    } catch (error) {
+      return '';
+    }
+  }
 
   function getNavbarHamburgerEls() {
     return {
@@ -684,26 +712,29 @@
 
   function trocarAba(nome) {
     window.AppPerf?.measure('nav.trocarAba', () => {
-      const alvo = String(nome || '').trim();
+      const alvo = normalizarNomeAba(nome) || ABA_INICIAL_PADRAO;
       if (!alvo) return;
+      const abaAlvo = document.getElementById('aba-' + alvo);
+      if (!abaAlvo) return;
       const atual = obterNomeAbaAtiva();
       if (atual && atual === alvo) {
         fecharMenuNavbar();
         atualizarEstadoNavbar(alvo);
         setTopBars(alvo);
         executarCicloAba(alvo);
+        salvarUltimaAba(alvo);
         return;
       }
 
       document.querySelectorAll('.aba')
         .forEach(a => a.classList.add('hidden'));
 
-      const aba = document.getElementById('aba-' + alvo);
-      if (aba) aba.classList.remove('hidden');
+      abaAlvo.classList.remove('hidden');
       fecharMenuNavbar();
       atualizarEstadoNavbar(alvo);
       setTopBars(alvo);
       executarCicloAba(alvo);
+      salvarUltimaAba(alvo);
     }, { aba: String(nome || '') });
   }
 
@@ -1607,7 +1638,7 @@
   document.addEventListener('DOMContentLoaded', () => {
     initLongTaskMonitor();
     initNavbarHamburger();
-    trocarAba('dashboard');
+    trocarAba(lerUltimaAba() || ABA_INICIAL_PADRAO);
     initBuscaEFiltroEstoque();
     initBuscaEFiltroCompras();
     initBuscaVendas();
