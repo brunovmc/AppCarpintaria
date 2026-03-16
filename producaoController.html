@@ -4,6 +4,8 @@
     let editandoId = null;
     let iniciado = false;
     let consumoInit = false;
+    let salvando = false;
+    let mutationLockToken = null;
 
     let produtos = [];
     let estoqueOpcoes = [];
@@ -74,6 +76,39 @@
       if (s === '') return 0;
       const n = Number(s.replace(',', '.'));
       return isNaN(n) ? 0 : n;
+    }
+
+    function setSalvando(ativo) {
+      salvando = !!ativo;
+      if (window.AppMutationUI?.lock && window.AppMutationUI?.unlock) {
+        if (salvando) {
+          if (!mutationLockToken) {
+            mutationLockToken = window.AppMutationUI.lock();
+          }
+        } else if (mutationLockToken) {
+          window.AppMutationUI.unlock(mutationLockToken);
+          mutationLockToken = null;
+        }
+      }
+      const btn = document.getElementById('btnSalvarProducao');
+      if (!btn) return;
+      btn.disabled = salvando;
+      if (window.AppLoading?.setButtonLoading) {
+        window.AppLoading.setButtonLoading(btn, salvando, 'Salvar', 'Salvando');
+      } else {
+        btn.textContent = salvando ? 'Salvando...' : 'Salvar';
+      }
+    }
+
+    function reabrirFormularioAposErro(dados, opcoes = {}) {
+      const payload = dados ? { ...dados } : {};
+      const editando = !!opcoes.editando;
+      editandoId = editando ? String(opcoes.id || '') : null;
+      ProducaoUI.preencherFormulario(payload);
+      if (payload.produto_id) {
+        carregarReceitasProduto(payload.produto_id, payload.receita_id || '', true);
+      }
+      ProducaoUI.mostrarFormulario();
     }
 
     function podeAlterarDados(contexto = 'Operacao') {
@@ -232,6 +267,7 @@
 
     function salvar() {
       if (!podeAlterarDados('Salvamento bloqueado em modo somente leitura')) return;
+      if (salvando) return;
       const get = id => document.getElementById(id)?.value || '';
 
       const produtoId = get('producaoProduto');
@@ -278,6 +314,9 @@
       if (receita) {
         dados.receita_nome = receita.nome_receita || '';
       }
+      const dadosFormulario = { ...dados };
+
+      setSalvando(true);
 
       if (editandoId) {
         const idAtual = editandoId;
@@ -293,9 +332,12 @@
           renderListaAtual();
           const msg = err?.message || 'Erro ao salvar edicao';
           mostrarToast(msg, 'erro');
+          setSalvando(false);
+          reabrirFormularioAposErro(dadosFormulario, { editando: true, id: idAtual });
         })
         .withSuccessHandler(() => {
           mostrarToast('Salvo com sucesso');
+          setSalvando(false);
         })
         .atualizarProducao(idAtual, dados);
 
@@ -326,6 +368,8 @@
           renderListaAtual();
           const msg = err?.message || 'Erro ao salvar producao';
           mostrarToast(msg, 'erro');
+          setSalvando(false);
+          reabrirFormularioAposErro(dadosFormulario, { editando: false });
         })
         .withSuccessHandler(itemSalvo => {
           ProducaoStore.remove(tempId);
@@ -333,12 +377,14 @@
           if (!itemSalvo || !itemSalvo.producao_id) {
             mostrarToast('Salvo. Atualizando lista...');
             carregarProducao();
+            setSalvando(false);
             return;
           }
 
           ProducaoStore.add(itemSalvo);
           renderListaAtual();
           mostrarToast('Salvo com sucesso');
+          setSalvando(false);
         })
         .criarProducao(dados);
     }

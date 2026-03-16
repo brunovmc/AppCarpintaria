@@ -3,6 +3,7 @@
     let iniciado = false;
     let editandoId = null;
     let salvando = false;
+    let mutationLockToken = null;
     let recebimentoVendaId = null;
     let salvandoRecebimento = false;
 
@@ -31,6 +32,16 @@
 
     function setSalvando(ativo) {
       salvando = !!ativo;
+      if (window.AppMutationUI?.lock && window.AppMutationUI?.unlock) {
+        if (salvando) {
+          if (!mutationLockToken) {
+            mutationLockToken = window.AppMutationUI.lock();
+          }
+        } else if (mutationLockToken) {
+          window.AppMutationUI.unlock(mutationLockToken);
+          mutationLockToken = null;
+        }
+      }
       const btn = document.getElementById('btnSalvarVenda');
       if (!btn) return;
       btn.disabled = salvando;
@@ -39,6 +50,14 @@
       } else {
         btn.textContent = salvando ? 'Salvando...' : 'Salvar';
       }
+    }
+
+    function reabrirFormularioAposErro(dados, opcoes = {}) {
+      const payload = dados ? { ...dados } : {};
+      const editando = !!opcoes.editando;
+      editandoId = editando ? String(opcoes.id || '') : null;
+      VendasUI.preencherFormulario(payload);
+      VendasUI.mostrarFormulario();
     }
 
     function init() {
@@ -130,6 +149,7 @@
         parcelas: Math.floor(parseNumeroInput(get('vendaParcelas')) || 1),
         observacao: String(get('vendaObservacao') || '').trim()
       };
+      const dadosFormulario = { ...dados };
 
       if (!dados.estoque_id) {
         mostrarToast('Selecione um produto do estoque', 'erro');
@@ -189,6 +209,7 @@
             renderListaAtual();
             mostrarToast(err?.message || 'Erro ao salvar venda', 'erro');
             setSalvando(false);
+            reabrirFormularioAposErro(dadosFormulario, { editando: true, id: idAtual });
           })
           .withSuccessHandler(() => {
             mostrarToast('Venda atualizada');
@@ -213,6 +234,7 @@
           renderListaAtual();
           mostrarToast(err?.message || 'Erro ao salvar venda', 'erro');
           setSalvando(false);
+          reabrirFormularioAposErro(dadosFormulario, { editando: false });
         })
         .withSuccessHandler(itemSalvo => {
           VendasStore.remove(tempId);
@@ -223,9 +245,9 @@
           }
           VendasStore.add(itemSalvo);
           renderListaAtual();
-          setSalvando(false);
           invalidarCacheDashboardPorImpacto(dados, itemSalvo);
           mostrarToast('Venda salva');
+          setSalvando(false);
         })
         .criarVenda(dados);
     }

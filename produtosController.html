@@ -3,6 +3,8 @@
 
     let editandoId = null;
     let iniciado = false;
+    let salvando = false;
+    let mutationLockToken = null;
 
     let receitasCache = {};
     let tiposValidacao = [];
@@ -15,6 +17,56 @@
       if (s === '') return '';
       const n = Number(s.replace(',', '.'));
       return isNaN(n) ? '' : n;
+    }
+
+    function setSalvando(ativo) {
+      salvando = !!ativo;
+      if (window.AppMutationUI?.lock && window.AppMutationUI?.unlock) {
+        if (salvando) {
+          if (!mutationLockToken) {
+            mutationLockToken = window.AppMutationUI.lock();
+          }
+        } else if (mutationLockToken) {
+          window.AppMutationUI.unlock(mutationLockToken);
+          mutationLockToken = null;
+        }
+      }
+      const btn = document.getElementById('btnSalvarProduto');
+      if (!btn) return;
+      btn.disabled = salvando;
+      if (window.AppLoading?.setButtonLoading) {
+        window.AppLoading.setButtonLoading(btn, salvando, 'Salvar', 'Salvando');
+      } else {
+        btn.textContent = salvando ? 'Salvando...' : 'Salvar';
+      }
+    }
+
+    function reabrirFormularioAposErro(payload, opcoes = {}) {
+      const editando = !!opcoes.editando;
+      editandoId = editando ? String(opcoes.id || '') : null;
+
+      if (window.ProdutosUI?.resetFormulario) {
+        ProdutosUI.resetFormulario();
+      }
+
+      const dadosProduto = payload?.dadosProduto || {};
+      const modelo = payload?.modelo || {
+        dados: { nome_receita: 'Modelo principal', descricao: '' },
+        entradas: [],
+        saidas: [],
+        etapas: []
+      };
+
+      const nomeInput = document.getElementById('produtoNome');
+      if (nomeInput) nomeInput.value = String(dadosProduto.nome_produto || '').trim();
+      if (window.ProdutosUI?.preencherModeloFormulario) {
+        ProdutosUI.preencherModeloFormulario(modelo);
+      }
+      const titulo = document.getElementById('produtoFormTitulo');
+      if (titulo) {
+        titulo.innerText = editando ? 'Editar Produto' : 'Novo Produto';
+      }
+      ProdutosUI.mostrarFormulario();
     }
 
     function podeAlterarDados(contexto = 'Operacao') {
@@ -396,6 +448,7 @@
 
     function salvar() {
       if (!podeAlterarDados('Salvamento bloqueado em modo somente leitura')) return;
+      if (salvando) return;
       const get = id => document.getElementById(id)?.value || '';
       const nomeProduto = String(get('produtoNome') || '').trim();
       if (!nomeProduto) {
@@ -424,19 +477,32 @@
       };
 
       const produtoId = editandoId || '';
+      const eraEdicao = !!editandoId;
+      const idEdicaoAtual = editandoId;
+      const payloadReabertura = {
+        dadosProduto: { ...dadosProduto },
+        modelo: JSON.parse(JSON.stringify(modelo || {}))
+      };
 
+      setSalvando(true);
+      finalizarUX();
       mostrarToast('Salvando produto e modelo...');
 
       google.script.run
         .withFailureHandler(() => {
+          setSalvando(false);
           mostrarToast('Erro ao salvar produto/modelo', 'erro');
+          reabrirFormularioAposErro(payloadReabertura, {
+            editando: eraEdicao,
+            id: idEdicaoAtual
+          });
         })
         .withSuccessHandler(() => {
           editandoId = null;
-          finalizarUX();
           carregarProdutos();
           atualizarOpcoesReceitas();
           mostrarToast('Salvo com sucesso');
+          setSalvando(false);
         })
         .salvarProdutoComModelo(
           produtoId,

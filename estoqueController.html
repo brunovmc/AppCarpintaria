@@ -4,6 +4,7 @@
     let editandoId = null;
     let iniciado = false;
     let salvando = false;
+    let mutationLockToken = null;
 
     let validacoes = null;
 
@@ -37,6 +38,16 @@
 
     function setSalvando(ativo) {
       salvando = !!ativo;
+      if (window.AppMutationUI?.lock && window.AppMutationUI?.unlock) {
+        if (salvando) {
+          if (!mutationLockToken) {
+            mutationLockToken = window.AppMutationUI.lock();
+          }
+        } else if (mutationLockToken) {
+          window.AppMutationUI.unlock(mutationLockToken);
+          mutationLockToken = null;
+        }
+      }
       const btn = document.getElementById('btnSalvarEstoque');
       if (!btn) return;
       btn.disabled = salvando;
@@ -45,6 +56,14 @@
       } else {
         btn.textContent = salvando ? 'Salvando...' : 'Salvar';
       }
+    }
+
+    function reabrirFormularioAposErro(dados, opcoes = {}) {
+      const payload = dados ? { ...dados } : {};
+      const editando = !!opcoes.editando;
+      editandoId = editando ? String(opcoes.id || '') : null;
+      EstoqueUI.preencherFormulario(payload);
+      EstoqueUI.mostrarFormulario();
     }
 
     function init() {
@@ -284,6 +303,7 @@
         comprado_em: get('comprado_em'),
         vida_util_mes: parseNumeroInput(get('vida_util_mes')) || ''
       };
+      const dadosFormulario = { ...dados };
 
       setSalvando(true);
 
@@ -301,6 +321,7 @@
             EstoqueUI.renderLista(EstoqueStore.get());
             mostrarToast('Erro ao salvar edicao', 'erro');
             setSalvando(false);
+            reabrirFormularioAposErro(dadosFormulario, { editando: true, id: idAtual });
           })
           .withSuccessHandler(() => {
             mostrarToast('Salvo com sucesso');
@@ -329,6 +350,7 @@
           EstoqueUI.renderLista(EstoqueStore.get());
           mostrarToast('Erro ao salvar item', 'erro');
           setSalvando(false);
+          reabrirFormularioAposErro(dadosFormulario, { editando: false });
         })
         .withSuccessHandler(itemSalvo => {
           EstoqueStore.remove(tempId);

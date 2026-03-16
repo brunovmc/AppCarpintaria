@@ -296,6 +296,118 @@
 
   window.AppTabCache = window.AppTabCache || createTabCacheHelper();
 
+  function createMutationUiLock() {
+    let seq = 0;
+    const tokens = new Set();
+    const estadosOriginais = new WeakMap();
+    let observer = null;
+
+    const seletoresBloqueados = [
+      '.bottom-bar button',
+      '#lista button',
+      '#listaCompras button',
+      '#listaVendas button',
+      '#listaProdutos button',
+      '#listaProducao button',
+      '#listaDespesasGerais button',
+      '#btnSalvarEstoque',
+      '#btnSalvarCompra',
+      '#btnSalvarVenda',
+      '#btnSalvarProduto',
+      '#btnSalvarProducao',
+      '#btnSalvarDespesaGeral'
+    ];
+
+    function coletarBotoesBloqueio() {
+      return [...document.querySelectorAll(seletoresBloqueados.join(','))]
+        .filter(btn => btn && btn.tagName === 'BUTTON');
+    }
+
+    function garantirObserver() {
+      if (observer || typeof MutationObserver === 'undefined' || !document?.body) return;
+      observer = new MutationObserver(() => {
+        if (!isLocked()) return;
+        aplicarEstadoBloqueio(true);
+      });
+      observer.observe(document.body, { childList: true, subtree: true });
+    }
+
+    function aplicarEstadoBloqueio(ativo) {
+      const botoes = coletarBotoesBloqueio();
+
+      if (ativo) {
+        botoes.forEach(btn => {
+          if (!estadosOriginais.has(btn)) {
+            estadosOriginais.set(btn, !!btn.disabled);
+          }
+          btn.disabled = true;
+          btn.dataset.appMutationLocked = '1';
+        });
+        return;
+      }
+
+      botoes.forEach(btn => {
+        if (btn.dataset.appMutationLocked !== '1') return;
+        const estadoOriginal = estadosOriginais.has(btn)
+          ? estadosOriginais.get(btn)
+          : false;
+        btn.disabled = !!estadoOriginal;
+        delete btn.dataset.appMutationLocked;
+        estadosOriginais.delete(btn);
+      });
+    }
+
+    function isMutationButton(btn) {
+      if (!btn || btn.tagName !== 'BUTTON') return false;
+      if (btn.closest('.navbar')) return false;
+      if (btn.closest('.top-bar')) return false;
+      if (btn.closest('#painelFiltroEstoque')) return false;
+      if (btn.closest('#painelFiltroCompras')) return false;
+      return true;
+    }
+
+    function lock() {
+      garantirObserver();
+      const token = `mutation_${++seq}`;
+      tokens.add(token);
+      aplicarEstadoBloqueio(true);
+      return token;
+    }
+
+    function unlock(token) {
+      if (token) {
+        tokens.delete(token);
+      } else {
+        tokens.clear();
+      }
+      if (tokens.size > 0) {
+        aplicarEstadoBloqueio(true);
+        return;
+      }
+      aplicarEstadoBloqueio(false);
+    }
+
+    function isLocked() {
+      return tokens.size > 0;
+    }
+
+    document.addEventListener('click', evento => {
+      if (!isLocked()) return;
+      const btn = evento.target?.closest?.('button');
+      if (!btn || !isMutationButton(btn)) return;
+      evento.preventDefault();
+      evento.stopImmediatePropagation();
+    }, true);
+
+    return {
+      lock,
+      unlock,
+      isLocked
+    };
+  }
+
+  window.AppMutationUI = window.AppMutationUI || createMutationUiLock();
+
   /* =========================
      PERF + CICLO DE ABAS
   ========================== */

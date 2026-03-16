@@ -5,6 +5,7 @@
     let origemRefazerId = null;
     let iniciado = false;
     let salvando = false;
+    let mutationLockToken = null;
     let pagamentoCompraId = null;
     let salvandoPagamento = false;
     const adicionandoAoEstoque = new Set();
@@ -56,6 +57,16 @@
 
     function setSalvando(ativo) {
       salvando = !!ativo;
+      if (window.AppMutationUI?.lock && window.AppMutationUI?.unlock) {
+        if (salvando) {
+          if (!mutationLockToken) {
+            mutationLockToken = window.AppMutationUI.lock();
+          }
+        } else if (mutationLockToken) {
+          window.AppMutationUI.unlock(mutationLockToken);
+          mutationLockToken = null;
+        }
+      }
       const btn = document.getElementById('btnSalvarCompra');
       if (!btn) return;
       btn.disabled = salvando;
@@ -64,6 +75,26 @@
       } else {
         btn.textContent = salvando ? 'Salvando...' : 'Salvar';
       }
+    }
+
+    function reabrirFormularioAposErro(dados, opcoes = {}) {
+      const payload = dados ? { ...dados } : {};
+      const editando = !!opcoes.editando;
+      const id = String(opcoes.id || '').trim();
+      const origem = String(opcoes.origemRefazerId || '').trim();
+
+      editandoId = editando ? id : null;
+      origemRefazerId = editando ? null : (origem || null);
+
+      ComprasUI.preencherFormulario(payload);
+      if (editando) {
+        ComprasUI.definirTituloFormulario?.('Editar Compra');
+      } else if (origemRefazerId) {
+        ComprasUI.definirTituloFormulario?.('Revise a nova compra');
+      } else {
+        ComprasUI.definirTituloFormulario?.('Nova Compra');
+      }
+      ComprasUI.mostrarFormulario();
     }
 
     function init() {
@@ -340,6 +371,8 @@
         parcelas_detalhe: parcelasDetalhe,
         vida_util_mes: parseNumeroInput(get('compraVidaUtilMes')) || ''
       };
+      const dadosFormulario = { ...dados };
+      const origemRefAtual = String(origemRefazerId || '').trim();
 
       if (!editandoId && origemRefazerId) {
         dados.origem_compra_id = origemRefazerId;
@@ -361,6 +394,7 @@
             renderListaAtual();
             mostrarToast('Erro ao salvar edicao', 'erro');
             setSalvando(false);
+            reabrirFormularioAposErro(dadosFormulario, { editando: true, id: idAtual });
           })
           .withSuccessHandler(() => {
             mostrarToast('Salvo com sucesso');
@@ -391,6 +425,7 @@
           renderListaAtual();
           mostrarToast('Erro ao salvar compra', 'erro');
           setSalvando(false);
+          reabrirFormularioAposErro(dadosFormulario, { editando: false, origemRefazerId: origemRefAtual });
         })
         .withSuccessHandler(itemSalvo => {
           ComprasStore.remove(tempId);

@@ -8,6 +8,7 @@
 
     let despesaEditandoId = null;
     let salvandoDespesa = false;
+    let mutationLockToken = null;
     let despesaPagamentoId = null;
     let salvandoPagamentoDespesa = false;
     let despesaPagamentoParcelado = false;
@@ -590,8 +591,30 @@
       limparFormularioDespesa();
     }
 
+    function reabrirFormularioDespesaAposErro(payload, opcoes = {}) {
+      const f = el();
+      const dados = payload ? { ...payload } : {};
+      const editando = !!opcoes.editando;
+      despesaEditandoId = editando ? String(opcoes.id || '') : null;
+      preencherFormularioDespesa(dados);
+      setModoFormularioDespesa(editando);
+      if (f.formDespesa) {
+        f.formDespesa.classList.remove('hidden');
+      }
+    }
+
     function setSalvandoDespesa(ativo) {
       salvandoDespesa = !!ativo;
+      if (window.AppMutationUI?.lock && window.AppMutationUI?.unlock) {
+        if (salvandoDespesa) {
+          if (!mutationLockToken) {
+            mutationLockToken = window.AppMutationUI.lock();
+          }
+        } else if (mutationLockToken) {
+          window.AppMutationUI.unlock(mutationLockToken);
+          mutationLockToken = null;
+        }
+      }
       const f = el();
       if (f.btnSalvarDespesa) {
         f.btnSalvarDespesa.disabled = salvandoDespesa;
@@ -682,18 +705,30 @@
         fixo: !!f.despesaFixo?.checked,
         observacao: String(f.despesaObservacao?.value || '').trim()
       };
+      const payloadFormulario = {
+        ...payload,
+        parcelas_detalhe: Array.isArray(payload.parcelas_detalhe)
+          ? payload.parcelas_detalhe.map(p => ({ ...p }))
+          : []
+      };
       const despesaAnterior = despesaEditandoId ? getById(despesaEditandoId) : null;
+      const eraEdicao = !!despesaEditandoId;
+      const idEdicaoAtual = despesaEditandoId;
 
       setSalvandoDespesa(true);
+      cancelarFormularioDespesa();
       const runner = google.script.run
         .withFailureHandler(err => {
           setSalvandoDespesa(false);
           mostrarToast(err?.message || 'Erro ao salvar despesa', 'erro');
+          reabrirFormularioDespesaAposErro(payloadFormulario, {
+            editando: eraEdicao,
+            id: idEdicaoAtual
+          });
         })
         .withSuccessHandler(() => {
-          setSalvandoDespesa(false);
-          cancelarFormularioDespesa();
           mostrarToast('Despesa salva');
+          setSalvandoDespesa(false);
           carregarDespesas(true);
           notificarDashboardAlterado(despesaAnterior, payload);
         });
