@@ -6,6 +6,8 @@
   const ABAS_APP = ['dashboard', ...ABAS_MENU_HAMBURGER];
   const ABA_INICIAL_PADRAO = 'dashboard';
   const LAST_TAB_STORAGE_KEY = 'app:lasttab:v1';
+  const QUICK_FILTER_STOCK_TYPE_KEY = 'app:quickfilter:v1:estoque:tipo';
+  const QUICK_FILTER_PURCHASE_TYPE_KEY = 'app:quickfilter:v1:compras:tipo';
   let listenerFecharMenuNavbarAtivo = false;
 
   function normalizarNomeAba(valor) {
@@ -46,6 +48,23 @@
     return !!menu && !menu.classList.contains('hidden');
   }
 
+  function obterLabelAbaMenu(aba) {
+    const alvo = String(aba || '').trim();
+    if (!alvo) return '';
+    const btnMenu = document.querySelector(`#navbarMenu button[data-aba="${alvo}"]`);
+    return String(btnMenu?.textContent || '').trim();
+  }
+
+  function atualizarRotuloBotaoHamburger(abaAtiva) {
+    const { btn } = getNavbarHamburgerEls();
+    if (!btn) return;
+    const alvo = String(abaAtiva || '').trim();
+    const ativoNoMenu = ABAS_MENU_HAMBURGER.includes(alvo);
+    const rotulo = ativoNoMenu ? (obterLabelAbaMenu(alvo) || 'Menu') : 'Menu';
+    btn.innerHTML = `<span class="navbar-hamburger-icon" aria-hidden="true">&#9776;</span><span class="navbar-hamburger-label">${rotulo}</span>`;
+    btn.setAttribute('aria-label', ativoNoMenu ? `Abrir menu de abas (atual: ${rotulo})` : 'Abrir menu de abas');
+  }
+
   function atualizarEstadoNavbar(abaAtiva) {
     const botoes = document.querySelectorAll('.navbar button[data-aba]');
     const alvo = String(abaAtiva || '').trim();
@@ -65,6 +84,39 @@
       btn.classList.toggle('active', ativoNoMenu);
       btn.setAttribute('aria-expanded', menuNavbarAberto() ? 'true' : 'false');
     }
+    atualizarRotuloBotaoHamburger(alvo);
+  }
+
+  function salvarFiltroRapidoNoCache(chave, valor) {
+    try {
+      if (!window.localStorage) return;
+      window.localStorage.setItem(String(chave || ''), String(valor || '').trim());
+    } catch (error) {
+      // sem acao
+    }
+  }
+
+  function lerFiltroRapidoDoCache(chave) {
+    try {
+      if (!window.localStorage) return null;
+      const raw = window.localStorage.getItem(String(chave || ''));
+      if (raw === null) return null;
+      return String(raw || '').trim();
+    } catch (error) {
+      return null;
+    }
+  }
+
+  function aplicarFiltroTipoRapidoPersistidoEstoque() {
+    const tipo = lerFiltroRapidoDoCache(QUICK_FILTER_STOCK_TYPE_KEY);
+    if (tipo === null) return;
+    setFiltroTipoRapidoEstoque(tipo);
+  }
+
+  function aplicarFiltroTipoRapidoPersistidoCompras() {
+    const tipo = lerFiltroRapidoDoCache(QUICK_FILTER_PURCHASE_TYPE_KEY);
+    if (tipo === null) return;
+    setFiltroTipoRapidoCompras(tipo);
   }
 
   function fecharMenuNavbar() {
@@ -877,6 +929,8 @@
       EstoqueUI.marcarTipoRapidoAtivo(buscaState.tipo);
     }
 
+    salvarFiltroRapidoNoCache(QUICK_FILTER_STOCK_TYPE_KEY, buscaState.tipo);
+
     aplicarBuscaEstoque();
   }
 
@@ -893,6 +947,8 @@
     if (window.ComprasUI?.marcarTipoRapidoAtivo) {
       ComprasUI.marcarTipoRapidoAtivo(buscaStateCompras.tipo);
     }
+
+    salvarFiltroRapidoNoCache(QUICK_FILTER_PURCHASE_TYPE_KEY, buscaStateCompras.tipo);
 
     aplicarBuscaCompras();
   }
@@ -947,6 +1003,7 @@
     if (window.EstoqueUI?.marcarTipoRapidoAtivo) {
       EstoqueUI.marcarTipoRapidoAtivo(buscaState.tipo);
     }
+    salvarFiltroRapidoNoCache(QUICK_FILTER_STOCK_TYPE_KEY, buscaState.tipo);
   }
 
   function lerFiltrosDoPainelCompras() {
@@ -961,6 +1018,7 @@
     if (window.ComprasUI?.marcarTipoRapidoAtivo) {
       ComprasUI.marcarTipoRapidoAtivo(buscaStateCompras.tipo);
     }
+    salvarFiltroRapidoNoCache(QUICK_FILTER_PURCHASE_TYPE_KEY, buscaStateCompras.tipo);
   }
 
   function aplicarBuscaEstoque() {
@@ -1227,6 +1285,7 @@
     if (window.EstoqueUI?.marcarTipoRapidoAtivo) {
       EstoqueUI.marcarTipoRapidoAtivo('');
     }
+    salvarFiltroRapidoNoCache(QUICK_FILTER_STOCK_TYPE_KEY, '');
 
     aplicarBuscaEstoque();
   }
@@ -1247,6 +1306,7 @@
     if (window.ComprasUI?.marcarTipoRapidoAtivo) {
       ComprasUI.marcarTipoRapidoAtivo('');
     }
+    salvarFiltroRapidoNoCache(QUICK_FILTER_PURCHASE_TYPE_KEY, '');
 
     aplicarBuscaCompras();
   }

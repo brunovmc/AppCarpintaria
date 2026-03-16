@@ -114,6 +114,9 @@
           if (typeof popularFiltrosDoPainel === 'function') {
             popularFiltrosDoPainel();
           }
+          if (typeof aplicarFiltroTipoRapidoPersistidoEstoque === 'function') {
+            aplicarFiltroTipoRapidoPersistidoEstoque();
+          }
         })
         .withFailureHandler(() => {
           perfEnd(perf, { ok: false });

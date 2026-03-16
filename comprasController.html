@@ -142,6 +142,9 @@
           if (typeof popularFiltrosDoPainelCompras === 'function') {
             popularFiltrosDoPainelCompras();
           }
+          if (typeof aplicarFiltroTipoRapidoPersistidoCompras === 'function') {
+            aplicarFiltroTipoRapidoPersistidoCompras();
+          }
         })
         .withFailureHandler(() => {
           perfEnd(perf, { ok: false });
