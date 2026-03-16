@@ -1,7 +1,16 @@
 <div id="listaProducao"></div>
 
+<div id="modalDetalhesProducao" class="modal hidden">
+  <div class="modal-content">
+    <button class="modal-close-square" onclick="ProducaoUI.fecharModalDetalhes()" aria-label="Fechar">X</button>
+    <h3 id="modalDetalhesProducaoTitulo">Detalhes da producao</h3>
+    <div id="modalDetalhesProducaoConteudo"></div>
+  </div>
+</div>
+
 <div id="formularioProducao" class="modal hidden">
   <div class="modal-content form-modal-content">
+  <button class="modal-close-square" onclick="ProducaoUI.fecharFormulario()" aria-label="Fechar">X</button>
   <h2 id="producaoFormTitulo">Nova Producao</h2>
 
   <div class="campo-ajuda-wrap">
@@ -51,6 +60,7 @@
 
 <div id="modalConsumoProducao" class="modal hidden">
   <div class="modal-content">
+    <button class="modal-close-square" onclick="ProducaoUI.fecharModalConsumo()" aria-label="Fechar">X</button>
     <h3 id="consumoTitulo">Baixar do estoque</h3>
     <div id="consumoLista"></div>
     <div class="acoes">
@@ -62,6 +72,7 @@
 
 <div id="modalPendenciasVinculoProducao" class="modal hidden">
   <div class="modal-content">
+    <button class="modal-close-square" onclick="ProducaoUI.fecharModalPendenciasVinculo()" aria-label="Fechar">X</button>
     <h3 id="pendenciasVinculoTitulo">Vincular entradas pendentes</h3>
     <div id="pendenciasVinculoLista"></div>
     <div class="acoes">

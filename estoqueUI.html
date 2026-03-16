@@ -1,6 +1,6 @@
 <script>
   window.EstoqueUI = (() => {
-    let cardAberto = null;
+    let detalhesModalAbertoId = '';
     let delegationInit = false;
 
     let categoriasBaseValidacao = [];
@@ -22,6 +22,9 @@
         formulario: document.getElementById('formulario'),
         lista: document.getElementById('lista'),
         listaControles: document.getElementById('listaControlesEstoque'),
+        modalDetalhes: document.getElementById('modalDetalhesEstoque'),
+        modalDetalhesConteudo: document.getElementById('modalDetalhesEstoqueConteudo'),
+        modalDetalhesTitulo: document.getElementById('modalDetalhesEstoqueTitulo'),
 
         // Form
         tipo: document.getElementById('tipo'),
@@ -574,10 +577,6 @@
         </div>
 
         <button class="ver-mais">Ver mais</button>
-
-        <div class="card-detalhes" data-loaded="0">
-          <div class="card-detalhes-body"></div>
-        </div>
       `;
 
       return div;
@@ -612,23 +611,41 @@
       `;
     }
 
-    function garantirDetalhesCard(card) {
-      if (!card) return;
-      const detalhes = card.querySelector('.card-detalhes');
-      const body = card.querySelector('.card-detalhes-body');
-      if (!detalhes || !body) return;
-      if (detalhes.dataset.loaded === '1') return;
-
-      const id = String(card.dataset.id || '').trim();
-      const item = itensPorId[id];
+    function abrirModalDetalhes(id) {
+      const alvoId = String(id || '').trim();
+      if (!alvoId) return;
+      const f = el();
+      if (!f.modalDetalhes || !f.modalDetalhesConteudo) return;
+      const item = itensPorId[alvoId];
       if (!item) {
-        body.innerHTML = '<p>Item nao encontrado.</p>';
-        detalhes.dataset.loaded = '1';
+        f.modalDetalhesConteudo.innerHTML = '<p>Item nao encontrado.</p>';
+        f.modalDetalhes.classList.remove('hidden');
         return;
       }
+      if (f.modalDetalhesTitulo) {
+        f.modalDetalhesTitulo.textContent = item.item || 'Detalhes do item';
+      }
+      f.modalDetalhesConteudo.innerHTML = montarDetalhesCard(item);
+      detalhesModalAbertoId = alvoId;
+      f.modalDetalhes.classList.remove('hidden');
+    }
 
-      body.innerHTML = montarDetalhesCard(item);
-      detalhes.dataset.loaded = '1';
+    function fecharModalDetalhes() {
+      const f = el();
+      if (!f.modalDetalhes) return;
+      f.modalDetalhes.classList.add('hidden');
+      if (f.modalDetalhesConteudo) f.modalDetalhesConteudo.innerHTML = '';
+      detalhesModalAbertoId = '';
+    }
+
+    function atualizarModalDetalhesSeAberto() {
+      if (!detalhesModalAbertoId) return;
+      const item = itensPorId[detalhesModalAbertoId];
+      if (!item) {
+        fecharModalDetalhes();
+        return;
+      }
+      abrirModalDetalhes(detalhesModalAbertoId);
     }
 
     function renderControlesLista() {
@@ -766,7 +783,6 @@
       const perf = window.AppPerf?.start('ui.estoque.renderLista', {
         total: Array.isArray(itens) ? itens.length : 0
       });
-      fecharCard();
       renderJobSeq += 1;
       lista.innerHTML = '';
       if (listaControles) listaControles.innerHTML = '';
@@ -777,6 +793,9 @@
       carregandoMais = false;
 
       if (listaFiltradaAtual.length === 0) {
+        if (detalhesModalAbertoId) {
+          fecharModalDetalhes();
+        }
         lista.innerHTML = '<p>Nenhum item no estoque.</p>';
         window.AppPerf?.end(perf, { vazio: true });
         return;
@@ -787,6 +806,7 @@
           renderizados_iniciais: qtdRenderizada,
           total: listaFiltradaAtual.length
         });
+        atualizarModalDetalhesSeAberto();
       });
     }
 
@@ -806,45 +826,11 @@
         if (e.target.classList.contains('ver-mais')) {
           e.stopPropagation();
           if (!card) return;
-          if (card.classList.contains('aberto')) {
-            fecharCard();
-          } else {
-            abrirCard(card);
-          }
+          abrirModalDetalhes(card.dataset.id || '');
           return;
-        }
-
-        if (cardAberto && !cardAberto.contains(e.target)) {
-          fecharCard();
         }
       });
 
-    }
-
-    function atualizarTextoBotaoCard(card, aberto) {
-      if (!card) return;
-      const btn = card.querySelector('.ver-mais');
-      if (!btn) return;
-      btn.textContent = aberto ? 'Ver menos' : 'Ver mais';
-    }
-
-    function abrirCard(card) {
-      if (!card) return;
-
-      if (cardAberto && cardAberto !== card) {
-        fecharCard();
-      }
-      garantirDetalhesCard(card);
-      card.classList.add('aberto');
-      atualizarTextoBotaoCard(card, true);
-      cardAberto = card;
-    }
-
-    function fecharCard() {
-      if (!cardAberto) return;
-      cardAberto.classList.remove('aberto');
-      atualizarTextoBotaoCard(cardAberto, false);
-      cardAberto = null;
     }
 
     /* =========================
@@ -875,7 +861,8 @@
       marcarTipoRapidoAtivo,
 
       atualizarQuantidadeMadeira,
-      handleFormaPagamentoChange
+      handleFormaPagamentoChange,
+      fecharModalDetalhes
     };
 
   })();

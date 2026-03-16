@@ -385,8 +385,9 @@
   .dash-obs-header {
     display: flex;
     align-items: center;
-    justify-content: space-between;
+    justify-content: flex-start;
     gap: 8px;
+    padding-right: 44px;
   }
 
   .dash-obs-fechar-topo {
@@ -1006,11 +1007,52 @@
     padding: 16px;
     width: 100%;
     max-width: 520px;
+    position: relative;
     max-height: calc(100vh - 32px);
     max-height: calc(100dvh - 32px);
     overflow-y: auto;
     overscroll-behavior: contain;
     -webkit-overflow-scrolling: touch;
+  }
+
+  #modalDetalhesEstoque .modal-content,
+  #modalDetalhesCompras .modal-content,
+  #modalDetalhesVendas .modal-content,
+  #modalDetalhesProdutos .modal-content,
+  #modalDetalhesProducao .modal-content {
+    max-width: 920px;
+  }
+
+  .modal-close-square {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    width: 32px;
+    height: 32px;
+    margin: 0;
+    padding: 0;
+    border: 1px solid #c8c8c8;
+    border-radius: 4px;
+    background: #fff;
+    color: #333;
+    font-size: 16px;
+    font-weight: 700;
+    line-height: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    z-index: 2;
+  }
+
+  .modal-close-square:active {
+    background: #f3f3f3;
+  }
+
+  .modal-content > h2,
+  .modal-content > h3,
+  .modal-content > strong {
+    padding-right: 44px;
   }
 
   .form-modal-content {

@@ -1,7 +1,16 @@
 <div id="listaProdutos"></div>
 
+<div id="modalDetalhesProdutos" class="modal hidden">
+  <div class="modal-content">
+    <button class="modal-close-square" onclick="ProdutosUI.fecharModalDetalhes()" aria-label="Fechar">X</button>
+    <h3 id="modalDetalhesProdutosTitulo">Detalhes do produto</h3>
+    <div id="modalDetalhesProdutosConteudo"></div>
+  </div>
+</div>
+
 <div id="formularioProduto" class="modal hidden">
   <div class="modal-content form-modal-content">
+  <button class="modal-close-square" onclick="ProdutosUI.fecharFormulario()" aria-label="Fechar">X</button>
   <h2 id="produtoFormTitulo">Novo Produto</h2>
 
   <div class="campo-ajuda-wrap">

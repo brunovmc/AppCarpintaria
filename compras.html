@@ -3,8 +3,17 @@
 <div id="listaCompras"></div>
 <div id="listaControlesCompras" class="lista-controles"></div>
 
+<div id="modalDetalhesCompras" class="modal hidden">
+  <div class="modal-content">
+    <button class="modal-close-square" onclick="ComprasUI.fecharModalDetalhes()" aria-label="Fechar">X</button>
+    <h3 id="modalDetalhesComprasTitulo">Detalhes da compra</h3>
+    <div id="modalDetalhesComprasConteudo"></div>
+  </div>
+</div>
+
 <div id="formularioCompra" class="modal hidden">
   <div class="modal-content form-modal-content">
+  <button class="modal-close-square" onclick="ComprasUI.fecharFormulario()" aria-label="Fechar">X</button>
   <h2 id="compraFormTitulo">Nova Compra</h2>
 
   <div class="campo-ajuda-wrap">
@@ -124,6 +133,7 @@
 
 <div id="modalPagamentoCompra" class="modal hidden">
   <div class="modal-content">
+    <button class="modal-close-square" onclick="ComprasController.cancelarPagamentoCompra()" aria-label="Fechar">X</button>
     <h3 id="pagamentoCompraTitulo">Registrar pagamento</h3>
 
     <div class="campo-ajuda-wrap">

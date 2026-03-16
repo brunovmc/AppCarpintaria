@@ -36,12 +36,11 @@
 
 <div id="modalObservabilidadeCard" class="modal hidden">
   <div class="modal-content dash-modal-observabilidade">
+    <button class="modal-close-square" onclick="DashboardController.fecharObservabilidadeCard()" aria-label="Fechar">X</button>
     <div class="dash-obs-header">
       <h3 id="obsCardTitulo">Composicao do card</h3>
-      <button class="dashboard-btn-inline dash-obs-fechar-topo" onclick="DashboardController.fecharObservabilidadeCard()">Fechar</button>
     </div>
     <div id="obsCardResumo" class="dash-obs-resumo"></div>
     <div id="obsCardLista" class="dash-obs-lista"></div>
-    <button onclick="DashboardController.fecharObservabilidadeCard()">Fechar</button>
   </div>
 </div>

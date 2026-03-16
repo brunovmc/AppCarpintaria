@@ -1,8 +1,17 @@
 <div id="listaVendas"></div>
 <div id="listaControlesVendas" class="lista-controles"></div>
 
+<div id="modalDetalhesVendas" class="modal hidden">
+  <div class="modal-content">
+    <button class="modal-close-square" onclick="VendasUI.fecharModalDetalhes()" aria-label="Fechar">X</button>
+    <h3 id="modalDetalhesVendasTitulo">Detalhes da venda</h3>
+    <div id="modalDetalhesVendasConteudo"></div>
+  </div>
+</div>
+
 <div id="formularioVenda" class="modal hidden">
   <div class="modal-content form-modal-content">
+  <button class="modal-close-square" onclick="VendasUI.fecharFormulario()" aria-label="Fechar">X</button>
   <h2 id="vendaFormTitulo">Nova Venda</h2>
 
   <div class="campo-ajuda-wrap">
@@ -62,6 +71,7 @@
 
 <div id="modalRecebimentoVenda" class="modal hidden">
   <div class="modal-content">
+    <button class="modal-close-square" onclick="VendasController.cancelarRecebimento()" aria-label="Fechar">X</button>
     <h3 id="recebimentoVendaTitulo">Registrar recebimento</h3>
 
     <div class="campo-ajuda-wrap">

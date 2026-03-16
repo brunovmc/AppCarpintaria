@@ -1,6 +1,6 @@
 <script>
   window.ProdutosUI = (() => {
-    let cardAberto = null;
+    let detalhesModalAbertoId = '';
     let delegationInit = false;
     let listaFiltradaAtual = [];
     let qtdRenderizada = 0;
@@ -23,6 +23,9 @@
       return {
         formulario: document.getElementById('formularioProduto'),
         lista: document.getElementById('listaProdutos'),
+        modalDetalhes: document.getElementById('modalDetalhesProdutos'),
+        modalDetalhesConteudo: document.getElementById('modalDetalhesProdutosConteudo'),
+        modalDetalhesTitulo: document.getElementById('modalDetalhesProdutosTitulo'),
 
         nome: document.getElementById('produtoNome'),
         modeloCard: document.getElementById('produtoModeloCard'),
@@ -890,32 +893,32 @@
         </div>
 
         <button class="ver-mais">Ver mais</button>
-
-        <div class="card-detalhes">
-          <button class="fechar-card">X</button>
-
-          <div class="bloco">
-            <p><b>Receitas</b></p>
-            ${renderReceitas(receitas, receitasCarregadas, i.produto_id)}
-          </div>
-
-          <div class="acoes">
-            <button onclick="ProdutosController.enviarParaProducao('${i.produto_id}')">Criar OP</button>
-            <button onclick="ProdutosController.editar('${i.produto_id}')">Editar</button>
-            <button onclick="ProdutosController.excluir('${i.produto_id}')">Excluir</button>
-          </div>
-        </div>
       `;
 
       return div;
+    }
+
+    function montarDetalhesProduto(i) {
+      const receitas = Array.isArray(i.receitas) ? i.receitas : [];
+      const receitasCarregadas = !!i.receitasCarregadas;
+      return `
+        <div class="bloco">
+          <p><b>Receitas</b></p>
+          ${renderReceitas(receitas, receitasCarregadas, i.produto_id)}
+        </div>
+
+        <div class="acoes">
+          <button onclick="ProdutosController.enviarParaProducao('${i.produto_id}')">Criar OP</button>
+          <button onclick="ProdutosController.editar('${i.produto_id}')">Editar</button>
+          <button onclick="ProdutosController.excluir('${i.produto_id}')">Excluir</button>
+        </div>
+      `;
     }
 
     function renderLista(itens) {
       const { lista } = el();
       if (!lista) return;
 
-      const abertoId = cardAberto ? cardAberto.dataset.id : null;
-      cardAberto = null;
       renderJobSeq += 1;
       const jobId = renderJobSeq;
       lista.innerHTML = '';
@@ -925,6 +928,9 @@
       initDelegation();
 
       if (listaFiltradaAtual.length === 0) {
+        if (detalhesModalAbertoId) {
+          fecharModalDetalhes();
+        }
         lista.innerHTML = '<p>Nenhum produto cadastrado.</p>';
         return;
       }
@@ -946,15 +952,56 @@
         }
 
         document.querySelectorAll('.linha-receita-entrada').forEach(sincronizarLinhaEntradaMadeira);
-        if (abertoId) {
-          const alvo = lista.querySelector(`.card[data-id="${abertoId}"]`);
-          if (alvo) {
-            abrirCard(alvo);
-          }
-        }
+        atualizarModalDetalhesSeAberto();
       };
 
       proximoFrame(processarChunk);
+    }
+
+    function getProdutoById(id) {
+      const alvo = String(id || '').trim();
+      if (!alvo) return null;
+      return (Array.isArray(listaFiltradaAtual) ? listaFiltradaAtual : [])
+        .find(p => String(p?.produto_id || '').trim() === alvo) || null;
+    }
+
+    function abrirModalDetalhes(id) {
+      const alvoId = String(id || '').trim();
+      if (!alvoId) return;
+      const f = el();
+      if (!f.modalDetalhes || !f.modalDetalhesConteudo) return;
+
+      const item = getProdutoById(alvoId);
+      if (!item) {
+        f.modalDetalhesConteudo.innerHTML = '<p>Produto nao encontrado.</p>';
+        f.modalDetalhes.classList.remove('hidden');
+        return;
+      }
+
+      if (f.modalDetalhesTitulo) {
+        f.modalDetalhesTitulo.textContent = item.nome_produto || 'Detalhes do produto';
+      }
+      f.modalDetalhesConteudo.innerHTML = montarDetalhesProduto(item);
+      detalhesModalAbertoId = alvoId;
+      f.modalDetalhes.classList.remove('hidden');
+    }
+
+    function fecharModalDetalhes() {
+      const f = el();
+      if (!f.modalDetalhes) return;
+      f.modalDetalhes.classList.add('hidden');
+      if (f.modalDetalhesConteudo) f.modalDetalhesConteudo.innerHTML = '';
+      detalhesModalAbertoId = '';
+    }
+
+    function atualizarModalDetalhesSeAberto() {
+      if (!detalhesModalAbertoId) return;
+      const item = getProdutoById(detalhesModalAbertoId);
+      if (!item) {
+        fecharModalDetalhes();
+        return;
+      }
+      abrirModalDetalhes(detalhesModalAbertoId);
     }
 
     /* =========================
@@ -972,16 +1019,11 @@
 
         if (e.target.classList.contains('ver-mais')) {
           e.stopPropagation();
-          abrirCard(card);
+          if (!card) return;
+          abrirModalDetalhes(card.dataset.id || '');
           if (card && window.ProdutosController) {
             ProdutosController.carregarReceitas(card.dataset.id);
           }
-          return;
-        }
-
-        if (e.target.classList.contains('fechar-card')) {
-          e.stopPropagation();
-          fecharCard();
           return;
         }
 
@@ -1059,10 +1101,6 @@
           if (linha) linha.remove();
           return;
         }
-
-        if (cardAberto && !cardAberto.contains(e.target)) {
-          fecharCard();
-        }
       });
 
       document.addEventListener('change', e => {
@@ -1107,22 +1145,6 @@
 
     }
 
-    function abrirCard(card) {
-      if (!card) return;
-
-      if (cardAberto && cardAberto !== card) {
-        fecharCard();
-      }
-      card.classList.add('aberto');
-      cardAberto = card;
-    }
-
-    function fecharCard() {
-      if (!cardAberto) return;
-      cardAberto.classList.remove('aberto');
-      cardAberto = null;
-    }
-
     /* =========================
        API PUBLICA
     ========================== */
@@ -1139,6 +1161,7 @@
       adicionarSaidaModeloForm,
       adicionarEtapaModeloForm,
       renderLista,
+      fecharModalDetalhes,
       setOpcoesReceitas,
       setReceitasProduto
     };

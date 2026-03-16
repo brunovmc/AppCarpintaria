@@ -3,8 +3,17 @@
 <div id="lista"></div>
 <div id="listaControlesEstoque" class="lista-controles"></div>
 
+<div id="modalDetalhesEstoque" class="modal hidden">
+  <div class="modal-content">
+    <button class="modal-close-square" onclick="EstoqueUI.fecharModalDetalhes()" aria-label="Fechar">X</button>
+    <h3 id="modalDetalhesEstoqueTitulo">Detalhes do item</h3>
+    <div id="modalDetalhesEstoqueConteudo"></div>
+  </div>
+</div>
+
 <div id="formulario" class="modal hidden">
   <div class="modal-content form-modal-content">
+  <button class="modal-close-square" onclick="EstoqueUI.fecharFormulario()" aria-label="Fechar">X</button>
   <h2 id="formTitulo">Novo Item</h2>
 
   <div class="campo-ajuda-wrap">

@@ -1,6 +1,6 @@
 <script>
   window.ProducaoUI = (() => {
-    let cardAberto = null;
+    let detalhesModalAbertoId = '';
     let delegationInit = false;
     let estoqueOpcoes = [];
     let tiposValidacao = [];
@@ -17,6 +17,9 @@
       return {
         formulario: document.getElementById('formularioProducao'),
         lista: document.getElementById('listaProducao'),
+        modalDetalhes: document.getElementById('modalDetalhesProducao'),
+        modalDetalhesConteudo: document.getElementById('modalDetalhesProducaoConteudo'),
+        modalDetalhesTitulo: document.getElementById('modalDetalhesProducaoTitulo'),
 
         // Form
         produto: document.getElementById('producaoProduto'),
@@ -392,12 +395,6 @@
       const concluido = status === 'Concluido' || status === 'Concluida';
       const estoqueAtualizado = !!i.estoque_atualizado;
       const podeAtualizarEstoque = concluido && !estoqueAtualizado;
-      const labelEstoque = estoqueAtualizado ? 'Estoque atualizado' : 'Atualizar estoque';
-      const saidasHtml = !estoqueAtualizado
-        ? '<p>As saidas serao geradas ao atualizar o estoque.</p>'
-        : (Array.isArray(i.saidasLotes)
-          ? renderSaidasLotes(i.saidasLotes, i.producao_id, true)
-          : '<p>Carregando saidas geradas...</p>');
 
       div.innerHTML = `
         <div class="card-resumo">
@@ -407,54 +404,66 @@
         </div>
 
         <button class="ver-mais">Ver mais</button>
-
-        <div class="card-detalhes">
-          <button class="fechar-card">X</button>
-
-          <p><b>Produto:</b> ${i.nome_produto || '-'}</p>
-          <p><b>Receita:</b> ${i.receita_nome || '-'}</p>
-          <p><b>Inicio:</b> ${i.data_inicio || '-'}</p>
-          <p><b>Previsto:</b> ${i.data_prevista_termino || '-'}</p>
-          <p><b>Custo previsto:</b> R$ ${custoPrevisto}</p>
-          <p><b>Observacao:</b> ${i.observacao || '-'}</p>
-          ${estoqueAtualizado ? `<p><b>Estoque atualizado:</b> ${i.data_estoque_atualizado || '-'}</p>` : ''}
-
-          <div class="bloco">
-            <p><b>Materiais previstos</b></p>
-            ${i.materiaisPrevistos ? renderMateriais(i.materiaisPrevistos) : '<p>Carregando materiais...</p>'}
-          </div>
-
-          <div class="bloco">
-            <p><b>Vinculos com estoque</b></p>
-            ${i.vinculosMateriais ? renderVinculos(i.vinculosMateriais, i.producao_id) : '<p>Carregando vinculos...</p>'}
-          </div>
-
-          <div class="bloco">
-            <p><b>Saidas geradas</b></p>
-            ${saidasHtml}
-          </div>
-
-          <div class="bloco">
-            <p><b>Checklist</b></p>
-            ${renderChecklist(i.etapas || [], i.producao_id)}
-            <div class="linha-etapa-add">
-              <input id="novaEtapa_${i.producao_id}" placeholder="Nova etapa">
-              <button class="btn-add-etapa" data-producao-id="${i.producao_id}">Adicionar etapa</button>
-            </div>
-          </div>
-
-          <div class="acoes">
-            <button
-              ${podeAtualizarEstoque ? '' : 'disabled'}
-              onclick="ProducaoController.abrirAtualizarEstoque('${i.producao_id}')"
-            >${labelEstoque}</button>
-            <button onclick="ProducaoController.editar('${i.producao_id}')">Editar</button>
-            <button onclick="ProducaoController.excluir('${i.producao_id}')">Excluir</button>
-          </div>
-        </div>
       `;
 
       return div;
+    }
+
+    function montarDetalhesProducao(i) {
+      const custoPrevisto = formatMoeda(i.custo_previsto || 0);
+      const status = String(i.status || '');
+      const concluido = status === 'Concluido' || status === 'Concluida';
+      const estoqueAtualizado = !!i.estoque_atualizado;
+      const podeAtualizarEstoque = concluido && !estoqueAtualizado;
+      const labelEstoque = estoqueAtualizado ? 'Estoque atualizado' : 'Atualizar estoque';
+      const saidasHtml = !estoqueAtualizado
+        ? '<p>As saidas serao geradas ao atualizar o estoque.</p>'
+        : (Array.isArray(i.saidasLotes)
+          ? renderSaidasLotes(i.saidasLotes, i.producao_id, true)
+          : '<p>Carregando saidas geradas...</p>');
+
+      return `
+        <p><b>Produto:</b> ${i.nome_produto || '-'}</p>
+        <p><b>Receita:</b> ${i.receita_nome || '-'}</p>
+        <p><b>Inicio:</b> ${i.data_inicio || '-'}</p>
+        <p><b>Previsto:</b> ${i.data_prevista_termino || '-'}</p>
+        <p><b>Custo previsto:</b> R$ ${custoPrevisto}</p>
+        <p><b>Observacao:</b> ${i.observacao || '-'}</p>
+        ${estoqueAtualizado ? `<p><b>Estoque atualizado:</b> ${i.data_estoque_atualizado || '-'}</p>` : ''}
+
+        <div class="bloco">
+          <p><b>Materiais previstos</b></p>
+          ${i.materiaisPrevistos ? renderMateriais(i.materiaisPrevistos) : '<p>Carregando materiais...</p>'}
+        </div>
+
+        <div class="bloco">
+          <p><b>Vinculos com estoque</b></p>
+          ${i.vinculosMateriais ? renderVinculos(i.vinculosMateriais, i.producao_id) : '<p>Carregando vinculos...</p>'}
+        </div>
+
+        <div class="bloco">
+          <p><b>Saidas geradas</b></p>
+          ${saidasHtml}
+        </div>
+
+        <div class="bloco">
+          <p><b>Checklist</b></p>
+          ${renderChecklist(i.etapas || [], i.producao_id)}
+          <div class="linha-etapa-add">
+            <input id="novaEtapa_${i.producao_id}" placeholder="Nova etapa">
+            <button class="btn-add-etapa" data-producao-id="${i.producao_id}">Adicionar etapa</button>
+          </div>
+        </div>
+
+        <div class="acoes">
+          <button
+            ${podeAtualizarEstoque ? '' : 'disabled'}
+            onclick="ProducaoController.abrirAtualizarEstoque('${i.producao_id}')"
+          >${labelEstoque}</button>
+          <button onclick="ProducaoController.editar('${i.producao_id}')">Editar</button>
+          <button onclick="ProducaoController.excluir('${i.producao_id}')">Excluir</button>
+        </div>
+      `;
     }
 
     function renderLista(itens) {
@@ -470,8 +479,6 @@
         }
       }
 
-      const abertoId = cardAberto ? cardAberto.dataset.id : null;
-      cardAberto = null;
       renderJobSeq += 1;
       const jobId = renderJobSeq;
       lista.innerHTML = '';
@@ -479,6 +486,9 @@
       qtdRenderizada = 0;
 
       if (listaFiltradaAtual.length === 0) {
+        if (detalhesModalAbertoId) {
+          fecharModalDetalhes();
+        }
         lista.innerHTML = '<p>Nenhuma ordem de producao.</p>';
         return;
       }
@@ -500,15 +510,56 @@
         }
 
         initDelegation();
-        if (abertoId) {
-          const alvo = lista.querySelector(`.card[data-id="${abertoId}"]`);
-          if (alvo) {
-            abrirCard(alvo);
-          }
-        }
+        atualizarModalDetalhesSeAberto();
       };
 
       proximoFrame(processarChunk);
+    }
+
+    function getProducaoById(id) {
+      const alvo = String(id || '').trim();
+      if (!alvo) return null;
+      return (Array.isArray(listaFiltradaAtual) ? listaFiltradaAtual : [])
+        .find(p => String(p?.producao_id || '').trim() === alvo) || null;
+    }
+
+    function abrirModalDetalhes(id) {
+      const alvoId = String(id || '').trim();
+      if (!alvoId) return;
+      const f = el();
+      if (!f.modalDetalhes || !f.modalDetalhesConteudo) return;
+
+      const item = getProducaoById(alvoId);
+      if (!item) {
+        f.modalDetalhesConteudo.innerHTML = '<p>Ordem de producao nao encontrada.</p>';
+        f.modalDetalhes.classList.remove('hidden');
+        return;
+      }
+
+      if (f.modalDetalhesTitulo) {
+        f.modalDetalhesTitulo.textContent = item.nome_ordem || item.nome_produto || 'Detalhes da producao';
+      }
+      f.modalDetalhesConteudo.innerHTML = montarDetalhesProducao(item);
+      detalhesModalAbertoId = alvoId;
+      f.modalDetalhes.classList.remove('hidden');
+    }
+
+    function fecharModalDetalhes() {
+      const f = el();
+      if (!f.modalDetalhes) return;
+      f.modalDetalhes.classList.add('hidden');
+      if (f.modalDetalhesConteudo) f.modalDetalhesConteudo.innerHTML = '';
+      detalhesModalAbertoId = '';
+    }
+
+    function atualizarModalDetalhesSeAberto() {
+      if (!detalhesModalAbertoId) return;
+      const item = getProducaoById(detalhesModalAbertoId);
+      if (!item) {
+        fecharModalDetalhes();
+        return;
+      }
+      abrirModalDetalhes(detalhesModalAbertoId);
     }
 
     /* =========================
@@ -665,18 +716,13 @@
 
         if (e.target.classList.contains('ver-mais')) {
           e.stopPropagation();
-          abrirCard(card);
+          if (!card) return;
+          abrirModalDetalhes(card.dataset.id || '');
           if (card && window.ProducaoController) {
             ProducaoController.carregarMateriaisPrevistos(card.dataset.id, true);
             ProducaoController.carregarVinculosMateriais?.(card.dataset.id, true);
             ProducaoController.carregarSaidasLotes?.(card.dataset.id, true);
           }
-          return;
-        }
-
-        if (e.target.classList.contains('fechar-card')) {
-          e.stopPropagation();
-          fecharCard();
           return;
         }
 
@@ -796,22 +842,6 @@
       });
     }
 
-    function abrirCard(card) {
-      if (!card) return;
-
-      if (cardAberto && cardAberto !== card) {
-        fecharCard();
-      }
-      card.classList.add('aberto');
-      cardAberto = card;
-    }
-
-    function fecharCard() {
-      if (!cardAberto) return;
-      cardAberto.classList.remove('aberto');
-      cardAberto = null;
-    }
-
     /* =========================
        API PUBLICA
     ========================== */
@@ -822,6 +852,7 @@
       preencherFormulario,
       resetFormulario,
       renderLista,
+      fecharModalDetalhes,
       renderProdutos,
       renderReceitas,
       setEstoqueOpcoes,

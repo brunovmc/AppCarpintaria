@@ -1,6 +1,6 @@
 <script>
   window.VendasUI = (() => {
-    let cardAberto = null;
+    let detalhesModalAbertoId = '';
     let delegationInit = false;
     let estoqueVendavel = [];
     let listaFiltradaAtual = [];
@@ -15,6 +15,9 @@
         formulario: document.getElementById('formularioVenda'),
         lista: document.getElementById('listaVendas'),
         listaControles: document.getElementById('listaControlesVendas'),
+        modalDetalhes: document.getElementById('modalDetalhesVendas'),
+        modalDetalhesConteudo: document.getElementById('modalDetalhesVendasConteudo'),
+        modalDetalhesTitulo: document.getElementById('modalDetalhesVendasTitulo'),
 
         estoqueItem: document.getElementById('vendaEstoqueItem'),
         quantidade: document.getElementById('vendaQuantidade'),
@@ -386,19 +389,57 @@
           ${String(v.status_pagamento || 'PENDENTE').toUpperCase()}
         </div>
         <button class="ver-mais">Ver mais</button>
-        <div class="card-detalhes">
-          <button class="fechar-card">X</button>
-          ${montarDetalhesCard(v)}
-        </div>
       `;
       return div;
+    }
+
+    function getVendaById(id) {
+      const alvo = String(id || '').trim();
+      if (!alvo) return null;
+      return (Array.isArray(listaFiltradaAtual) ? listaFiltradaAtual : [])
+        .find(v => String(v?.ID || '').trim() === alvo) || null;
+    }
+
+    function abrirModalDetalhes(id) {
+      const alvoId = String(id || '').trim();
+      if (!alvoId) return;
+      const f = el();
+      if (!f.modalDetalhes || !f.modalDetalhesConteudo) return;
+      const item = getVendaById(alvoId);
+      if (!item) {
+        f.modalDetalhesConteudo.innerHTML = '<p>Venda nao encontrada.</p>';
+        f.modalDetalhes.classList.remove('hidden');
+        return;
+      }
+      if (f.modalDetalhesTitulo) {
+        f.modalDetalhesTitulo.textContent = item.item || 'Detalhes da venda';
+      }
+      f.modalDetalhesConteudo.innerHTML = montarDetalhesCard(item);
+      detalhesModalAbertoId = alvoId;
+      f.modalDetalhes.classList.remove('hidden');
+    }
+
+    function fecharModalDetalhes() {
+      const f = el();
+      if (!f.modalDetalhes) return;
+      f.modalDetalhes.classList.add('hidden');
+      if (f.modalDetalhesConteudo) f.modalDetalhesConteudo.innerHTML = '';
+      detalhesModalAbertoId = '';
+    }
+
+    function atualizarModalDetalhesSeAberto() {
+      if (!detalhesModalAbertoId) return;
+      const item = getVendaById(detalhesModalAbertoId);
+      if (!item) {
+        fecharModalDetalhes();
+        return;
+      }
+      abrirModalDetalhes(detalhesModalAbertoId);
     }
 
     function renderLista(itens) {
       const f = el();
       if (!f.lista) return;
-      const abertoId = cardAberto ? cardAberto.dataset.id : '';
-      fecharCard();
       renderJobSeq += 1;
       const jobId = renderJobSeq;
       f.lista.innerHTML = '';
@@ -409,6 +450,9 @@
       renderizandoLista = false;
 
       if (listaFiltradaAtual.length === 0) {
+        if (detalhesModalAbertoId) {
+          fecharModalDetalhes();
+        }
         f.lista.innerHTML = '<p>Nenhuma venda cadastrada.</p>';
         return;
       }
@@ -432,10 +476,7 @@
 
         renderizandoLista = false;
         initDelegation();
-        if (abertoId) {
-          const alvo = f.lista.querySelector(`.card[data-id="${abertoId}"]`);
-          if (alvo) abrirCard(alvo);
-        }
+        atualizarModalDetalhesSeAberto();
       };
 
       proximoFrame(processarChunk);
@@ -452,33 +493,11 @@
 
         if (e.target.classList.contains('ver-mais')) {
           e.stopPropagation();
-          abrirCard(card);
+          if (!card) return;
+          abrirModalDetalhes(card.dataset.id || '');
           return;
-        }
-
-        if (e.target.classList.contains('fechar-card')) {
-          e.stopPropagation();
-          fecharCard();
-          return;
-        }
-
-        if (cardAberto && !cardAberto.contains(e.target)) {
-          fecharCard();
         }
       });
-    }
-
-    function abrirCard(card) {
-      if (!card) return;
-      if (cardAberto && cardAberto !== card) fecharCard();
-      card.classList.add('aberto');
-      cardAberto = card;
-    }
-
-    function fecharCard() {
-      if (!cardAberto) return;
-      cardAberto.classList.remove('aberto');
-      cardAberto = null;
     }
 
     function abrirModalRecebimento(venda) {
@@ -602,6 +621,7 @@
       handleQuantidadeOuTotalChange,
       handleFormaPagamentoChange,
       handleParcelasConfigChange,
+      fecharModalDetalhes,
       lerParcelasDetalheVenda,
       abrirModalRecebimento,
       fecharModalRecebimento,

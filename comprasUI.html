@@ -1,6 +1,6 @@
 <script>
   window.ComprasUI = (() => {
-    let cardAberto = null;
+    let detalhesModalAbertoId = '';
     let delegationInit = false;
     let categoriasBaseValidacao = [];
     let categoriasPorTipoValidacao = {};
@@ -26,6 +26,9 @@
         formulario: document.getElementById('formularioCompra'),
         lista: document.getElementById('listaCompras'),
         listaControles: document.getElementById('listaControlesCompras'),
+        modalDetalhes: document.getElementById('modalDetalhesCompras'),
+        modalDetalhesConteudo: document.getElementById('modalDetalhesComprasConteudo'),
+        modalDetalhesTitulo: document.getElementById('modalDetalhesComprasTitulo'),
 
         // Form
         tipo: document.getElementById('compraTipo'),
@@ -746,10 +749,6 @@
         </div>
 
         <button class="ver-mais">Ver mais</button>
-
-        <div class="card-detalhes" data-loaded="0">
-          <div class="card-detalhes-body"></div>
-        </div>
       `;
 
       return div;
@@ -806,23 +805,43 @@
       `;
     }
 
-    function garantirDetalhesCard(card) {
-      if (!card) return;
-      const detalhes = card.querySelector('.card-detalhes');
-      const body = card.querySelector('.card-detalhes-body');
-      if (!detalhes || !body) return;
-      if (detalhes.dataset.loaded === '1') return;
+    function abrirModalDetalhes(id) {
+      const alvoId = String(id || '').trim();
+      if (!alvoId) return;
+      const f = el();
+      if (!f.modalDetalhes || !f.modalDetalhesConteudo) return;
 
-      const id = String(card.dataset.id || '').trim();
-      const item = itensPorId[id];
+      const item = itensPorId[alvoId];
       if (!item) {
-        body.innerHTML = '<p>Item nao encontrado.</p>';
-        detalhes.dataset.loaded = '1';
+        f.modalDetalhesConteudo.innerHTML = '<p>Item nao encontrado.</p>';
+        f.modalDetalhes.classList.remove('hidden');
         return;
       }
 
-      body.innerHTML = montarDetalhesCard(item);
-      detalhes.dataset.loaded = '1';
+      if (f.modalDetalhesTitulo) {
+        f.modalDetalhesTitulo.textContent = item.item || 'Detalhes da compra';
+      }
+      f.modalDetalhesConteudo.innerHTML = montarDetalhesCard(item);
+      detalhesModalAbertoId = alvoId;
+      f.modalDetalhes.classList.remove('hidden');
+    }
+
+    function fecharModalDetalhes() {
+      const f = el();
+      if (!f.modalDetalhes) return;
+      f.modalDetalhes.classList.add('hidden');
+      if (f.modalDetalhesConteudo) f.modalDetalhesConteudo.innerHTML = '';
+      detalhesModalAbertoId = '';
+    }
+
+    function atualizarModalDetalhesSeAberto() {
+      if (!detalhesModalAbertoId) return;
+      const item = itensPorId[detalhesModalAbertoId];
+      if (!item) {
+        fecharModalDetalhes();
+        return;
+      }
+      abrirModalDetalhes(detalhesModalAbertoId);
     }
 
     function renderControlesLista() {
@@ -970,7 +989,6 @@
       const perf = window.AppPerf?.start('ui.compras.renderLista', {
         total: Array.isArray(itens) ? itens.length : 0
       });
-      fecharCard();
       renderJobSeq += 1;
       lista.innerHTML = '';
       if (listaControles) listaControles.innerHTML = '';
@@ -992,6 +1010,9 @@
       );
 
       if (listaFiltradaAtual.length === 0) {
+        if (detalhesModalAbertoId) {
+          fecharModalDetalhes();
+        }
         const semPendentesComOcultas = !mostrarAdicionadasAoEstoque && visao.adicionadas.length > 0;
         if (semPendentesComOcultas) {
           lista.appendChild(criarSeparadorAdicionadas());
@@ -1007,6 +1028,7 @@
           renderizados_iniciais: qtdRenderizada,
           total: listaFiltradaAtual.length
         });
+        atualizarModalDetalhesSeAberto();
       });
     }
 
@@ -1026,44 +1048,10 @@
         if (e.target.classList.contains('ver-mais')) {
           e.stopPropagation();
           if (!card) return;
-          if (card.classList.contains('aberto')) {
-            fecharCard();
-          } else {
-            abrirCard(card);
-          }
+          abrirModalDetalhes(card.dataset.id || '');
           return;
         }
-
-        if (cardAberto && !cardAberto.contains(e.target)) {
-          fecharCard();
-        }
       });
-    }
-
-    function atualizarTextoBotaoCard(card, aberto) {
-      if (!card) return;
-      const btn = card.querySelector('.ver-mais');
-      if (!btn) return;
-      btn.textContent = aberto ? 'Ver menos' : 'Ver mais';
-    }
-
-    function abrirCard(card) {
-      if (!card) return;
-
-      if (cardAberto && cardAberto !== card) {
-        fecharCard();
-      }
-      garantirDetalhesCard(card);
-      card.classList.add('aberto');
-      atualizarTextoBotaoCard(card, true);
-      cardAberto = card;
-    }
-
-    function fecharCard() {
-      if (!cardAberto) return;
-      cardAberto.classList.remove('aberto');
-      atualizarTextoBotaoCard(cardAberto, false);
-      cardAberto = null;
     }
 
     function abrirModalPagamentoCompra(item) {
@@ -1204,6 +1192,7 @@
       toggleAdicionadasAoEstoque,
       atualizarQuantidadeMadeira,
       definirTituloFormulario,
+      fecharModalDetalhes,
       abrirModalPagamentoCompra,
       fecharModalPagamentoCompra,
       lerParcelasDetalheCompra,
