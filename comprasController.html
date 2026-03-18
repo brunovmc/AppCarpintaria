@@ -6,6 +6,7 @@
     let iniciado = false;
     let salvando = false;
     let mutationLockToken = null;
+    let mutationLockTokenPagamento = null;
     let pagamentoCompraId = null;
     let salvandoPagamento = false;
     const adicionandoAoEstoque = new Set();
@@ -75,6 +76,19 @@
       } else {
         btn.textContent = salvando ? 'Salvando...' : 'Salvar';
       }
+    }
+
+    function setBloqueioMutacaoPagamento(ativo) {
+      if (!window.AppMutationUI?.lock || !window.AppMutationUI?.unlock) return;
+      if (ativo) {
+        if (!mutationLockTokenPagamento) {
+          mutationLockTokenPagamento = window.AppMutationUI.lock();
+        }
+        return;
+      }
+      if (!mutationLockTokenPagamento) return;
+      window.AppMutationUI.unlock(mutationLockTokenPagamento);
+      mutationLockTokenPagamento = null;
     }
 
     function reabrirFormularioAposErro(dados, opcoes = {}) {
@@ -601,6 +615,17 @@
       }
     }
 
+    function reabrirModalPagamentoCompraAposErro(compraId, dados) {
+      const id = String(compraId || '').trim();
+      if (!id) return;
+      const item = ComprasStore.getById(id);
+      if (!item) return;
+      const abriu = ComprasUI.abrirModalPagamentoCompra(item);
+      if (!abriu) return;
+      ComprasUI.preencherModalPagamentoCompra?.(dados || {});
+      pagamentoCompraId = id;
+    }
+
     function confirmarPagamentoCompra() {
       if (!podeAlterarDados('Pagamento bloqueado em modo somente leitura')) return;
       if (salvandoPagamento) return;
@@ -627,20 +652,25 @@
         mostrarToast('Valor pago invalido', 'erro');
         return;
       }
-      const itemAntes = ComprasStore.getById(pagamentoCompraId);
+      const compraId = pagamentoCompraId;
+      const dadosFormulario = { ...dados };
+      const itemAntes = ComprasStore.getById(compraId);
 
       salvandoPagamento = true;
-      ComprasUI.setModalPagamentoCompraProcessando(true);
+      setBloqueioMutacaoPagamento(true);
+      ComprasUI.fecharModalPagamentoCompra();
+      pagamentoCompraId = null;
 
       google.script.run
         .withFailureHandler(err => {
           salvandoPagamento = false;
-          ComprasUI.setModalPagamentoCompraProcessando(false);
+          setBloqueioMutacaoPagamento(false);
           mostrarToast(err?.message || 'Erro ao registrar pagamento', 'erro');
+          reabrirModalPagamentoCompraAposErro(compraId, dadosFormulario);
         })
         .withSuccessHandler(resp => {
           salvandoPagamento = false;
-          ComprasUI.setModalPagamentoCompraProcessando(false);
+          setBloqueioMutacaoPagamento(false);
 
           if (resp?.compraAtualizada?.ID) {
             ComprasStore.update(resp.compraAtualizada.ID, resp.compraAtualizada);
@@ -650,11 +680,9 @@
           }
 
           invalidarCacheDashboardPorImpacto(itemAntes, dados, resp?.compraAtualizada);
-          ComprasUI.fecharModalPagamentoCompra();
-          pagamentoCompraId = null;
           mostrarToast('Pagamento registrado');
         })
-        .registrarPagamentoCompra(pagamentoCompraId, {
+        .registrarPagamentoCompra(compraId, {
           data_pagamento: dados.data_pagamento,
           valor_pago: valorPago,
           parcela_alvo_id: dados.parcela_alvo_id,
@@ -666,6 +694,7 @@
     function cancelarPagamentoCompra() {
       pagamentoCompraId = null;
       salvandoPagamento = false;
+      setBloqueioMutacaoPagamento(false);
       ComprasUI.fecharModalPagamentoCompra();
     }
 

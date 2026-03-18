@@ -145,6 +145,20 @@
       return payload;
     }
 
+    function normalizarOrdemEtapas(etapas) {
+      if (!Array.isArray(etapas)) return [];
+      const ordenadas = [...etapas].sort((a, b) => {
+        const ordemA = Number(a?.ordem || 0);
+        const ordemB = Number(b?.ordem || 0);
+        if (ordemA === ordemB) return 0;
+        return ordemA - ordemB;
+      });
+      return ordenadas.map((et, idx) => ({
+        ...et,
+        ordem: idx + 1
+      }));
+    }
+
     function carregarProdutos() {
       google.script.run
         .withSuccessHandler(lista => {
@@ -931,6 +945,53 @@
         ]);
     }
 
+    function moverEtapaParaCima(producaoId, etapaId) {
+      if (!podeAlterarDados('Edicao bloqueada em modo somente leitura')) return;
+      const item = ProducaoStore.getById(producaoId);
+      if (!item) return;
+
+      const etapasOriginais = Array.isArray(item.etapas)
+        ? item.etapas.map(et => ({ ...et }))
+        : [];
+      if (etapasOriginais.length <= 1) return;
+
+      const etapasOrdenadas = normalizarOrdemEtapas(etapasOriginais);
+      const idx = etapasOrdenadas.findIndex(et => String(et?.id || '') === String(etapaId || ''));
+      if (idx <= 0) return;
+
+      const snapshot = {
+        ...item,
+        etapas: etapasOriginais
+      };
+
+      const anterior = etapasOrdenadas[idx - 1];
+      etapasOrdenadas[idx - 1] = etapasOrdenadas[idx];
+      etapasOrdenadas[idx] = anterior;
+
+      const etapasAtualizadas = etapasOrdenadas.map((et, pos) => ({
+        ...et,
+        ordem: pos + 1
+      }));
+
+      ProducaoStore.update(producaoId, { etapas: etapasAtualizadas });
+      renderListaAtual();
+
+      google.script.run
+        .withFailureHandler(() => {
+          ProducaoStore.update(producaoId, { etapas: snapshot.etapas || [] });
+          renderListaAtual();
+          mostrarToast('Erro ao reordenar etapa', 'erro');
+        })
+        .withSuccessHandler(() => {
+          mostrarToast('Etapa reordenada');
+          refreshEtapas(producaoId);
+        })
+        .atualizarEtapasProducao(
+          producaoId,
+          etapasAtualizadas.map(et => sanitizeEtapa(et, true))
+        );
+    }
+
     function deletarEtapa(producaoId, etapaId) {
       if (!podeAlterarDados('Exclusao bloqueada em modo somente leitura')) return;
       if (!confirm('Deseja remover esta etapa?')) return;
@@ -991,6 +1052,7 @@
       iniciarEdicaoEtapa,
       cancelarEdicaoEtapa,
       salvarEdicaoEtapa,
+      moverEtapaParaCima,
       deletarEtapa
     };
 

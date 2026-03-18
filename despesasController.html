@@ -9,6 +9,7 @@
     let despesaEditandoId = null;
     let salvandoDespesa = false;
     let mutationLockToken = null;
+    let mutationLockTokenPagamento = null;
     let despesaPagamentoId = null;
     let salvandoPagamentoDespesa = false;
     let despesaPagamentoParcelado = false;
@@ -765,6 +766,16 @@
 
     function setSalvandoPagamentoDespesa(ativo) {
       salvandoPagamentoDespesa = !!ativo;
+      if (window.AppMutationUI?.lock && window.AppMutationUI?.unlock) {
+        if (salvandoPagamentoDespesa) {
+          if (!mutationLockTokenPagamento) {
+            mutationLockTokenPagamento = window.AppMutationUI.lock();
+          }
+        } else if (mutationLockTokenPagamento) {
+          window.AppMutationUI.unlock(mutationLockTokenPagamento);
+          mutationLockTokenPagamento = null;
+        }
+      }
       const f = el();
       [f.pagDespesaData, f.pagDespesaValor, f.pagDespesaParcela, f.pagDespesaForma, f.pagDespesaObservacao, f.btnConfirmarPagDespesa]
         .forEach(input => {
@@ -787,25 +798,25 @@
     }
 
     function registrarPagamentoDespesa(id) {
-      if (!podeAlterarDados('Pagamento bloqueado em modo somente leitura')) return;
-      if (salvandoPagamentoDespesa) return;
+      if (!podeAlterarDados('Pagamento bloqueado em modo somente leitura')) return false;
+      if (salvandoPagamentoDespesa) return false;
       const despesaId = String(id || '').trim();
       const item = despesas.find(d => String(d.ID || '').trim() === despesaId);
       if (!item) {
         mostrarToast('Despesa nao encontrada', 'erro');
-        return;
+        return false;
       }
 
       const pendente = Number(item.total_pendente || 0);
       if (pendente <= 0.009) {
         mostrarToast('Despesa ja esta paga');
-        return;
+        return false;
       }
 
       const formas = Array.isArray(validacoes?.formasPagamento) ? validacoes.formasPagamento : [];
       if (formas.length === 0) {
         mostrarToast('Cadastre FORMA_PAGAMENTO na aba VALIDACAO', 'erro');
-        return;
+        return false;
       }
 
       const f = el();
@@ -825,7 +836,7 @@
           if (!proximaParcela?.ID) {
             despesaPagamentoId = null;
             mostrarToast('Nao ha parcela pendente para esta despesa', 'erro');
-            return;
+            return false;
           }
           const numero = Number(proximaParcela.parcela_numero || 0);
           const total = Number(proximaParcela.parcelas_total || 0);
@@ -861,10 +872,37 @@
       if (f.pagDespesaObservacao) f.pagDespesaObservacao.value = '';
       if (f.modalPagamentoDespesa) f.modalPagamentoDespesa.classList.remove('hidden');
       setSalvandoPagamentoDespesa(false);
+      return true;
     }
 
     function registrarPagamento(id) {
       registrarPagamentoDespesa(id);
+    }
+
+    function reabrirPagamentoDespesaAposErro(despesaId, dados) {
+      const id = String(despesaId || '').trim();
+      if (!id) return;
+      const abriu = registrarPagamentoDespesa(id);
+      if (!abriu) return;
+      const f = el();
+      const payload = dados || {};
+      const dataPagamento = String(payload.data_pagamento || '').trim();
+      const valorPago = String(payload.valor_pago ?? '').trim();
+      const parcelaAlvoId = String(payload.parcela_alvo_id || '').trim();
+      const formaPagamento = String(payload.forma_pagamento || '').trim();
+      const observacao = String(payload.observacao || '').trim();
+
+      if (f.pagDespesaData && dataPagamento) f.pagDespesaData.value = dataPagamento;
+      if (f.pagDespesaValor && valorPago !== '') f.pagDespesaValor.value = valorPago;
+      if (f.pagDespesaForma && formaPagamento) f.pagDespesaForma.value = formaPagamento;
+      if (f.pagDespesaObservacao) f.pagDespesaObservacao.value = observacao;
+      if (f.pagDespesaParcela && parcelaAlvoId) {
+        const possuiOpcao = [...f.pagDespesaParcela.options]
+          .some(op => String(op.value || '').trim() === parcelaAlvoId);
+        if (possuiOpcao) {
+          f.pagDespesaParcela.value = parcelaAlvoId;
+        }
+      }
     }
 
     function confirmarPagamentoDespesa() {
@@ -897,27 +935,42 @@
         mostrarToast('Valor pago invalido', 'erro');
         return;
       }
-      const despesaAtual = getById(despesaPagamentoId);
+      const despesaIdAtual = despesaPagamentoId;
+      const eraParcelado = despesaPagamentoParcelado;
+      const despesaAtual = getById(despesaIdAtual);
+      const dadosFormulario = {
+        data_pagamento: dataPagamento,
+        valor_pago: valorPago,
+        parcela_alvo_id: eraParcelado ? String(f.pagDespesaParcela?.value || '').trim() : '',
+        forma_pagamento: formaPagamento,
+        observacao
+      };
 
       setSalvandoPagamentoDespesa(true);
+      if (f.modalPagamentoDespesa) {
+        f.modalPagamentoDespesa.classList.add('hidden');
+      }
+      despesaPagamentoId = null;
+      despesaPagamentoParcelado = false;
+
       google.script.run
         .withFailureHandler(err => {
           setSalvandoPagamentoDespesa(false);
           mostrarToast(err?.message || 'Erro ao registrar pagamento', 'erro');
+          reabrirPagamentoDespesaAposErro(despesaIdAtual, dadosFormulario);
         })
         .withSuccessHandler(() => {
           setSalvandoPagamentoDespesa(false);
-          cancelarPagamentoDespesa();
           mostrarToast('Pagamento registrado');
           carregarDespesas(true);
           notificarDashboardAlterado(despesaAtual, {
             data_pagamento: dataPagamento
           });
         })
-        .registrarPagamentoDespesaGeral(despesaPagamentoId, {
+        .registrarPagamentoDespesaGeral(despesaIdAtual, {
           data_pagamento: dataPagamento,
           valor_pago: valorPago,
-          parcela_alvo_id: despesaPagamentoParcelado ? String(f.pagDespesaParcela?.value || '').trim() : '',
+          parcela_alvo_id: dadosFormulario.parcela_alvo_id,
           forma_pagamento: formaPagamento,
           observacao
         });

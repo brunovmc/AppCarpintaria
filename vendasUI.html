@@ -586,6 +586,29 @@
       };
     }
 
+    function preencherModalRecebimento(dados = {}) {
+      const f = el();
+      const payload = dados || {};
+      const dataPagamento = String(payload.data_pagamento || '').trim();
+      const valorPago = String(payload.valor_pago ?? '').trim();
+      const parcelaAlvoId = String(payload.parcela_alvo_id || '').trim();
+      const formaPagamento = String(payload.forma_pagamento || '').trim();
+      const observacao = String(payload.observacao || '').trim();
+
+      if (f.recebimentoData && dataPagamento) f.recebimentoData.value = dataPagamento;
+      if (f.recebimentoValor && valorPago !== '') f.recebimentoValor.value = valorPago;
+      if (f.recebimentoForma && formaPagamento) f.recebimentoForma.value = formaPagamento;
+      if (f.recebimentoObs) f.recebimentoObs.value = observacao;
+
+      if (f.recebimentoParcela && parcelaAlvoId) {
+        const possuiOpcao = [...f.recebimentoParcela.options]
+          .some(op => String(op.value || '').trim() === parcelaAlvoId);
+        if (possuiOpcao) {
+          f.recebimentoParcela.value = parcelaAlvoId;
+        }
+      }
+    }
+
     function setModalRecebimentoProcessando(processando) {
       const f = el();
       const on = !!processando;
@@ -626,6 +649,7 @@
       abrirModalRecebimento,
       fecharModalRecebimento,
       lerModalRecebimento,
+      preencherModalRecebimento,
       setModalRecebimentoProcessando
     };
   })();

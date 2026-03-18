@@ -382,25 +382,32 @@
     const estadosOriginais = new WeakMap();
     let observer = null;
 
-    const seletoresBloqueados = [
-      '.bottom-bar button',
-      '#lista button',
-      '#listaCompras button',
-      '#listaVendas button',
-      '#listaProdutos button',
-      '#listaProducao button',
-      '#listaDespesasGerais button',
-      '#btnSalvarEstoque',
-      '#btnSalvarCompra',
-      '#btnSalvarVenda',
-      '#btnSalvarProduto',
-      '#btnSalvarProducao',
-      '#btnSalvarDespesaGeral'
+    const classesSomenteLeitura = [
+      'ver-mais',
+      'modal-close-square',
+      'btn-carregar-mais',
+      'compras-separador-acao'
+    ];
+    const acoesSomenteLeituraOnclick = [
+      'fecharmodal',
+      'fecharformulario',
+      'cancelarpagamento',
+      'cancelarrecebimento',
+      'fecharobservabilidadecard'
     ];
 
     function coletarBotoesBloqueio() {
-      return [...document.querySelectorAll(seletoresBloqueados.join(','))]
-        .filter(btn => btn && btn.tagName === 'BUTTON');
+      return [...document.querySelectorAll('button')].filter(isMutationButton);
+    }
+
+    function isReadOnlyButton(btn) {
+      if (!btn || btn.tagName !== 'BUTTON') return false;
+      if (btn.classList && classesSomenteLeitura.some(cls => btn.classList.contains(cls))) {
+        return true;
+      }
+      if (btn.id === 'btnDashboardAtualizar') return true;
+      const onclick = String(btn.getAttribute('onclick') || '').toLowerCase();
+      return acoesSomenteLeituraOnclick.some(acao => onclick.includes(acao));
     }
 
     function garantirObserver() {
@@ -443,6 +450,7 @@
       if (btn.closest('.top-bar')) return false;
       if (btn.closest('#painelFiltroEstoque')) return false;
       if (btn.closest('#painelFiltroCompras')) return false;
+      if (isReadOnlyButton(btn)) return false;
       return true;
     }
 

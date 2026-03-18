@@ -1164,6 +1164,29 @@
       };
     }
 
+    function preencherModalPagamentoCompra(dados = {}) {
+      const f = el();
+      const payload = dados || {};
+      const dataPagamento = String(payload.data_pagamento || '').trim();
+      const valorPago = String(payload.valor_pago ?? '').trim();
+      const parcelaAlvoId = String(payload.parcela_alvo_id || '').trim();
+      const formaPagamento = String(payload.forma_pagamento || '').trim();
+      const observacao = String(payload.observacao || '').trim();
+
+      if (f.pagamentoData && dataPagamento) f.pagamentoData.value = dataPagamento;
+      if (f.pagamentoValor && valorPago !== '') f.pagamentoValor.value = valorPago;
+      if (f.pagamentoForma && formaPagamento) f.pagamentoForma.value = formaPagamento;
+      if (f.pagamentoObservacao) f.pagamentoObservacao.value = observacao;
+
+      if (f.pagamentoParcela && parcelaAlvoId) {
+        const possuiOpcao = [...f.pagamentoParcela.options]
+          .some(op => String(op.value || '').trim() === parcelaAlvoId);
+        if (possuiOpcao) {
+          f.pagamentoParcela.value = parcelaAlvoId;
+        }
+      }
+    }
+
     /* =========================
        API PUBLICA
     ========================== */
@@ -1197,6 +1220,7 @@
       fecharModalPagamentoCompra,
       lerParcelasDetalheCompra,
       lerModalPagamentoCompra,
+      preencherModalPagamentoCompra,
       setModalPagamentoCompraProcessando
     };
 

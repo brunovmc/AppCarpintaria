@@ -541,9 +541,20 @@
       return `
         <div class="linha-etapa">
           <input class="input-etapa-edit etapa-nome" placeholder="Descreva a etapa" value="${etapa.nome_etapa || ''}">
+          <button type="button" class="btn-modelo-subir-etapa" aria-label="Mover etapa para cima">↑</button>
           <button type="button" class="btn-modelo-remover-etapa">Remover</button>
         </div>
       `;
+    }
+
+    function atualizarControlesEtapasModelo() {
+      const linhas = [...document.querySelectorAll('#produtoModeloEtapas .linha-etapa')];
+      linhas.forEach((linha, idx) => {
+        const btnSubir = linha.querySelector('.btn-modelo-subir-etapa');
+        if (btnSubir) {
+          btnSubir.disabled = idx === 0;
+        }
+      });
     }
 
     function adicionarEntradaModeloForm(entrada = {}) {
@@ -564,6 +575,7 @@
       const { modeloEtapas } = el();
       if (!modeloEtapas) return;
       modeloEtapas.insertAdjacentHTML('beforeend', renderLinhaEtapaModelo(etapa));
+      atualizarControlesEtapasModelo();
     }
 
     function preencherModeloFormulario(modelo = {}) {
@@ -598,6 +610,7 @@
         etapas.forEach(et => adicionarEtapaModeloForm(et));
       }
 
+      atualizarControlesEtapasModelo();
       renderDatalistsFormulario();
     }
 
@@ -1099,6 +1112,18 @@
         if (e.target.classList.contains('btn-modelo-remover-etapa')) {
           const linha = e.target.closest('.linha-etapa');
           if (linha) linha.remove();
+          atualizarControlesEtapasModelo();
+          return;
+        }
+
+        if (e.target.classList.contains('btn-modelo-subir-etapa')) {
+          const linha = e.target.closest('.linha-etapa');
+          const container = document.getElementById('produtoModeloEtapas');
+          if (!linha || !container) return;
+          const anterior = linha.previousElementSibling;
+          if (!anterior) return;
+          container.insertBefore(linha, anterior);
+          atualizarControlesEtapasModelo();
           return;
         }
       });

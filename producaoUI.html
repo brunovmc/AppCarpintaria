@@ -343,9 +343,17 @@
         return '<p>Nenhuma etapa cadastrada.</p>';
       }
 
-      return etapas.map(et => {
+      const etapasOrdenadas = [...etapas].sort((a, b) => {
+        const ordemA = Number(a?.ordem || 0);
+        const ordemB = Number(b?.ordem || 0);
+        if (ordemA === ordemB) return 0;
+        return ordemA - ordemB;
+      });
+
+      return etapasOrdenadas.map((et, idx) => {
         const checked = String(et.feito).toLowerCase() === 'true';
         const editing = !!et._editing;
+        const podeSubir = idx > 0;
 
         if (editing) {
           return `
@@ -375,6 +383,7 @@
             >
             <span class="etapa-nome">${et.nome_etapa || ''}</span>
             <div class="etapa-acoes">
+              <button class="btn-etapa-subir" data-producao-id="${producaoId}" data-etapa-id="${et.id}" aria-label="Mover etapa para cima" ${podeSubir ? '' : 'disabled'}>↑</button>
               <button class="btn-etapa-editar" data-producao-id="${producaoId}" data-etapa-id="${et.id}">Editar</button>
               <button class="btn-etapa-deletar" data-producao-id="${producaoId}" data-etapa-id="${et.id}">Excluir</button>
             </div>
@@ -796,6 +805,15 @@
           const etapaId = e.target.dataset.etapaId;
           if (window.ProducaoController) {
             ProducaoController.iniciarEdicaoEtapa(producaoId, etapaId);
+          }
+          return;
+        }
+
+        if (e.target.classList.contains('btn-etapa-subir')) {
+          const producaoId = e.target.dataset.producaoId;
+          const etapaId = e.target.dataset.etapaId;
+          if (window.ProducaoController) {
+            ProducaoController.moverEtapaParaCima(producaoId, etapaId);
           }
           return;
         }

@@ -4,6 +4,7 @@
     let editandoId = null;
     let salvando = false;
     let mutationLockToken = null;
+    let mutationLockTokenRecebimento = null;
     let recebimentoVendaId = null;
     let salvandoRecebimento = false;
 
@@ -50,6 +51,19 @@
       } else {
         btn.textContent = salvando ? 'Salvando...' : 'Salvar';
       }
+    }
+
+    function setBloqueioMutacaoRecebimento(ativo) {
+      if (!window.AppMutationUI?.lock || !window.AppMutationUI?.unlock) return;
+      if (ativo) {
+        if (!mutationLockTokenRecebimento) {
+          mutationLockTokenRecebimento = window.AppMutationUI.lock();
+        }
+        return;
+      }
+      if (!mutationLockTokenRecebimento) return;
+      window.AppMutationUI.unlock(mutationLockTokenRecebimento);
+      mutationLockTokenRecebimento = null;
     }
 
     function reabrirFormularioAposErro(dados, opcoes = {}) {
@@ -310,6 +324,17 @@
       }
     }
 
+    function reabrirModalRecebimentoAposErro(vendaId, dados) {
+      const id = String(vendaId || '').trim();
+      if (!id) return;
+      const item = VendasStore.getById(id);
+      if (!item) return;
+      const abriu = VendasUI.abrirModalRecebimento(item);
+      if (!abriu) return;
+      VendasUI.preencherModalRecebimento?.(dados || {});
+      recebimentoVendaId = id;
+    }
+
     function confirmarRecebimento() {
       if (!podeAlterarDados('Recebimento bloqueado em modo somente leitura')) return;
       if (salvandoRecebimento) return;
@@ -336,20 +361,25 @@
         mostrarToast('Valor de recebimento invalido', 'erro');
         return;
       }
-      const itemAntes = VendasStore.getById(recebimentoVendaId);
+      const vendaId = recebimentoVendaId;
+      const dadosFormulario = { ...dados };
+      const itemAntes = VendasStore.getById(vendaId);
 
       salvandoRecebimento = true;
-      VendasUI.setModalRecebimentoProcessando(true);
+      setBloqueioMutacaoRecebimento(true);
+      VendasUI.fecharModalRecebimento();
+      recebimentoVendaId = null;
 
       google.script.run
         .withFailureHandler(err => {
           salvandoRecebimento = false;
-          VendasUI.setModalRecebimentoProcessando(false);
+          setBloqueioMutacaoRecebimento(false);
           mostrarToast(err?.message || 'Erro ao registrar recebimento', 'erro');
+          reabrirModalRecebimentoAposErro(vendaId, dadosFormulario);
         })
         .withSuccessHandler(resp => {
           salvandoRecebimento = false;
-          VendasUI.setModalRecebimentoProcessando(false);
+          setBloqueioMutacaoRecebimento(false);
 
           if (resp?.vendaAtualizada?.ID) {
             VendasStore.update(resp.vendaAtualizada.ID, resp.vendaAtualizada);
@@ -368,12 +398,10 @@
           }
 
           invalidarCacheDashboardPorImpacto(itemAntes, dados, resp?.vendaAtualizada);
-          VendasUI.fecharModalRecebimento();
-          recebimentoVendaId = null;
           carregarEstoqueVendavel();
           mostrarToast('Recebimento registrado');
         })
-        .registrarRecebimentoVenda(recebimentoVendaId, {
+        .registrarRecebimentoVenda(vendaId, {
           data_pagamento: dados.data_pagamento,
           valor_pago: valor,
           parcela_alvo_id: dados.parcela_alvo_id,
@@ -385,6 +413,7 @@
     function cancelarRecebimento() {
       recebimentoVendaId = null;
       salvandoRecebimento = false;
+      setBloqueioMutacaoRecebimento(false);
       VendasUI.fecharModalRecebimento();
     }
 
