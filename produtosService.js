@@ -65,10 +65,75 @@ const PRODUTOS_RECEITAS_SAIDAS_SCHEMA = [
   'id',
   'receita_id',
   'nome_saida',
+  'tipo_item',
+  'categoria',
   'unidade',
   'quantidade',
   'ativo'
 ];
+
+function normalizarTipoSaidaReceitaProduto(tipo) {
+  const t = String(tipo || '').trim().toUpperCase();
+  return t || 'PRODUTO';
+}
+
+function normalizarCategoriaSaidaReceitaProduto(tipo, categoria) {
+  const tipoNorm = normalizarTipoSaidaReceitaProduto(tipo);
+  const categoriaInformada = String(categoria || '').trim();
+
+  let validacoes = null;
+  try {
+    validacoes = typeof obterValidacoes === 'function' ? obterValidacoes() : null;
+  } catch (error) {
+    validacoes = null;
+  }
+
+  const mapaCategorias = validacoes?.categoriasPorTipo || {};
+  const categoriasTipo = Array.isArray(mapaCategorias[tipoNorm]) ? mapaCategorias[tipoNorm] : [];
+
+  if (categoriaInformada) {
+    if (categoriasTipo.length > 0) {
+      const encontrada = categoriasTipo.find(v =>
+        String(v || '').trim().toUpperCase() === categoriaInformada.toUpperCase()
+      );
+      return encontrada || '';
+    }
+
+    const categoriasGerais = Array.isArray(validacoes?.categorias) ? validacoes.categorias : [];
+    if (categoriasGerais.length > 0) {
+      const encontrada = categoriasGerais.find(v =>
+        String(v || '').trim().toUpperCase() === categoriaInformada.toUpperCase()
+      );
+      return encontrada || '';
+    }
+
+    return categoriaInformada;
+  }
+
+  if (categoriasTipo.length > 0) {
+    if (tipoNorm === 'PRODUTO') {
+      const peca = categoriasTipo.find(v => String(v || '').trim().toUpperCase() === 'PECA');
+      if (peca) return peca;
+    }
+    return String(categoriasTipo[0] || '').trim();
+  }
+
+  return tipoNorm === 'PRODUTO' ? 'PECA' : '';
+}
+
+function obterValorUnitarioEstoqueParaCustoProduto(itemEstoque) {
+  const tipo = String(itemEstoque?.tipo || '').trim().toUpperCase();
+  const custoBruto = String(itemEstoque?.custo_unitario ?? '').trim();
+  const custo = parseNumeroBR(custoBruto);
+
+  if (tipo === 'PRODUTO') {
+    if (custoBruto === '') return 0;
+    return custo;
+  }
+
+  if (custoBruto !== '') return custo;
+  return parseNumeroBR(itemEstoque?.valor_unit);
+}
 
 function getResumoModeloProduto(produtoId) {
   const modelo = obterModeloProduto(produtoId);
@@ -455,7 +520,17 @@ function listarReceitasProduto(produtoId) {
   const saidas = sheetSaidas ? rowsToObjects(sheetSaidas) : [];
 
   const entradasAtivas = entradas.filter(i => String(i.ativo).toLowerCase() === 'true');
-  const saidasAtivas = saidas.filter(i => String(i.ativo).toLowerCase() === 'true');
+  const saidasAtivas = saidas
+    .filter(i => String(i.ativo).toLowerCase() === 'true')
+    .map(i => {
+      const tipoItem = normalizarTipoSaidaReceitaProduto(i.tipo_item);
+      const categoria = normalizarCategoriaSaidaReceitaProduto(tipoItem, i.categoria);
+      return {
+        ...i,
+        tipo_item: tipoItem,
+        categoria
+      };
+    });
 
   return receitas.map(r => ({
     ...r,
@@ -623,12 +698,24 @@ function salvarSaidasReceita(receitaId, linhas) {
 
   const linhasValidas = Array.isArray(linhas) ? linhas : [];
   linhasValidas.forEach(l => {
+    const nomeSaida = String(l.nome_saida || '').trim();
+    const unidade = String(l.unidade || '').trim();
+    const quantidade = parseNumeroBR(l.quantidade);
+    const tipoItem = normalizarTipoSaidaReceitaProduto(l.tipo_item);
+    const categoria = normalizarCategoriaSaidaReceitaProduto(tipoItem, l.categoria);
+
+    if (!nomeSaida || !unidade || quantidade <= 0) {
+      return;
+    }
+
     const novo = {
       id: gerarId('RSA'),
       receita_id: receitaId,
-      nome_saida: l.nome_saida || '',
-      unidade: l.unidade || '',
-      quantidade: parseNumeroBR(l.quantidade),
+      nome_saida: nomeSaida,
+      tipo_item: tipoItem,
+      categoria,
+      unidade,
+      quantidade,
       ativo: true
     };
     insert(ABA_PRODUTOS_RECEITAS_SAIDAS, novo, PRODUTOS_RECEITAS_SAIDAS_SCHEMA);
@@ -916,7 +1003,7 @@ function explodirReceitaDetalhada(produtoId, receitaId, qtdPlanejada) {
     if (estoqueItem) {
       itemNome = estoqueItem.item || itemNome || estoqueId;
       unidade = estoqueItem.unidade || unidade || '';
-      const valorEstoque = parseNumeroBR(estoqueItem.valor_unit);
+      const valorEstoque = obterValorUnitarioEstoqueParaCustoProduto(estoqueItem);
       if (valorEstoque > 0 || !valorUnit) {
         valorUnit = valorEstoque;
       }
@@ -992,6 +1079,8 @@ function explodirSaidasReceitaDetalhada(produtoId, receitaId, qtdPlanejada) {
     if (!qtdBase || qtdBase <= 0) return;
 
     const nomeSaida = String(s.nome_saida || '').trim() || nomeProduto || 'Saida';
+    const tipoItem = normalizarTipoSaidaReceitaProduto(s.tipo_item);
+    const categoria = normalizarCategoriaSaidaReceitaProduto(tipoItem, s.categoria);
     const quantidade = parseNumeroBR(qtdBase * fator);
     if (!quantidade || quantidade <= 0) return;
 
@@ -999,6 +1088,8 @@ function explodirSaidasReceitaDetalhada(produtoId, receitaId, qtdPlanejada) {
       receita_saida_id: s.id || '',
       receita_id: receitaId,
       nome_saida: nomeSaida,
+      tipo_item: tipoItem,
+      categoria,
       unidade: s.unidade || '',
       quantidade
     });
@@ -1057,7 +1148,7 @@ function explodirBOM(produtoId, qtd) {
 
   function adicionarEstoque(refId, qtdTotal, unidadeComp) {
     const estoque = estoqueMap[refId] || {};
-    const valorUnit = parseNumeroBR(estoque.valor_unit);
+    const valorUnit = obterValorUnitarioEstoqueParaCustoProduto(estoque);
     const itemNome = estoque.item || refId || '';
     const unidade = estoque.unidade || unidadeComp || '';
 

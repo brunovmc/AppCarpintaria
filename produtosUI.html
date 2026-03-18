@@ -84,6 +84,19 @@
         }
         sincronizarLinhaEntradaMadeira(row);
       });
+
+      document.querySelectorAll('.linha-receita-saida').forEach(row => {
+        const tipo = String(row.querySelector('.saida-tipo')?.value || '').toUpperCase();
+        const categoriaSel = row.querySelector('.saida-categoria');
+        const categoriaAtual = categoriaSel ? categoriaSel.value : '';
+        if (categoriaSel) {
+          categoriaSel.innerHTML = renderOpcoesCategoria(categoriaAtual, tipo);
+          if (!categoriaSel.value) {
+            const categoriaPadrao = getCategoriasParaTipo(tipo)[0] || '';
+            setSelectByValidation(categoriaSel, categoriaPadrao);
+          }
+        }
+      });
     }
 
     function parseNumero(valor) {
@@ -440,6 +453,10 @@
       return '<option value="">Tipo</option>' + opts;
     }
 
+    function renderOpcoesTipoSaida(selecionado) {
+      return renderOpcoesTipoEntrada(selecionado);
+    }
+
     function renderOpcoesSelect(lista, selecionado, placeholder) {
       const selecionadoUpper = String(selecionado || '').trim().toUpperCase();
       const opts = (Array.isArray(lista) ? lista : []).map(v => {
@@ -492,9 +509,18 @@
     }
 
     function renderSaidaEditRow(saida = {}) {
+      const tipo = String(saida.tipo_item || 'PRODUTO').toUpperCase();
+      const categoriaPadrao = getCategoriasParaTipo(tipo)[0] || '';
+      const categoria = String(saida.categoria || categoriaPadrao).trim();
       return `
         <div class="linha-receita-saida">
           <input class="saida-nome" placeholder="Nome" value="${saida.nome_saida || ''}">
+          <select class="saida-tipo">
+            ${renderOpcoesTipoSaida(tipo)}
+          </select>
+          <select class="saida-categoria">
+            ${renderOpcoesCategoria(categoria, tipo)}
+          </select>
           <select class="saida-unidade">
             ${renderOpcoesUnidade(saida.unidade || '')}
           </select>
@@ -706,6 +732,7 @@
       return saidas.map(s => `
         <div class="linha-receita">
           <div><strong>${s.nome_saida || '-'}</strong></div>
+          <div class="comp-meta">Tipo: ${String(s.tipo_item || '-').toUpperCase()} | Categoria: ${s.categoria || '-'}</div>
           <div class="comp-meta">${s.quantidade || '-'} ${s.unidade || ''}</div>
           <div class="comp-meta">Custo unit: ${custoTexto}</div>
         </div>
@@ -860,6 +887,8 @@
 
       const saidas = [...card.querySelectorAll('.linha-receita-saida')].map(row => ({
         nome_saida: row.querySelector('.saida-nome')?.value || '',
+        tipo_item: String(row.querySelector('.saida-tipo')?.value || '').toUpperCase(),
+        categoria: row.querySelector('.saida-categoria')?.value || '',
         unidade: row.querySelector('.saida-unidade')?.value || '',
         quantidade: row.querySelector('.saida-qtd')?.value || ''
       }));
@@ -1153,6 +1182,19 @@
           if (categoriaInput) categoriaInput.value = '';
           sincronizarLinhaEntradaMadeira(row);
 
+          return;
+        }
+
+        if (e.target.classList.contains('saida-tipo')) {
+          const row = e.target.closest('.linha-receita-saida');
+          if (!row) return;
+          const tipo = String(e.target.value || '').toUpperCase();
+          const categoriaInput = row.querySelector('.saida-categoria');
+          if (categoriaInput) {
+            categoriaInput.innerHTML = renderOpcoesCategoria('', tipo);
+            const categoriaPadrao = getCategoriasParaTipo(tipo)[0] || '';
+            setSelectByValidation(categoriaInput, categoriaPadrao);
+          }
           return;
         }
       });

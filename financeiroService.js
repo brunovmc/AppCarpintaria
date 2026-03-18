@@ -82,6 +82,23 @@ function parseBooleanFinanceiro(valor) {
   return s === 'true' || s === '1' || s === 'sim' || s === 'yes';
 }
 
+function obterCustoUnitarioEstoqueDashboard(item) {
+  const tipo = String(item?.tipo || '').trim().toUpperCase();
+  const custoBruto = String(item?.custo_unitario ?? '').trim();
+  const custoUnitario = parseNumeroBR(custoBruto);
+
+  // Para PRODUTO, valuation deve usar custo de producao (custo_unitario), nao preco/venda legado.
+  if (tipo === 'PRODUTO') {
+    if (custoBruto === '') return 0;
+    return custoUnitario;
+  }
+
+  if (custoBruto !== '') {
+    return custoUnitario;
+  }
+  return parseNumeroBR(item?.valor_unit);
+}
+
 function adicionarMesesComAjusteFinanceiro(dataBase, quantidadeMeses) {
   const base = parseDataFinanceiro(dataBase);
   if (!base || !isFinite(quantidadeMeses)) return null;
@@ -1754,7 +1771,7 @@ function obterResumoDashboardFinanceiro(referenciaYm, forcarRecarregar) {
   const valorEstoquePorTipo = {};
   estoque.forEach(item => {
     const quantidade = parseNumeroBR(item.quantidade);
-    const valorUnit = parseNumeroBR(item.custo_unitario || item.valor_unit);
+    const valorUnit = obterCustoUnitarioEstoqueDashboard(item);
     const valor = round2Financeiro(Math.max(0, quantidade * valorUnit));
     valorEstoqueTotal = round2Financeiro(valorEstoqueTotal + valor);
 
@@ -2290,7 +2307,7 @@ function obterComposicaoCardDashboardFinanceiro(referenciaYm, cardKey, forcarRec
       const meta = obterMetaOrigem(ORIGEM_TIPO_ESTOQUE, id);
       if (!meta) return null;
       const quantidade = round2Financeiro(parseNumeroBR(item.quantidade));
-      const custo = round2Financeiro(parseNumeroBR(item.custo_unitario || item.valor_unit));
+      const custo = round2Financeiro(obterCustoUnitarioEstoqueDashboard(item));
       return {
         linha_id: `EST:${id}`,
         tipo_linha: 'estoque',

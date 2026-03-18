@@ -154,6 +154,8 @@ function listarProducao() {
       if (!saidasReceitaMap[receitaId]) saidasReceitaMap[receitaId] = [];
       saidasReceitaMap[receitaId].push({
         nome_saida: String(s.nome_saida || '').trim(),
+        tipo_item: String(s.tipo_item || '').trim().toUpperCase() || 'PRODUTO',
+        categoria: String(s.categoria || '').trim(),
         unidade: String(s.unidade || '').trim(),
         quantidade_base: parseNumeroBR(s.quantidade)
       });
@@ -195,6 +197,8 @@ function listarProducao() {
             if (quantidade <= 0) return null;
             return {
               nome_saida: s.nome_saida || prod.nome_produto || 'Saida',
+              tipo_item: s.tipo_item || 'PRODUTO',
+              categoria: s.categoria || '',
               unidade: s.unidade || '',
               quantidade
             };
@@ -1603,21 +1607,28 @@ function agruparSaidasReceitaParaEstoque(saidas) {
 
   (Array.isArray(saidas) ? saidas : []).forEach(s => {
     const nomeSaida = String(s.nome_saida || '').trim();
+    const tipoItem = normalizarTipoSaidaProducao(s.tipo_item);
+    const categoria = normalizarCategoriaSaidaProducao(tipoItem, s.categoria);
     const unidade = String(s.unidade || '').trim();
     const quantidade = parseNumeroBR(s.quantidade);
 
     if (!nomeSaida || quantidade <= 0) return;
 
-    const chave = `${normalizarTextoProducao(nomeSaida)}||${normalizarTextoProducao(unidade)}`;
+    const chave = `${normalizarTextoProducao(tipoItem)}||${normalizarTextoProducao(categoria)}||${normalizarTextoProducao(nomeSaida)}||${normalizarTextoProducao(unidade)}`;
     if (!map[chave]) {
       map[chave] = {
         nome_saida: nomeSaida,
+        tipo_item: tipoItem,
+        categoria,
         unidade,
         quantidade: 0
       };
     }
 
     map[chave].quantidade += quantidade;
+    if (!map[chave].categoria && categoria) {
+      map[chave].categoria = categoria;
+    }
     if (!map[chave].unidade && unidade) {
       map[chave].unidade = unidade;
     }
@@ -1625,21 +1636,78 @@ function agruparSaidasReceitaParaEstoque(saidas) {
 
   return Object.values(map).map(i => ({
     nome_saida: i.nome_saida,
+    tipo_item: i.tipo_item,
+    categoria: i.categoria,
     unidade: i.unidade,
     quantidade: parseNumeroBR(i.quantidade)
   }));
 }
 
-function localizarItemEstoqueProdutoPorSaida(estoqueRows, nomeSaida, unidadeSaida) {
+function normalizarTipoSaidaProducao(tipo) {
+  const t = String(tipo || '').trim().toUpperCase();
+  return t || 'PRODUTO';
+}
+
+function normalizarCategoriaSaidaProducao(tipo, categoria) {
+  const tipoNorm = normalizarTipoSaidaProducao(tipo);
+  const categoriaInformada = String(categoria || '').trim();
+
+  let validacoes = null;
+  try {
+    validacoes = typeof obterValidacoes === 'function' ? obterValidacoes() : null;
+  } catch (error) {
+    validacoes = null;
+  }
+
+  const mapaCategorias = validacoes?.categoriasPorTipo || {};
+  const categoriasTipo = Array.isArray(mapaCategorias[tipoNorm]) ? mapaCategorias[tipoNorm] : [];
+
+  if (categoriaInformada) {
+    if (categoriasTipo.length > 0) {
+      const encontrada = categoriasTipo.find(v =>
+        String(v || '').trim().toUpperCase() === categoriaInformada.toUpperCase()
+      );
+      return encontrada || '';
+    }
+
+    const categoriasGerais = Array.isArray(validacoes?.categorias) ? validacoes.categorias : [];
+    if (categoriasGerais.length > 0) {
+      const encontrada = categoriasGerais.find(v =>
+        String(v || '').trim().toUpperCase() === categoriaInformada.toUpperCase()
+      );
+      return encontrada || '';
+    }
+
+    return categoriaInformada;
+  }
+
+  if (categoriasTipo.length > 0) {
+    if (tipoNorm === 'PRODUTO') {
+      const peca = categoriasTipo.find(v => String(v || '').trim().toUpperCase() === 'PECA');
+      if (peca) return peca;
+    }
+    return String(categoriasTipo[0] || '').trim();
+  }
+
+  return tipoNorm === 'PRODUTO' ? 'PECA' : '';
+}
+
+function localizarItemEstoqueProdutoPorSaida(estoqueRows, nomeSaida, unidadeSaida, tipoSaida, categoriaSaida) {
+  const tipoNorm = normalizarTextoProducao(normalizarTipoSaidaProducao(tipoSaida));
+  const categoriaNorm = normalizarTextoProducao(normalizarCategoriaSaidaProducao(tipoSaida, categoriaSaida));
   const nomeNorm = normalizarTextoProducao(nomeSaida);
   const unidadeNorm = normalizarTextoProducao(unidadeSaida);
   const lista = Array.isArray(estoqueRows) ? estoqueRows : [];
 
-  const candidatos = lista.filter(i =>
+  let candidatos = lista.filter(i =>
     String(i.ativo).toLowerCase() === 'true' &&
-    normalizarTextoProducao(i.tipo) === 'produto' &&
+    normalizarTextoProducao(i.tipo) === tipoNorm &&
     normalizarTextoProducao(i.item) === nomeNorm
   );
+
+  if (categoriaNorm) {
+    candidatos = candidatos.filter(i => normalizarTextoProducao(i.categoria) === categoriaNorm);
+  }
 
   if (candidatos.length === 0) return null;
   if (!unidadeNorm) return candidatos[0];
@@ -1649,7 +1717,17 @@ function localizarItemEstoqueProdutoPorSaida(estoqueRows, nomeSaida, unidadeSaid
 }
 
 function obterCustoUnitarioEstoqueItem(item) {
-  return parseNumeroBR(item?.custo_unitario || item?.valor_unit);
+  const tipo = String(item?.tipo || '').trim().toUpperCase();
+  const custoBruto = String(item?.custo_unitario ?? '').trim();
+  const custo = parseNumeroBR(custoBruto);
+
+  if (tipo === 'PRODUTO') {
+    if (custoBruto === '') return 0;
+    return custo;
+  }
+
+  if (custoBruto !== '') return custo;
+  return parseNumeroBR(item?.valor_unit);
 }
 
 function calcularCustoUnitarioSaidas(totalConsumo, saidasAgrupadas) {
@@ -1673,12 +1751,20 @@ function lancarSaidasProducaoNoEstoque(producaoId, saidasAgrupadas, estoqueRows,
 
   saidas.forEach(s => {
     const nomeSaida = String(s.nome_saida || '').trim();
+    const tipoSaida = normalizarTipoSaidaProducao(s.tipo_item);
+    const categoriaSaida = normalizarCategoriaSaidaProducao(tipoSaida, s.categoria);
     const quantidade = parseNumeroBR(s.quantidade);
     const unidade = String(s.unidade || 'UN').trim() || 'UN';
 
     if (!nomeSaida || quantidade <= 0) return;
 
-    const itemExistente = localizarItemEstoqueProdutoPorSaida(linhasEstoque, nomeSaida, unidade);
+    const itemExistente = localizarItemEstoqueProdutoPorSaida(
+      linhasEstoque,
+      nomeSaida,
+      unidade,
+      tipoSaida,
+      categoriaSaida
+    );
     let estoqueId = '';
     let novoSaldo = quantidade;
     let custoUnitarioFinal = custoSaida;
@@ -1686,7 +1772,7 @@ function lancarSaidasProducaoNoEstoque(producaoId, saidasAgrupadas, estoqueRows,
     if (!itemExistente) {
       const novoItem = {
         ID: gerarId('EST'),
-        tipo: 'PRODUTO',
+        tipo: tipoSaida,
         item: nomeSaida,
         unidade,
         valor_unit: custoSaida,
@@ -1698,7 +1784,7 @@ function lancarSaidasProducaoNoEstoque(producaoId, saidasAgrupadas, estoqueRows,
         comprimento_cm: '',
         largura_cm: '',
         espessura_cm: '',
-        categoria: 'PECA',
+        categoria: categoriaSaida,
         fornecedor: '',
         pago_por: '',
         potencia: '',
@@ -1739,6 +1825,7 @@ function lancarSaidasProducaoNoEstoque(producaoId, saidasAgrupadas, estoqueRows,
           quantidade: novoSaldo,
           custo_unitario: custoUnitarioFinal,
           valor_unit: custoUnitarioFinal,
+          categoria: itemExistente.categoria || categoriaSaida,
           origem_tipo: 'PRODUCAO',
           origem_id: producaoId,
           op_id: producaoId
@@ -1749,6 +1836,9 @@ function lancarSaidasProducaoNoEstoque(producaoId, saidasAgrupadas, estoqueRows,
       itemExistente.quantidade = novoSaldo;
       itemExistente.custo_unitario = custoUnitarioFinal;
       itemExistente.valor_unit = custoUnitarioFinal;
+      if (!String(itemExistente.categoria || '').trim() && categoriaSaida) {
+        itemExistente.categoria = categoriaSaida;
+      }
       mapaAtivos[itemExistente.ID] = itemExistente;
       estoqueId = itemExistente.ID;
 

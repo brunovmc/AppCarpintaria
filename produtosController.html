@@ -382,9 +382,18 @@
 
       for (const s of saidas) {
         const nomeSaida = String(s.nome_saida || '').trim();
+        const tipo = String(s.tipo_item || '').trim().toUpperCase();
+        const categoria = String(s.categoria || '').trim();
         const unidade = String(s.unidade || '').trim();
         const qtd = parseNumeroInput(s.quantidade);
         if (!nomeSaida) return 'Informe o nome da saida';
+        if (!tipo) return 'Informe o tipo da saida';
+        if (!isTipoValidacao(tipo)) {
+          return 'Tipo da saida invalido';
+        }
+        if (!categoria || !isCategoriaValidaParaTipo(tipo, categoria)) {
+          return 'Categoria da saida invalida';
+        }
         if (!unidade || !isUnidadeValidacao(unidade)) {
           return 'Unidade da saida invalida';
         }
