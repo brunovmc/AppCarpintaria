@@ -143,6 +143,22 @@ function listarProducao() {
       receitasMap[r.receita_id] = r;
     });
 
+  const saidasReceitaSheet = getDataSpreadsheet().getSheetByName(ABA_PRODUTOS_RECEITAS_SAIDAS);
+  const saidasReceitaRows = saidasReceitaSheet ? rowsToObjects(saidasReceitaSheet) : [];
+  const saidasReceitaMap = {};
+  saidasReceitaRows
+    .filter(i => String(i.ativo).toLowerCase() === 'true')
+    .forEach(s => {
+      const receitaId = String(s.receita_id || '').trim();
+      if (!receitaId) return;
+      if (!saidasReceitaMap[receitaId]) saidasReceitaMap[receitaId] = [];
+      saidasReceitaMap[receitaId].push({
+        nome_saida: String(s.nome_saida || '').trim(),
+        unidade: String(s.unidade || '').trim(),
+        quantidade_base: parseNumeroBR(s.quantidade)
+      });
+    });
+
   const etapasSheet = getDataSpreadsheet().getSheetByName(ABA_PRODUCAO_ETAPAS);
   const etapasRows = etapasSheet ? rowsToObjects(etapasSheet) : [];
   const etapasMap = {};
@@ -168,12 +184,35 @@ function listarProducao() {
     .map(i => {
       const prod = produtosMap[i.produto_id] || {};
       const receita = receitasMap[i.receita_id] || {};
+      const qtdPlanejada = parseNumeroBR(i.qtd_planejada);
+      const saidasBaseReceita = Array.isArray(saidasReceitaMap[i.receita_id])
+        ? saidasReceitaMap[i.receita_id]
+        : [];
+      const saidasPrevistas = agruparSaidasReceitaParaEstoque(
+        saidasBaseReceita
+          .map(s => {
+            const quantidade = parseNumeroBR(s.quantidade_base) * qtdPlanejada;
+            if (quantidade <= 0) return null;
+            return {
+              nome_saida: s.nome_saida || prod.nome_produto || 'Saida',
+              unidade: s.unidade || '',
+              quantidade
+            };
+          })
+          .filter(v => !!v)
+      );
+      const totalSaidasPrevistas = saidasPrevistas
+        .reduce((acc, s) => acc + parseNumeroBR(s.quantidade), 0);
+
       return {
         ...i,
         nome_produto: prod.nome_produto || '',
         unidade_produto: prod.unidade_produto || '',
         receita_nome: receita.nome_receita || '',
-        qtd_planejada: parseNumeroBR(i.qtd_planejada),
+        qtd_planejada: qtdPlanejada,
+        saidas_previstas: saidasPrevistas,
+        saidas_previstas_tipos: saidasPrevistas.length,
+        saidas_previstas_total: parseNumeroBR(totalSaidasPrevistas),
         estoque_atualizado: String(i.estoque_atualizado).toLowerCase() === 'true',
         criado_em: i.criado_em
           ? formatDateSafe(i.criado_em, 'yyyy-MM-dd HH:mm')

@@ -55,6 +55,15 @@
       return n.toFixed(2);
     }
 
+    function formatQuantidadeResumo(valor) {
+      const n = Number(valor || 0);
+      if (!isFinite(n)) return '0';
+      if (Math.abs(n - Math.round(n)) < 0.000001) {
+        return String(Math.round(n));
+      }
+      return n.toFixed(2);
+    }
+
     function parseNumeroInput(valor) {
       const s = String(valor ?? '').trim();
       if (s === '') return 0;
@@ -404,12 +413,20 @@
       const concluido = status === 'Concluido' || status === 'Concluida';
       const estoqueAtualizado = !!i.estoque_atualizado;
       const podeAtualizarEstoque = concluido && !estoqueAtualizado;
+      const totalSaidasPrevistas = Number(i.saidas_previstas_total || 0);
+      const tiposSaida = Number(
+        i.saidas_previstas_tipos || (Array.isArray(i.saidas_previstas) ? i.saidas_previstas.length : 0)
+      );
+      const resumoSaidas = totalSaidasPrevistas > 0
+        ? `${formatQuantidadeResumo(totalSaidasPrevistas)} saidas previstas${tiposSaida > 1 ? ` (${tiposSaida} tipos)` : ''}`
+        : 'Sem saidas previstas';
 
       div.innerHTML = `
         <div class="card-resumo">
           <strong>${nome}</strong><br>
           ${i.status || ''}<br>
-          ${i.qtd_planejada || 0} ${unidade}
+          ${i.qtd_planejada || 0} ${unidade}<br>
+          ${resumoSaidas}
         </div>
 
         <button class="ver-mais">Ver mais</button>
