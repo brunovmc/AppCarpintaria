@@ -66,6 +66,19 @@
       return isNaN(n) ? 0 : n;
     }
 
+    function escapeHtml(valor) {
+      return String(valor ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    function escapeAttr(valor) {
+      return escapeHtml(valor);
+    }
+
     function proximoFrame(fn) {
       let executado = false;
       const run = () => {
@@ -140,7 +153,7 @@
       f.parcelasDetalheLista.innerHTML = lista.map((p, idx) => `
         <div class="parcela-detalhe-linha">
           <span class="parcela-detalhe-num">#${idx + 1}</span>
-          <input type="date" data-campo="data" value="${String(p.data || '')}">
+          <input type="date" data-campo="data" value="${escapeAttr(String(p.data || ''))}">
           <input type="number" data-campo="valor" min="0" step="0.01" value="${Number(p.valor || 0).toFixed(2)}">
         </div>
       `).join('');
@@ -342,37 +355,46 @@
       if (lista.length === 0) return '<p>Nenhuma parcela gerada.</p>';
       return lista.map(p => `
         <div class="linha-material">
-          <span>Parcela ${Number(p.parcela_numero || 0)}/${Number(p.parcelas_total || 0)} - ${p.data_prevista || '-'}</span>
-          <span>${p.status || 'PENDENTE'} | ${formatarMoeda(p.valor_pago || 0)} / ${formatarMoeda(p.valor_previsto || 0)}</span>
+          <span>Parcela ${Number(p.parcela_numero || 0)}/${Number(p.parcelas_total || 0)} - ${escapeHtml(p.data_prevista || '-')}</span>
+          <span>${escapeHtml(p.status || 'PENDENTE')} | ${formatarMoeda(p.valor_pago || 0)} / ${formatarMoeda(p.valor_previsto || 0)}</span>
         </div>
       `).join('');
     }
 
     function montarDetalhesCard(v) {
       const podeReceber = Number(v.total_pendente || 0) > 0.009;
+      const idJs = JSON.stringify(String(v.ID || ''));
       const estoqueLabel = v.estoque_baixado
         ? `SIM (${v.data_baixa_estoque || '-'})`
         : 'NAO';
+      const produto = escapeHtml(v.item || '-');
+      const unidade = escapeHtml(v.unidade || '');
+      const recebidoPor = escapeHtml(v.recebido_por || '-');
+      const dataVenda = escapeHtml(v.data_venda || '-');
+      const forma = escapeHtml(v.forma_pagamento || '-');
+      const financeiro = escapeHtml(String(v.status_pagamento || 'PENDENTE').toUpperCase());
+      const estoqueLabelSafe = escapeHtml(estoqueLabel);
+      const observacao = escapeHtml(v.observacao || '-');
       return `
-        <p><b>Produto:</b> ${v.item || '-'}</p>
-        <p><b>Quantidade:</b> ${Number(v.quantidade || 0).toFixed(2)} ${v.unidade || ''}</p>
+        <p><b>Produto:</b> ${produto}</p>
+        <p><b>Quantidade:</b> ${Number(v.quantidade || 0).toFixed(2)} ${unidade}</p>
         <p><b>Valor unitario:</b> ${formatarMoeda(v.valor_unit_venda || 0)}</p>
         <p><b>Valor total:</b> ${formatarMoeda(v.valor_total_venda || 0)}</p>
-        <p><b>Recebido por:</b> ${v.recebido_por || '-'}</p>
-        <p><b>Data de venda:</b> ${v.data_venda || '-'}</p>
-        <p><b>Forma:</b> ${v.forma_pagamento || '-'}</p>
+        <p><b>Recebido por:</b> ${recebidoPor}</p>
+        <p><b>Data de venda:</b> ${dataVenda}</p>
+        <p><b>Forma:</b> ${forma}</p>
         <p><b>Parcelas:</b> ${Number(v.parcelas || 1)}</p>
-        <p><b>Financeiro:</b> ${String(v.status_pagamento || 'PENDENTE').toUpperCase()} | Recebido ${formatarMoeda(v.total_pago || 0)} | Pendente ${formatarMoeda(v.total_pendente || 0)}</p>
-        <p><b>Estoque baixado:</b> ${estoqueLabel}</p>
-        <p><b>Observacao:</b> ${v.observacao || '-'}</p>
+        <p><b>Financeiro:</b> ${financeiro} | Recebido ${formatarMoeda(v.total_pago || 0)} | Pendente ${formatarMoeda(v.total_pendente || 0)}</p>
+        <p><b>Estoque baixado:</b> ${estoqueLabelSafe}</p>
+        <p><b>Observacao:</b> ${observacao}</p>
         <div class="bloco">
           <p><b>Parcelas</b></p>
           ${renderParcelasDetalhe(v.parcelas_detalhe)}
         </div>
         <div class="acoes">
-          ${podeReceber ? `<button onclick="VendasController.registrarRecebimento('${v.ID}')">Registrar recebimento</button>` : ''}
-          <button onclick="VendasController.editar('${v.ID}')">Editar</button>
-          <button onclick="VendasController.excluir('${v.ID}')">Excluir</button>
+          ${podeReceber ? `<button onclick='VendasController.registrarRecebimento(${idJs})'>Registrar recebimento</button>` : ''}
+          <button onclick='VendasController.editar(${idJs})'>Editar</button>
+          <button onclick='VendasController.excluir(${idJs})'>Excluir</button>
         </div>
       `;
     }
@@ -381,12 +403,15 @@
       const div = document.createElement('div');
       div.className = 'card';
       div.dataset.id = v.ID;
+      const item = escapeHtml(v.item || '-');
+      const unidade = escapeHtml(v.unidade || '');
+      const status = escapeHtml(String(v.status_pagamento || 'PENDENTE').toUpperCase());
       div.innerHTML = `
         <div class="card-resumo">
-          <strong>${v.item || '-'}</strong><br>
-          ${Number(v.quantidade || 0).toFixed(2)} ${v.unidade || ''}<br>
+          <strong>${item}</strong><br>
+          ${Number(v.quantidade || 0).toFixed(2)} ${unidade}<br>
           ${formatarMoeda(v.valor_total_venda || 0)}<br>
-          ${String(v.status_pagamento || 'PENDENTE').toUpperCase()}
+          ${status}
         </div>
         <button class="ver-mais">Ver mais</button>
       `;

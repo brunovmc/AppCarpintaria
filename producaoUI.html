@@ -71,6 +71,19 @@
       return isNaN(n) ? 0 : n;
     }
 
+    function escapeHtml(valor) {
+      return String(valor ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    function escapeAttr(valor) {
+      return escapeHtml(valor);
+    }
+
     function proximoFrame(fn) {
       let executado = false;
       const run = () => {
@@ -111,7 +124,7 @@
         const tipo = String(i.tipo || '').toUpperCase();
         const saldo = Number(i.quantidade || 0).toFixed(2);
         const selected = id === String(selecionadoId || '') ? 'selected' : '';
-        return `<option value="${id}" ${selected}>${nome} (${tipo}) - Saldo ${saldo}</option>`;
+        return `<option value="${escapeAttr(id)}" ${selected}>${escapeHtml(nome)} (${escapeHtml(tipo)}) - Saldo ${saldo}</option>`;
       }).join('');
       return (incluirVazio ? '<option value="">Selecione no estoque</option>' : '') + opts;
     }
@@ -232,8 +245,8 @@
 
       const linhas = itens.map(i => `
         <div class="linha-material">
-          <span>${i.item || i.estoque_id}</span>
-          <span>${Number(i.quantidade || 0).toFixed(2)} ${i.unidade || ''}</span>
+          <span>${escapeHtml(i.item || i.estoque_id)}</span>
+          <span>${Number(i.quantidade || 0).toFixed(2)} ${escapeHtml(i.unidade || '')}</span>
         </div>
       `);
 
@@ -243,7 +256,7 @@
     function renderFormNovoItemManual(producaoId) {
       const tipos = (Array.isArray(tiposValidacao) ? tiposValidacao : []);
       const optsTipo = tipos
-        .map(t => `<option value="${t}">${t}</option>`)
+        .map(t => `<option value="${escapeAttr(t)}">${escapeHtml(t)}</option>`)
         .join('');
 
       const optsEstoque = renderOpcoesEstoque(estoqueOpcoes, '', true);
@@ -252,16 +265,16 @@
         <div class="receita-card">
           <div class="comp-meta"><b>Adicionar item manual na OP</b></div>
           <div class="linha-add-destino">
-            <select id="manualTipo_${producaoId}">
+            <select id="manualTipo_${escapeAttr(producaoId)}">
               <option value="">Tipo</option>
               ${optsTipo}
             </select>
-            <input id="manualNome_${producaoId}" placeholder="Nome do item">
-            <input id="manualQtd_${producaoId}" type="number" step="0.01" min="0" placeholder="Qtd prevista">
-            <select id="manualEstoque_${producaoId}">
+            <input id="manualNome_${escapeAttr(producaoId)}" placeholder="Nome do item">
+            <input id="manualQtd_${escapeAttr(producaoId)}" type="number" step="0.01" min="0" placeholder="Qtd prevista">
+            <select id="manualEstoque_${escapeAttr(producaoId)}">
               ${optsEstoque}
             </select>
-            <button class="btn-add-item-manual" data-producao-id="${producaoId}">Adicionar</button>
+            <button class="btn-add-item-manual" data-producao-id="${escapeAttr(producaoId)}">Adicionar</button>
           </div>
         </div>
       `;
@@ -281,7 +294,7 @@
         const ok = !!v.saldo_suficiente;
         const vinculado = !!v.vinculado;
         const statusSaldo = vinculado ? (ok ? 'OK' : 'FALTA') : '-';
-        const origem = v.origem_item ? `Origem: ${v.origem_item}` : 'Origem: -';
+        const origem = v.origem_item ? `Origem: ${escapeHtml(v.origem_item)}` : 'Origem: -';
 
         let candidatos = getCandidatosVinculo(v);
         if (v.estoque_id && !candidatos.some(i => String(i.ID) === String(v.estoque_id))) {
@@ -293,18 +306,18 @@
         const opcoes = renderOpcoesEstoque(candidatos, v.estoque_id, true);
 
         return `
-          <div class="receita-card linha-vinculo" data-producao-id="${producaoId}" data-vinculo-id="${v.id}">
-            <div><strong>${v.item || v.origem_item || v.id}</strong></div>
-            <div class="comp-meta">Tipo: ${v.tipo_item || '-'} | Status: ${v.status || '-'}</div>
+          <div class="receita-card linha-vinculo" data-producao-id="${escapeAttr(producaoId)}" data-vinculo-id="${escapeAttr(v.id)}">
+            <div><strong>${escapeHtml(v.item || v.origem_item || v.id)}</strong></div>
+            <div class="comp-meta">Tipo: ${escapeHtml(v.tipo_item || '-')} | Status: ${escapeHtml(v.status || '-')}</div>
             <div class="comp-meta">
-              Prev: ${prevista} ${v.unidade || ''} | Cons: ${consumida} | Pend: ${pendente} | Saldo: ${saldo} (${statusSaldo})
+              Prev: ${prevista} ${escapeHtml(v.unidade || '')} | Cons: ${consumida} | Pend: ${pendente} | Saldo: ${saldo} (${escapeHtml(statusSaldo)})
             </div>
             <div class="comp-meta">${origem}</div>
             <div class="linha-add-destino">
               <select class="vinculo-estoque-select">
                 ${opcoes}
               </select>
-              <button class="btn-vincular-estoque" data-producao-id="${producaoId}" data-vinculo-id="${v.id}">Salvar vinculo</button>
+              <button class="btn-vincular-estoque" data-producao-id="${escapeAttr(producaoId)}" data-vinculo-id="${escapeAttr(v.id)}">Salvar vinculo</button>
             </div>
           </div>
         `;
@@ -323,19 +336,19 @@
         const quantidade = Number(l.quantidade || 0).toFixed(2);
         const custoUnit = Number(l.custo_unitario || 0).toFixed(4);
         const custoTotal = Number(l.custo_total || 0).toFixed(2);
-        const inputId = `custoLote_${l.id}`;
+        const inputId = `custoLote_${String(l.id || '').replace(/[^a-zA-Z0-9_-]/g, '')}`;
 
         return `
           <div class="receita-card">
-            <div><strong>${l.nome_saida || l.estoque_id || l.id}</strong></div>
+            <div><strong>${escapeHtml(l.nome_saida || l.estoque_id || l.id)}</strong></div>
             <div class="comp-meta">
-              Qtd: ${quantidade} ${l.unidade || ''} | Custo total lote: R$ ${custoTotal}
+              Qtd: ${quantidade} ${escapeHtml(l.unidade || '')} | Custo total lote: R$ ${custoTotal}
             </div>
-            <div class="comp-meta">Criado em: ${l.criado_em || '-'}</div>
+            <div class="comp-meta">Criado em: ${escapeHtml(l.criado_em || '-')}</div>
             ${permiteEdicao ? `
               <div class="linha-add-destino">
-                <input id="${inputId}" type="number" step="0.01" min="0" value="${custoUnit}">
-                <button class="btn-salvar-custo-lote" data-producao-id="${producaoId}" data-lote-id="${l.id}">
+                <input id="${escapeAttr(inputId)}" type="number" step="0.01" min="0" value="${escapeAttr(custoUnit)}">
+                <button class="btn-salvar-custo-lote" data-producao-id="${escapeAttr(producaoId)}" data-lote-id="${escapeAttr(l.id)}">
                   Salvar custo
                 </button>
               </div>
@@ -369,13 +382,13 @@
             <div class="linha-etapa">
               <input type="checkbox" disabled ${checked ? 'checked' : ''}>
               <input
-                id="editEtapa_${producaoId}_${et.id}"
+                id="editEtapa_${escapeAttr(producaoId)}_${escapeAttr(et.id)}"
                 class="input-etapa-edit"
-                value="${et.nome_etapa || ''}"
+                value="${escapeAttr(et.nome_etapa || '')}"
               >
               <div class="etapa-acoes">
-                <button class="btn-etapa-salvar" data-producao-id="${producaoId}" data-etapa-id="${et.id}">Salvar</button>
-                <button class="btn-etapa-cancelar" data-producao-id="${producaoId}" data-etapa-id="${et.id}">Cancelar</button>
+                <button class="btn-etapa-salvar" data-producao-id="${escapeAttr(producaoId)}" data-etapa-id="${escapeAttr(et.id)}">Salvar</button>
+                <button class="btn-etapa-cancelar" data-producao-id="${escapeAttr(producaoId)}" data-etapa-id="${escapeAttr(et.id)}">Cancelar</button>
               </div>
             </div>
           `;
@@ -386,15 +399,15 @@
             <input
               type="checkbox"
               class="check-etapa"
-              data-producao-id="${producaoId}"
-              data-etapa-id="${et.id}"
+              data-producao-id="${escapeAttr(producaoId)}"
+              data-etapa-id="${escapeAttr(et.id)}"
               ${checked ? 'checked' : ''}
             >
-            <span class="etapa-nome">${et.nome_etapa || ''}</span>
+            <span class="etapa-nome">${escapeHtml(et.nome_etapa || '')}</span>
             <div class="etapa-acoes">
-              <button class="btn-etapa-subir" data-producao-id="${producaoId}" data-etapa-id="${et.id}" aria-label="Mover etapa para cima" ${podeSubir ? '' : 'disabled'}>↑</button>
-              <button class="btn-etapa-editar" data-producao-id="${producaoId}" data-etapa-id="${et.id}">Editar</button>
-              <button class="btn-etapa-deletar" data-producao-id="${producaoId}" data-etapa-id="${et.id}">Excluir</button>
+              <button class="btn-etapa-subir" data-producao-id="${escapeAttr(producaoId)}" data-etapa-id="${escapeAttr(et.id)}" aria-label="Mover etapa para cima" ${podeSubir ? '' : 'disabled'}>↑</button>
+              <button class="btn-etapa-editar" data-producao-id="${escapeAttr(producaoId)}" data-etapa-id="${escapeAttr(et.id)}">Editar</button>
+              <button class="btn-etapa-deletar" data-producao-id="${escapeAttr(producaoId)}" data-etapa-id="${escapeAttr(et.id)}">Excluir</button>
             </div>
           </div>
         `;
@@ -420,13 +433,18 @@
       const resumoSaidas = totalSaidasPrevistas > 0
         ? `${formatQuantidadeResumo(totalSaidasPrevistas)} saidas previstas${tiposSaida > 1 ? ` (${tiposSaida} tipos)` : ''}`
         : 'Sem saidas previstas';
+      const nomeLabel = escapeHtml(nome);
+      const statusLabel = escapeHtml(i.status || '');
+      const qtdPlanejada = escapeHtml(i.qtd_planejada || 0);
+      const unidadeLabel = escapeHtml(unidade);
+      const resumoSaidasLabel = escapeHtml(resumoSaidas);
 
       div.innerHTML = `
         <div class="card-resumo">
-          <strong>${nome}</strong><br>
-          ${i.status || ''}<br>
-          ${i.qtd_planejada || 0} ${unidade}<br>
-          ${resumoSaidas}
+          <strong>${nomeLabel}</strong><br>
+          ${statusLabel}<br>
+          ${qtdPlanejada} ${unidadeLabel}<br>
+          ${resumoSaidasLabel}
         </div>
 
         <button class="ver-mais">Ver mais</button>
@@ -442,20 +460,28 @@
       const estoqueAtualizado = !!i.estoque_atualizado;
       const podeAtualizarEstoque = concluido && !estoqueAtualizado;
       const labelEstoque = estoqueAtualizado ? 'Estoque atualizado' : 'Atualizar estoque';
+      const idJs = JSON.stringify(String(i.producao_id || ''));
       const saidasHtml = !estoqueAtualizado
         ? '<p>As saidas serao geradas ao atualizar o estoque.</p>'
         : (Array.isArray(i.saidasLotes)
           ? renderSaidasLotes(i.saidasLotes, i.producao_id, true)
           : '<p>Carregando saidas geradas...</p>');
+      const produtoLabel = escapeHtml(i.nome_produto || '-');
+      const receitaLabel = escapeHtml(i.receita_nome || '-');
+      const inicioLabel = escapeHtml(i.data_inicio || '-');
+      const previstoLabel = escapeHtml(i.data_prevista_termino || '-');
+      const observacaoLabel = escapeHtml(i.observacao || '-');
+      const dataEstoqueAtualizadoLabel = escapeHtml(i.data_estoque_atualizado || '-');
+      const labelEstoqueSafe = escapeHtml(labelEstoque);
 
       return `
-        <p><b>Produto:</b> ${i.nome_produto || '-'}</p>
-        <p><b>Receita:</b> ${i.receita_nome || '-'}</p>
-        <p><b>Inicio:</b> ${i.data_inicio || '-'}</p>
-        <p><b>Previsto:</b> ${i.data_prevista_termino || '-'}</p>
+        <p><b>Produto:</b> ${produtoLabel}</p>
+        <p><b>Receita:</b> ${receitaLabel}</p>
+        <p><b>Inicio:</b> ${inicioLabel}</p>
+        <p><b>Previsto:</b> ${previstoLabel}</p>
         <p><b>Custo previsto:</b> R$ ${custoPrevisto}</p>
-        <p><b>Observacao:</b> ${i.observacao || '-'}</p>
-        ${estoqueAtualizado ? `<p><b>Estoque atualizado:</b> ${i.data_estoque_atualizado || '-'}</p>` : ''}
+        <p><b>Observacao:</b> ${observacaoLabel}</p>
+        ${estoqueAtualizado ? `<p><b>Estoque atualizado:</b> ${dataEstoqueAtualizadoLabel}</p>` : ''}
 
         <div class="bloco">
           <p><b>Materiais previstos</b></p>
@@ -476,18 +502,18 @@
           <p><b>Checklist</b></p>
           ${renderChecklist(i.etapas || [], i.producao_id)}
           <div class="linha-etapa-add">
-            <input id="novaEtapa_${i.producao_id}" placeholder="Nova etapa">
-            <button class="btn-add-etapa" data-producao-id="${i.producao_id}">Adicionar etapa</button>
+            <input id="novaEtapa_${escapeAttr(i.producao_id)}" placeholder="Nova etapa">
+            <button class="btn-add-etapa" data-producao-id="${escapeAttr(i.producao_id)}">Adicionar etapa</button>
           </div>
         </div>
 
         <div class="acoes">
           <button
             ${podeAtualizarEstoque ? '' : 'disabled'}
-            onclick="ProducaoController.abrirAtualizarEstoque('${i.producao_id}')"
-          >${labelEstoque}</button>
-          <button onclick="ProducaoController.editar('${i.producao_id}')">Editar</button>
-          <button onclick="ProducaoController.excluir('${i.producao_id}')">Excluir</button>
+            onclick='ProducaoController.abrirAtualizarEstoque(${idJs})'
+          >${labelEstoqueSafe}</button>
+          <button onclick='ProducaoController.editar(${idJs})'>Editar</button>
+          <button onclick='ProducaoController.excluir(${idJs})'>Excluir</button>
         </div>
       `;
     }
@@ -904,3 +930,4 @@
 
   })();
 </script>
+

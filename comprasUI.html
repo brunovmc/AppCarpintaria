@@ -138,6 +138,19 @@
       return `R$ ${seguro.toFixed(2)}`;
     }
 
+    function escapeHtml(valor) {
+      return String(valor ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    function escapeAttr(valor) {
+      return escapeHtml(valor);
+    }
+
     function getHojeISO() {
       const d = new Date();
       const yyyy = d.getFullYear();
@@ -287,7 +300,7 @@
       f.parcelas_detalhe_lista.innerHTML = lista.map((p, idx) => `
         <div class="parcela-detalhe-linha">
           <span class="parcela-detalhe-num">#${idx + 1}</span>
-          <input type="date" data-campo="data" value="${String(p.data || '')}">
+          <input type="date" data-campo="data" value="${escapeAttr(String(p.data || ''))}">
           <input type="number" data-campo="valor" min="0" step="0.01" value="${Number(p.valor || 0).toFixed(2)}">
         </div>
       `).join('');
@@ -737,14 +750,23 @@
       const isMadeira = String(i.tipo || '').toUpperCase() === 'MADEIRA';
       const status = jaAdicionada ? 'Ja adicionada ao estoque' : 'Pendente para estoque';
       const valorTotal = Number(i.total_previsto || (Number(i.quantidade || 0) * Number(i.valor_unit || 0)));
+      const itemLabel = escapeHtml(i.item || '-');
+      const tipoLabel = escapeHtml(i.tipo || '-');
+      const categoriaLabel = escapeHtml(i.categoria || '-');
+      const quantidadeLabel = escapeHtml(i.quantidade || 0);
+      const unidadeLabel = escapeHtml(i.unidade || '');
+      const comprimentoLabel = escapeHtml(i.comprimento_cm || '-');
+      const larguraLabel = escapeHtml(i.largura_cm || '-');
+      const espessuraLabel = escapeHtml(i.espessura_cm || '-');
+      const statusLabel = escapeHtml(status);
 
       div.innerHTML = `
         <div class="card-resumo">
-          <strong>${i.item}</strong><br>
-          ${i.tipo} > ${i.categoria || '-'}<br>
-          ${i.quantidade || 0} ${i.unidade || ''}
-          ${isMadeira ? `<br><span>(${i.comprimento_cm || '-'} x ${i.largura_cm || '-'} x ${i.espessura_cm || '-'}) cm</span>` : ''}
-          <br><span>${status}</span>
+          <strong>${itemLabel}</strong><br>
+          ${tipoLabel} > ${categoriaLabel}<br>
+          ${quantidadeLabel} ${unidadeLabel}
+          ${isMadeira ? `<br><span>(${comprimentoLabel} x ${larguraLabel} x ${espessuraLabel}) cm</span>` : ''}
+          <br><span>${statusLabel}</span>
           <div class="card-resumo-valor">Valor: ${formatarMoeda(valorTotal)}</div>
         </div>
 
@@ -760,47 +782,64 @@
       const status = jaAdicionada
         ? `Ja adicionada ao estoque${i.estoque_id ? ` (ID: ${i.estoque_id})` : ''}`
         : 'Pendente para estoque';
+      const idJs = JSON.stringify(String(i.ID || ''));
       const botaoAdicionarAoEstoque = jaAdicionada
         ? ''
-        : `<button onclick="ComprasController.adicionarAoEstoque('${i.ID}')">Adicionar ao estoque</button>`;
+        : `<button onclick='ComprasController.adicionarAoEstoque(${idJs})'>Adicionar ao estoque</button>`;
       const statusPagamento = String(i.status_pagamento || 'PENDENTE').toUpperCase();
       const totalPrevisto = Number(i.total_previsto || 0);
       const totalPago = Number(i.total_pago || 0);
       const totalPendente = Number(i.total_pendente || 0);
       const pagamentoResumo = `${statusPagamento} | Pago: ${formatarMoeda(totalPago)} | Pendente: ${formatarMoeda(totalPendente)} | Previsto: ${formatarMoeda(totalPrevisto)}`;
       const botaoPagamento = totalPendente > 0.009
-        ? `<button onclick="ComprasController.registrarPagamento('${i.ID}')">Registrar pagamento</button>`
+        ? `<button onclick='ComprasController.registrarPagamento(${idJs})'>Registrar pagamento</button>`
         : '';
+      const fornecedor = escapeHtml(i.fornecedor || '-');
+      const pagoPor = escapeHtml(i.pago_por || '-');
+      const statusLabel = escapeHtml(status);
+      const pagamentoResumoLabel = escapeHtml(pagamentoResumo);
+      const compradoEm = escapeHtml(i.comprado_em || '-');
+      const dataPagamento = escapeHtml(i.data_pagamento || '-');
+      const dataVencimento = escapeHtml(i.data_vencimento || '-');
+      const formaPagamento = escapeHtml(i.forma_pagamento || '-');
+      const dataUltimoPagamento = escapeHtml(i.data_ultimo_pagamento || '-');
+      const formaUltimoPagamento = escapeHtml(i.forma_ultimo_pagamento || '');
+      const observacao = escapeHtml(i.observacao || '-');
+      const comprimentoLabel = escapeHtml(i.comprimento_cm || '-');
+      const larguraLabel = escapeHtml(i.largura_cm || '-');
+      const espessuraLabel = escapeHtml(i.espessura_cm || '-');
+      const potencia = escapeHtml(i.potencia || '-');
+      const voltagem = escapeHtml(i.voltagem || '-');
       return `
-        <p><b>Fornecedor:</b> ${i.fornecedor || '-'}</p>
-        <p><b>Pago por:</b> ${i.pago_por || '-'}</p>
-        <p><b>Status:</b> ${status}</p>
-        <p><b>Financeiro:</b> ${pagamentoResumo}</p>
-        <p><b>Comprado em:</b> ${i.comprado_em || '-'}</p>
-        <p><b>Data de pagamento:</b> ${i.data_pagamento || '-'}</p>
-        <p><b>Vencimento:</b> ${i.data_vencimento || '-'}</p>
-        <p><b>Forma de pagamento:</b> ${i.forma_pagamento || '-'}</p>
+        <p><b>Fornecedor:</b> ${fornecedor}</p>
+        <p><b>Pago por:</b> ${pagoPor}</p>
+        <p><b>Status:</b> ${statusLabel}</p>
+        <p><b>Financeiro:</b> ${pagamentoResumoLabel}</p>
+        <p><b>Comprado em:</b> ${compradoEm}</p>
+        <p><b>Data de pagamento:</b> ${dataPagamento}</p>
+        <p><b>Vencimento:</b> ${dataVencimento}</p>
+        <p><b>Forma de pagamento:</b> ${formaPagamento}</p>
         <p><b>Parcelas:</b> ${Number(i.parcelas || 1)}</p>
-        <p><b>Ultimo pagamento:</b> ${i.data_ultimo_pagamento || '-'}${i.forma_ultimo_pagamento ? ` (${i.forma_ultimo_pagamento})` : ''}</p>
+        <p><b>Ultimo pagamento:</b> ${dataUltimoPagamento}${formaUltimoPagamento ? ` (${formaUltimoPagamento})` : ''}</p>
         <p><b>Valor unitario:</b> R$ ${Number(i.valor_unit || 0).toFixed(2)}</p>
         <p><b>Valor total item:</b> ${formatarMoeda(Number(i.quantidade || 0) * Number(i.valor_unit || 0))}</p>
-        <p><b>Observacao:</b> ${i.observacao || '-'}</p>
+        <p><b>Observacao:</b> ${observacao}</p>
 
         ${isMadeira ? `
-          <p><b>Medidas (cm):</b> ${i.comprimento_cm || '-'} x ${i.largura_cm || '-'} x ${i.espessura_cm || '-'}</p>
+          <p><b>Medidas (cm):</b> ${comprimentoLabel} x ${larguraLabel} x ${espessuraLabel}</p>
         ` : ''}
 
         ${i.tipo === 'EQUIPAMENTO' ? `
-          <p><b>Potencia:</b> ${i.potencia || '-'}</p>
-          <p><b>Voltagem:</b> ${i.voltagem || '-'}</p>
+          <p><b>Potencia:</b> ${potencia}</p>
+          <p><b>Voltagem:</b> ${voltagem}</p>
         ` : ''}
 
         <div class="acoes">
           ${botaoAdicionarAoEstoque}
           ${botaoPagamento}
-          <button onclick="ComprasController.refazer('${i.ID}')">Refazer compra</button>
-          <button onclick="ComprasController.editar('${i.ID}')">Editar</button>
-          <button onclick="ComprasController.excluir('${i.ID}')">Excluir</button>
+          <button onclick='ComprasController.refazer(${idJs})'>Refazer compra</button>
+          <button onclick='ComprasController.editar(${idJs})'>Editar</button>
+          <button onclick='ComprasController.excluir(${idJs})'>Excluir</button>
         </div>
       `;
     }

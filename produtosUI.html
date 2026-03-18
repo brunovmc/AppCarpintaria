@@ -118,6 +118,19 @@
       return n.toFixed(casas).replace(/\.?0+$/, '');
     }
 
+    function escapeHtml(valor) {
+      return String(valor ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    function escapeAttr(valor) {
+      return escapeHtml(valor);
+    }
+
     function calcularVolumeM3(comp, larg, esp) {
       const c = parseNumero(comp);
       const l = parseNumero(larg);
@@ -463,9 +476,9 @@
         const val = String(v || '').trim();
         if (!val) return '';
         const sel = val.toUpperCase() === selecionadoUpper ? 'selected' : '';
-        return `<option value="${val}" ${sel}>${val}</option>`;
+        return `<option value="${escapeAttr(val)}" ${sel}>${escapeHtml(val)}</option>`;
       }).join('');
-      return `<option value="">${placeholder}</option>` + opts;
+      return `<option value="">${escapeHtml(placeholder)}</option>` + opts;
     }
 
     function renderOpcoesCategoria(selecionado, tipo = '') {
@@ -491,18 +504,18 @@
           <select class="entrada-tipo">
             ${renderOpcoesTipoEntrada(tipo)}
           </select>
-          <input class="entrada-nome-item" placeholder="Nome do item" value="${entrada.nome_item || ''}">
+          <input class="entrada-nome-item" placeholder="Nome do item" value="${escapeAttr(entrada.nome_item || '')}">
           <select class="entrada-categoria">
             ${renderOpcoesCategoria(entrada.categoria || '', tipo)}
           </select>
           <select class="entrada-unidade" ${unidadeDisabled}>
             ${renderOpcoesUnidade(entrada.unidade || '')}
           </select>
-          <input class="entrada-qtd" type="number" step="${qtdStep}" min="0" placeholder="${qtdPlaceholder}" value="${entrada.qtd_pecas ?? ''}" ${qtdReadonly} data-auto-madeira="${qtdAutoData}">
-          <input class="entrada-comp ${dimsHidden}" type="number" step="0.01" min="0" placeholder="Comp (cm)" value="${entrada.comprimento_cm ?? ''}">
-          <input class="entrada-larg ${dimsHidden}" type="number" step="0.01" min="0" placeholder="Larg (cm)" value="${entrada.largura_cm ?? ''}">
-          <input class="entrada-esp ${dimsHidden}" type="number" step="0.01" min="0" placeholder="Esp (cm)" value="${entrada.espessura_cm ?? ''}">
-          <input class="entrada-custo" type="number" step="0.01" min="0" placeholder="Custo unit" value="${entrada.custo_manual ?? ''}">
+          <input class="entrada-qtd" type="number" step="${qtdStep}" min="0" placeholder="${escapeAttr(qtdPlaceholder)}" value="${escapeAttr(entrada.qtd_pecas ?? '')}" ${qtdReadonly} data-auto-madeira="${qtdAutoData}">
+          <input class="entrada-comp ${dimsHidden}" type="number" step="0.01" min="0" placeholder="Comp (cm)" value="${escapeAttr(entrada.comprimento_cm ?? '')}">
+          <input class="entrada-larg ${dimsHidden}" type="number" step="0.01" min="0" placeholder="Larg (cm)" value="${escapeAttr(entrada.largura_cm ?? '')}">
+          <input class="entrada-esp ${dimsHidden}" type="number" step="0.01" min="0" placeholder="Esp (cm)" value="${escapeAttr(entrada.espessura_cm ?? '')}">
+          <input class="entrada-custo" type="number" step="0.01" min="0" placeholder="Custo unit" value="${escapeAttr(entrada.custo_manual ?? '')}">
           <button class="btn-receita-remover-entrada">Remover</button>
         </div>
       `;
@@ -514,7 +527,7 @@
       const categoria = String(saida.categoria || categoriaPadrao).trim();
       return `
         <div class="linha-receita-saida">
-          <input class="saida-nome" placeholder="Nome" value="${saida.nome_saida || ''}">
+          <input class="saida-nome" placeholder="Nome" value="${escapeAttr(saida.nome_saida || '')}">
           <select class="saida-tipo">
             ${renderOpcoesTipoSaida(tipo)}
           </select>
@@ -524,7 +537,7 @@
           <select class="saida-unidade">
             ${renderOpcoesUnidade(saida.unidade || '')}
           </select>
-          <input class="saida-qtd" type="number" step="0.01" min="0" placeholder="Quantidade" value="${saida.quantidade ?? ''}">
+          <input class="saida-qtd" type="number" step="0.01" min="0" placeholder="Quantidade" value="${escapeAttr(saida.quantidade ?? '')}">
           <button class="btn-receita-remover-saida">Remover</button>
         </div>
       `;
@@ -700,23 +713,26 @@
       }
 
       return entradas.map(e => {
-        const dims = `${e.comprimento_cm || '-'} x ${e.largura_cm || '-'} x ${e.espessura_cm || '-'} cm`;
-        const qtd = e.qtd_pecas ?? '-';
-        const tipo = String(e.tipo_item || '').toUpperCase() || '-';
+        const dims = `${escapeHtml(e.comprimento_cm || '-')} x ${escapeHtml(e.largura_cm || '-')} x ${escapeHtml(e.espessura_cm || '-')} cm`;
+        const qtd = escapeHtml(e.qtd_pecas ?? '-');
+        const tipo = escapeHtml(String(e.tipo_item || '').toUpperCase() || '-');
         const qtdLabel = tipo === 'MADEIRA' ? 'Volume (m3)' : 'Quantidade';
         const custo = parseNumero(e.custo_manual) > 0
           ? `Custo unit: R$ ${formatNumero(e.custo_manual)}`
           : 'Custo unit: -';
-        const titulo = e.nome_item || '-';
+        const titulo = escapeHtml(e.nome_item || '-');
+        const categoria = escapeHtml(e.categoria || '-');
+        const unidade = escapeHtml(e.unidade || '-');
+        const custoLabel = escapeHtml(custo);
 
         return `
           <div class="linha-receita">
             <div><strong>${titulo}</strong></div>
             <div class="comp-meta">Tipo: ${tipo} | ${qtdLabel}: ${qtd}</div>
-            <div class="comp-meta">Categoria: ${e.categoria || '-'}</div>
-            <div class="comp-meta">Unidade: ${e.unidade || '-'}</div>
+            <div class="comp-meta">Categoria: ${categoria}</div>
+            <div class="comp-meta">Unidade: ${unidade}</div>
             ${tipo === 'MADEIRA' ? `<div class="comp-meta">Dimensoes: ${dims}</div>` : ''}
-            <div class="comp-meta">${custo}</div>
+            <div class="comp-meta">${custoLabel}</div>
           </div>
         `;
       }).join('');
@@ -731,9 +747,9 @@
 
       return saidas.map(s => `
         <div class="linha-receita">
-          <div><strong>${s.nome_saida || '-'}</strong></div>
-          <div class="comp-meta">Tipo: ${String(s.tipo_item || '-').toUpperCase()} | Categoria: ${s.categoria || '-'}</div>
-          <div class="comp-meta">${s.quantidade || '-'} ${s.unidade || ''}</div>
+          <div><strong>${escapeHtml(s.nome_saida || '-')}</strong></div>
+          <div class="comp-meta">Tipo: ${escapeHtml(String(s.tipo_item || '-').toUpperCase())} | Categoria: ${escapeHtml(s.categoria || '-')}</div>
+          <div class="comp-meta">${escapeHtml(s.quantidade || '-')} ${escapeHtml(s.unidade || '')}</div>
           <div class="comp-meta">Custo unit: ${custoTexto}</div>
         </div>
       `).join('');
@@ -745,18 +761,18 @@
 
       if (receita._editing) {
         return `
-          <div class="receita-card editing" data-produto-id="${produtoId}" data-receita-id="${receita.receita_id}">
+          <div class="receita-card editing" data-produto-id="${escapeAttr(produtoId)}" data-receita-id="${escapeAttr(receita.receita_id)}">
             <div class="receita-header">
-              <input class="receita-nome" placeholder="Nome da receita" value="${receita.nome_receita || ''}">
+              <input class="receita-nome" placeholder="Nome da receita" value="${escapeAttr(receita.nome_receita || '')}">
             </div>
-            <textarea class="receita-desc" placeholder="Descricao">${receita.descricao || ''}</textarea>
+            <textarea class="receita-desc" placeholder="Descricao">${escapeHtml(receita.descricao || '')}</textarea>
 
             <div class="bloco">
               <p><b>Entradas</b></p>
               <div class="receita-entradas">
                 ${entradas.map(e => renderEntradaEditRow(e)).join('')}
               </div>
-              <button class="btn-receita-add-entrada" data-produto-id="${produtoId}" data-receita-id="${receita.receita_id}">Adicionar entrada</button>
+              <button class="btn-receita-add-entrada" data-produto-id="${escapeAttr(produtoId)}" data-receita-id="${escapeAttr(receita.receita_id)}">Adicionar entrada</button>
             </div>
 
             <div class="bloco">
@@ -764,12 +780,12 @@
               <div class="receita-saidas">
                 ${saidas.map(renderSaidaEditRow).join('')}
               </div>
-              <button class="btn-receita-add-saida" data-produto-id="${produtoId}" data-receita-id="${receita.receita_id}">Adicionar saida</button>
+              <button class="btn-receita-add-saida" data-produto-id="${escapeAttr(produtoId)}" data-receita-id="${escapeAttr(receita.receita_id)}">Adicionar saida</button>
             </div>
 
             <div class="comp-acoes">
-              <button class="btn-receita-salvar" data-produto-id="${produtoId}" data-receita-id="${receita.receita_id}">Salvar</button>
-              <button class="btn-receita-cancelar" data-produto-id="${produtoId}" data-receita-id="${receita.receita_id}">Cancelar</button>
+              <button class="btn-receita-salvar" data-produto-id="${escapeAttr(produtoId)}" data-receita-id="${escapeAttr(receita.receita_id)}">Salvar</button>
+              <button class="btn-receita-cancelar" data-produto-id="${escapeAttr(produtoId)}" data-receita-id="${escapeAttr(receita.receita_id)}">Cancelar</button>
             </div>
           </div>
         `;
@@ -780,12 +796,12 @@
       const custoUnit = custos.custoUnit;
 
       return `
-        <div class="receita-card" data-produto-id="${produtoId}" data-receita-id="${receita.receita_id}">
+        <div class="receita-card" data-produto-id="${escapeAttr(produtoId)}" data-receita-id="${escapeAttr(receita.receita_id)}">
           <div class="receita-header">
-            <strong>${receita.nome_receita || 'Receita'}</strong>
+            <strong>${escapeHtml(receita.nome_receita || 'Receita')}</strong>
             <span class="receita-tag">Modelo</span>
           </div>
-          ${receita.descricao ? `<div class="comp-meta">${receita.descricao}</div>` : ''}
+          ${receita.descricao ? `<div class="comp-meta">${escapeHtml(receita.descricao)}</div>` : ''}
           <div class="comp-meta">Custo total: ${custoTotal}</div>
 
           <div class="bloco">
@@ -799,7 +815,7 @@
           </div>
 
           <div class="comp-acoes">
-            <button class="btn-receita-editar" data-produto-id="${produtoId}" data-receita-id="${receita.receita_id}">Editar</button>
+            <button class="btn-receita-editar" data-produto-id="${escapeAttr(produtoId)}" data-receita-id="${escapeAttr(receita.receita_id)}">Editar</button>
           </div>
         </div>
       `;
@@ -809,7 +825,7 @@
       if (!carregada) {
         return `
           <p>Receitas nao carregadas.</p>
-          <button class="btn-receita-carregar" data-produto-id="${produtoId}">Carregar receitas</button>
+          <button class="btn-receita-carregar" data-produto-id="${escapeAttr(produtoId)}">Carregar receitas</button>
         `;
       }
 
@@ -827,9 +843,9 @@
         .filter(p => p && p.produto_id)
         .map(p => {
           const label = p.nome_produto || p.produto_id;
-          return `<option value="${label}"></option>`;
+          return `<option value="${escapeAttr(label)}"></option>`;
         }).join('');
-      return `<datalist id="produtosAutocomplete_${produtoId}">${opts}</datalist>`;
+      return `<datalist id="produtosAutocomplete_${escapeAttr(produtoId)}">${opts}</datalist>`;
     }
 
     function renderEstoqueDatalists(produtoId) {
@@ -847,9 +863,9 @@
           .filter(i => String(i.tipo || '').toUpperCase() === String(tipo || '').toUpperCase())
           .map(i => {
             const label = i.item || i.ID;
-            return `<option value="${label}"></option>`;
+            return `<option value="${escapeAttr(label)}"></option>`;
           }).join('');
-        return `<datalist id="estoqueAutocomplete_${produtoId}_${tipoKey}">${opts}</datalist>`;
+        return `<datalist id="estoqueAutocomplete_${escapeAttr(produtoId)}_${escapeAttr(tipoKey)}">${opts}</datalist>`;
       }).join('');
     }
 
@@ -927,11 +943,13 @@
       const resumoModelo = (entradasTotal + saidasTotal + etapasTotal) > 0
         ? `Modelo: ${nomeModelo} | ${entradasTotal} entradas, ${saidasTotal} saidas, ${etapasTotal} etapas`
         : 'Modelo: nao configurado';
+      const nomeProduto = escapeHtml(i.nome_produto || i.produto_id);
+      const resumo = escapeHtml(resumoModelo);
 
       div.innerHTML = `
         <div class="card-resumo">
-          <strong>${i.nome_produto || i.produto_id}</strong><br>
-          ${resumoModelo}
+          <strong>${nomeProduto}</strong><br>
+          ${resumo}
         </div>
 
         <button class="ver-mais">Ver mais</button>
@@ -943,6 +961,7 @@
     function montarDetalhesProduto(i) {
       const receitas = Array.isArray(i.receitas) ? i.receitas : [];
       const receitasCarregadas = !!i.receitasCarregadas;
+      const idJs = JSON.stringify(String(i.produto_id || ''));
       return `
         <div class="bloco">
           <p><b>Receitas</b></p>
@@ -950,9 +969,9 @@
         </div>
 
         <div class="acoes">
-          <button onclick="ProdutosController.enviarParaProducao('${i.produto_id}')">Criar OP</button>
-          <button onclick="ProdutosController.editar('${i.produto_id}')">Editar</button>
-          <button onclick="ProdutosController.excluir('${i.produto_id}')">Excluir</button>
+          <button onclick='ProdutosController.enviarParaProducao(${idJs})'>Criar OP</button>
+          <button onclick='ProdutosController.editar(${idJs})'>Editar</button>
+          <button onclick='ProdutosController.excluir(${idJs})'>Excluir</button>
         </div>
       `;
     }
