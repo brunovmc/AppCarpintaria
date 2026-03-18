@@ -122,8 +122,12 @@
 
     function carregarValidacoes() {
       const perf = perfStart('rpc.compras.obterValidacoes');
-      google.script.run
-        .withSuccessHandler(data => {
+      const loader = window.AppValidacoes?.get
+        ? window.AppValidacoes.get({ maxAgeMs: 1000 * 60 * 60 * 12 })
+        : Promise.reject(new Error('cache de validacoes indisponivel'));
+
+      loader
+        .then(({ data }) => {
           perfEnd(perf, { ok: true });
           validacoes = data || {};
 
@@ -134,17 +138,6 @@
           validacoes.fornecedores ||= [];
           validacoes.pagosPor ||= [];
           validacoes.formasPagamento ||= [];
-
-          if (typeof window !== 'undefined') {
-            window.AppValidacoesCache = {
-              ...(window.AppValidacoesCache || {}),
-              tipos: validacoes.tipos,
-              categorias: validacoes.categorias,
-              categoriasPorTipo: validacoes.categoriasPorTipo,
-              pagosPor: validacoes.pagosPor,
-              formasPagamento: validacoes.formasPagamento
-            };
-          }
 
           ComprasUI.renderTipos?.(validacoes.tipos);
           ComprasUI.renderUnidades?.(validacoes.unidades);
@@ -160,11 +153,10 @@
             aplicarFiltroTipoRapidoPersistidoCompras();
           }
         })
-        .withFailureHandler(() => {
+        .catch(() => {
           perfEnd(perf, { ok: false });
           mostrarToast('Falha ao carregar validacoes', 'erro');
-        })
-        .obterValidacoes();
+        });
     }
 
     function categoriaValidaParaTipo(tipo, categoria) {

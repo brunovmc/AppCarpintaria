@@ -182,23 +182,20 @@
     }
 
     function carregarValidacoes() {
-      google.script.run
-        .withSuccessHandler(data => {
+      const loader = window.AppValidacoes?.get
+        ? window.AppValidacoes.get({ maxAgeMs: 1000 * 60 * 60 * 12 })
+        : Promise.reject(new Error('cache de validacoes indisponivel'));
+
+      loader
+        .then(({ data }) => {
           const validacoes = data || {};
           tiposValidacao = Array.isArray(validacoes.tipos) ? validacoes.tipos : [];
           ProducaoUI.setTiposValidacao?.(tiposValidacao);
-          if (typeof window !== 'undefined') {
-            window.AppValidacoesCache = {
-              ...(window.AppValidacoesCache || {}),
-              tipos: tiposValidacao
-            };
-          }
         })
-        .withFailureHandler(() => {
+        .catch(() => {
           tiposValidacao = [];
           ProducaoUI.setTiposValidacao?.([]);
-        })
-        .obterValidacoes();
+        });
     }
 
     function initFormEventos() {

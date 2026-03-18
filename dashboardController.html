@@ -642,8 +642,12 @@
     }
 
     function carregarValidacoes(onDone) {
-      google.script.run
-        .withSuccessHandler(data => {
+      const loader = window.AppValidacoes?.get
+        ? window.AppValidacoes.get({ maxAgeMs: 1000 * 60 * 60 * 12 })
+        : Promise.reject(new Error('cache de validacoes indisponivel'));
+
+      loader
+        .then(({ data }) => {
           validacoes = data || {};
           validacoes.categoriasDespesas ||= [];
           validacoes.fornecedores ||= [];
@@ -660,11 +664,10 @@
 
           if (typeof onDone === 'function') onDone();
         })
-        .withFailureHandler(() => {
+        .catch(() => {
           mostrarToast('Falha ao carregar validacoes', 'erro');
           if (typeof onDone === 'function') onDone();
-        })
-        .obterValidacoes();
+        });
     }
 
     function init() {

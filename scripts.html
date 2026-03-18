@@ -376,11 +376,196 @@
 
   window.AppTabCache = window.AppTabCache || createTabCacheHelper();
 
+  function createValidacoesHelper() {
+    const STORAGE_KEY = 'app:validacoes:v1';
+    const DEFAULT_TTL_MS = 1000 * 60 * 60 * 12; // 12h
+    let memoriaData = null;
+    let memoriaTs = 0;
+    let inFlightPromise = null;
+    let storageDisponivelMemo = null;
+
+    function storageDisponivel() {
+      if (storageDisponivelMemo !== null) return storageDisponivelMemo;
+      try {
+        if (!window.localStorage) {
+          storageDisponivelMemo = false;
+          return false;
+        }
+        const key = `${STORAGE_KEY}:__probe__`;
+        window.localStorage.setItem(key, '1');
+        window.localStorage.removeItem(key);
+        storageDisponivelMemo = true;
+        return true;
+      } catch (error) {
+        storageDisponivelMemo = false;
+        return false;
+      }
+    }
+
+    function listaNormalizada(lista) {
+      return [...new Set((Array.isArray(lista) ? lista : [])
+        .map(v => String(v || '').trim())
+        .filter(v => v !== ''))];
+    }
+
+    function normalizarMapaCategorias(rawMap) {
+      const mapa = {};
+      if (!rawMap || typeof rawMap !== 'object') return mapa;
+      Object.keys(rawMap).forEach(k => {
+        const chave = String(k || '').trim().toUpperCase();
+        if (!chave) return;
+        mapa[chave] = listaNormalizada(rawMap[k]);
+      });
+      return mapa;
+    }
+
+    function normalizar(raw) {
+      const data = raw && typeof raw === 'object' ? raw : {};
+      return {
+        tipos: listaNormalizada(data.tipos),
+        unidades: listaNormalizada(data.unidades),
+        categorias: listaNormalizada(data.categorias),
+        categoriasPorTipo: normalizarMapaCategorias(data.categoriasPorTipo),
+        fornecedores: listaNormalizada(data.fornecedores),
+        pagosPor: listaNormalizada(data.pagosPor),
+        formasPagamento: listaNormalizada(data.formasPagamento),
+        categoriasDespesas: listaNormalizada(data.categoriasDespesas)
+      };
+    }
+
+    function atualizarCacheGlobal(data) {
+      window.AppValidacoesCache = {
+        ...(window.AppValidacoesCache || {}),
+        tipos: data.tipos || [],
+        unidades: data.unidades || [],
+        categorias: data.categorias || [],
+        categoriasPorTipo: data.categoriasPorTipo || {},
+        fornecedores: data.fornecedores || [],
+        pagosPor: data.pagosPor || [],
+        formasPagamento: data.formasPagamento || [],
+        categoriasDespesas: data.categoriasDespesas || []
+      };
+    }
+
+    function salvarStorage(data, ts) {
+      if (!storageDisponivel()) return;
+      try {
+        window.localStorage.setItem(STORAGE_KEY, JSON.stringify({
+          ts: Number(ts || Date.now()),
+          data
+        }));
+      } catch (error) {
+        // sem acao
+      }
+    }
+
+    function lerStorage(maxAgeMs) {
+      if (!storageDisponivel()) return null;
+      try {
+        const raw = window.localStorage.getItem(STORAGE_KEY);
+        if (!raw) return null;
+        const payload = JSON.parse(raw);
+        if (!payload || typeof payload !== 'object') return null;
+        const ts = Number(payload.ts || 0);
+        if (!ts) return null;
+        if ((Date.now() - ts) > Number(maxAgeMs || DEFAULT_TTL_MS)) return null;
+        const data = normalizar(payload.data);
+        memoriaData = data;
+        memoriaTs = ts;
+        atualizarCacheGlobal(data);
+        return data;
+      } catch (error) {
+        return null;
+      }
+    }
+
+    function lerMemoria(maxAgeMs) {
+      if (!memoriaData || !memoriaTs) return null;
+      if ((Date.now() - memoriaTs) > Number(maxAgeMs || DEFAULT_TTL_MS)) return null;
+      return memoriaData;
+    }
+
+    function prime(rawData, ts = Date.now()) {
+      const data = normalizar(rawData);
+      const stamp = Number(ts || Date.now());
+      memoriaData = data;
+      memoriaTs = stamp;
+      atualizarCacheGlobal(data);
+      salvarStorage(data, stamp);
+      return data;
+    }
+
+    function peek(maxAgeMs = DEFAULT_TTL_MS) {
+      return lerMemoria(maxAgeMs) || lerStorage(maxAgeMs);
+    }
+
+    function invalidate() {
+      memoriaData = null;
+      memoriaTs = 0;
+      if (!storageDisponivel()) return;
+      try {
+        window.localStorage.removeItem(STORAGE_KEY);
+      } catch (error) {
+        // sem acao
+      }
+    }
+
+    function get(options = {}) {
+      const force = !!options.force;
+      const maxAgeMs = Number(options.maxAgeMs) > 0 ? Number(options.maxAgeMs) : DEFAULT_TTL_MS;
+      const staleOnError = options.staleOnError !== false;
+
+      if (!force) {
+        const cache = peek(maxAgeMs);
+        if (cache) {
+          return Promise.resolve({ data: cache, source: 'cache' });
+        }
+      }
+
+      if (inFlightPromise) return inFlightPromise;
+
+      const stale = peek(Number.MAX_SAFE_INTEGER);
+      if (!window.google?.script?.run) {
+        if (stale) return Promise.resolve({ data: stale, source: 'stale' });
+        return Promise.reject(new Error('google.script.run indisponivel'));
+      }
+
+      inFlightPromise = new Promise((resolve, reject) => {
+        google.script.run
+          .withSuccessHandler(raw => {
+            const data = prime(raw);
+            resolve({ data, source: 'backend' });
+          })
+          .withFailureHandler(err => {
+            if (staleOnError && stale) {
+              resolve({ data: stale, source: 'stale' });
+              return;
+            }
+            reject(err || new Error('Falha ao carregar validacoes'));
+          })
+          .obterValidacoes();
+      }).finally(() => {
+        inFlightPromise = null;
+      });
+
+      return inFlightPromise;
+    }
+
+    return {
+      get,
+      peek,
+      prime,
+      invalidate,
+      normalizar
+    };
+  }
+
+  window.AppValidacoes = window.AppValidacoes || createValidacoesHelper();
+
   function createMutationUiLock() {
     let seq = 0;
     const tokens = new Set();
     const estadosOriginais = new WeakMap();
-    let observer = null;
 
     const classesSomenteLeitura = [
       'ver-mais',
@@ -410,16 +595,10 @@
       return acoesSomenteLeituraOnclick.some(acao => onclick.includes(acao));
     }
 
-    function garantirObserver() {
-      if (observer || typeof MutationObserver === 'undefined' || !document?.body) return;
-      observer = new MutationObserver(() => {
-        if (!isLocked()) return;
-        aplicarEstadoBloqueio(true);
-      });
-      observer.observe(document.body, { childList: true, subtree: true });
-    }
-
     function aplicarEstadoBloqueio(ativo) {
+      if (document?.body) {
+        document.body.classList.toggle('app-mutation-locked', !!ativo);
+      }
       const botoes = coletarBotoesBloqueio();
 
       if (ativo) {
@@ -455,7 +634,6 @@
     }
 
     function lock() {
-      garantirObserver();
       const token = `mutation_${++seq}`;
       tokens.add(token);
       aplicarEstadoBloqueio(true);
@@ -1389,50 +1567,10 @@
   }
 
   // espera o EstoqueStore carregar (sem travar nada)
-  const FILTRO_RETRY_MS = 300;
-  const FILTRO_RETRY_MAX_TENTATIVAS = 20;
-  let filtroPoll = null;
-  let filtroPollTentativas = 0;
-  let filtroPollToken = 0;
-
-  function pararPollFiltros() {
-    filtroPollToken += 1;
-    filtroPollTentativas = 0;
-    if (filtroPoll) {
-      clearTimeout(filtroPoll);
-      filtroPoll = null;
-    }
-  }
+  function pararPollFiltros() {}
   function iniciarPollFiltros() {
     if (!painelFiltroExiste()) return;
-    if (window.EstoqueStore && EstoqueStore.isLoaded()) {
-      popularFiltrosDoPainel();
-      pararPollFiltros();
-      return;
-    }
-
-    // evita múltiplos polls
-    if (filtroPoll) return;
-
-    const token = ++filtroPollToken;
-    filtroPollTentativas = 0;
-    const tentar = () => {
-      if (token !== filtroPollToken) return;
-      if (window.EstoqueStore && EstoqueStore.isLoaded()) {
-        popularFiltrosDoPainel();
-        filtroPollTentativas = 0;
-        filtroPoll = null;
-        return;
-      }
-      filtroPollTentativas += 1;
-      if (filtroPollTentativas >= FILTRO_RETRY_MAX_TENTATIVAS) {
-        filtroPoll = null;
-        return;
-      }
-      filtroPoll = setTimeout(tentar, FILTRO_RETRY_MS);
-    };
-
-    filtroPoll = setTimeout(tentar, 0);
+    popularFiltrosDoPainel();
   }
 
   function popularFiltrosDoPainelCompras() {
@@ -1471,47 +1609,28 @@
     }
   }
 
-  let filtroPollCompras = null;
-  let filtroPollComprasTentativas = 0;
-  let filtroPollComprasToken = 0;
-
-  function pararPollFiltrosCompras() {
-    filtroPollComprasToken += 1;
-    filtroPollComprasTentativas = 0;
-    if (filtroPollCompras) {
-      clearTimeout(filtroPollCompras);
-      filtroPollCompras = null;
-    }
-  }
+  function pararPollFiltrosCompras() {}
 
   function iniciarPollFiltrosCompras() {
     if (!painelFiltroComprasExiste()) return;
-    if (window.ComprasStore && ComprasStore.isLoaded()) {
-      popularFiltrosDoPainelCompras();
-      pararPollFiltrosCompras();
-      return;
-    }
-    if (filtroPollCompras) return;
+    popularFiltrosDoPainelCompras();
+  }
 
-    const token = ++filtroPollComprasToken;
-    filtroPollComprasTentativas = 0;
-    const tentar = () => {
-      if (token !== filtroPollComprasToken) return;
-      if (window.ComprasStore && ComprasStore.isLoaded()) {
-        popularFiltrosDoPainelCompras();
-        filtroPollComprasTentativas = 0;
-        filtroPollCompras = null;
+  let listenersFiltroStoreRegistrados = false;
+  function registrarListenersFiltrosStore() {
+    if (listenersFiltroStoreRegistrados) return;
+    listenersFiltroStoreRegistrados = true;
+
+    window.addEventListener('app:store:loaded', evento => {
+      const tab = String(evento?.detail?.tab || '').trim().toLowerCase();
+      if (tab === 'estoque') {
+        if (painelFiltroExiste()) popularFiltrosDoPainel();
         return;
       }
-      filtroPollComprasTentativas += 1;
-      if (filtroPollComprasTentativas >= FILTRO_RETRY_MAX_TENTATIVAS) {
-        filtroPollCompras = null;
-        return;
+      if (tab === 'compras') {
+        if (painelFiltroComprasExiste()) popularFiltrosDoPainelCompras();
       }
-      filtroPollCompras = setTimeout(tentar, FILTRO_RETRY_MS);
-    };
-
-    filtroPollCompras = setTimeout(tentar, 0);
+    });
   }
 
   /* =========================
@@ -1706,6 +1825,7 @@
   document.addEventListener('DOMContentLoaded', () => {
     initLongTaskMonitor();
     initNavbarHamburger();
+    registrarListenersFiltrosStore();
     trocarAba(lerUltimaAba() || ABA_INICIAL_PADRAO);
     initBuscaEFiltroEstoque();
     initBuscaEFiltroCompras();
@@ -1715,3 +1835,5 @@
     initBuscaProducao();
   });
 </script>
+
+

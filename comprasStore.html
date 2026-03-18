@@ -13,6 +13,17 @@
       window.AppTabCache?.remover?.(CACHE_TAB);
     }
 
+    function emitirStoreLoaded() {
+      if (typeof window === 'undefined' || typeof window.dispatchEvent !== 'function') return;
+      try {
+        window.dispatchEvent(new CustomEvent('app:store:loaded', {
+          detail: { tab: CACHE_TAB }
+        }));
+      } catch (error) {
+        // sem acao
+      }
+    }
+
     function jaAdicionadaAoEstoque(item) {
       return String(item?.adicionado_estoque ?? '').trim().toLowerCase() === 'true';
     }
@@ -83,6 +94,7 @@
       itens = ordenarCompras(lista);
       carregado = true;
       salvarCache();
+      emitirStoreLoaded();
     }
 
     function get() {

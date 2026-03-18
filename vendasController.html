@@ -83,8 +83,12 @@
     }
 
     function carregarValidacoes() {
-      google.script.run
-        .withSuccessHandler(data => {
+      const loader = window.AppValidacoes?.get
+        ? window.AppValidacoes.get({ maxAgeMs: 1000 * 60 * 60 * 12 })
+        : Promise.reject(new Error('cache de validacoes indisponivel'));
+
+      loader
+        .then(({ data }) => {
           validacoes = data || {};
           validacoes.pagosPor ||= [];
           validacoes.formasPagamento ||= [];
@@ -92,10 +96,9 @@
           VendasUI.renderRecebidosPor?.(validacoes.pagosPor);
           VendasUI.renderFormasPagamento?.(validacoes.formasPagamento);
         })
-        .withFailureHandler(() => {
+        .catch(() => {
           validacoes = {};
-        })
-        .obterValidacoes();
+        });
     }
 
     function carregarEstoqueVendavel() {
