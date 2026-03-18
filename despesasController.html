@@ -733,8 +733,8 @@
           notificarDashboardAlterado(despesaAnterior, payload);
         });
 
-      if (despesaEditandoId) {
-        runner.atualizarDespesaGeral(despesaEditandoId, payload);
+      if (eraEdicao && idEdicaoAtual) {
+        runner.atualizarDespesaGeral(idEdicaoAtual, payload);
       } else {
         runner.criarDespesaGeral(payload);
       }
