@@ -1822,10 +1822,200 @@
     }
   }
 
+  const modalFocusState = new WeakMap();
+
+  function listarModaisAbertos() {
+    return [...document.querySelectorAll('.modal')].filter(m => !m.classList.contains('hidden'));
+  }
+
+  function listarFocaveis(container) {
+    if (!container) return [];
+    const seletor = [
+      'button:not([disabled]):not([tabindex="-1"])',
+      'a[href]:not([tabindex="-1"])',
+      'input:not([disabled]):not([type="hidden"]):not([tabindex="-1"])',
+      'select:not([disabled]):not([tabindex="-1"])',
+      'textarea:not([disabled]):not([tabindex="-1"])',
+      '[tabindex]:not([tabindex="-1"])'
+    ].join(',');
+    return [...container.querySelectorAll(seletor)].filter(el => {
+      const style = window.getComputedStyle(el);
+      return style.display !== 'none' && style.visibility !== 'hidden';
+    });
+  }
+
+  function atualizarEstadoBodyModal() {
+    if (typeof document === 'undefined' || !document.body) return;
+    const aberto = listarModaisAbertos().length > 0;
+    document.body.classList.toggle('modal-open', aberto);
+  }
+
+  function focarAoAbrirModal(modal) {
+    if (!modal) return;
+    const conteudo = modal.querySelector('.modal-content');
+    if (!conteudo) return;
+
+    const state = modalFocusState.get(modal) || {};
+    if (!state.opener || !document.contains(state.opener)) {
+      state.opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    }
+    modalFocusState.set(modal, state);
+
+    const focoAlvo = modal.querySelector('.modal-close-square:not([disabled])') || listarFocaveis(conteudo)[0] || conteudo;
+    if (!focoAlvo.getAttribute('tabindex') && focoAlvo === conteudo) {
+      focoAlvo.setAttribute('tabindex', '-1');
+    }
+    setTimeout(() => {
+      try {
+        focoAlvo.focus({ preventScroll: true });
+      } catch (error) {
+        // sem acao
+      }
+    }, 0);
+  }
+
+  function restaurarFocoAoFechar(modal) {
+    const state = modalFocusState.get(modal);
+    if (!state?.opener || !document.contains(state.opener)) return;
+    setTimeout(() => {
+      try {
+        state.opener.focus({ preventScroll: true });
+      } catch (error) {
+        // sem acao
+      }
+    }, 0);
+  }
+
+  function atualizarAriaModal(modal) {
+    if (!modal) return;
+    const aberto = !modal.classList.contains('hidden');
+    modal.setAttribute('aria-hidden', aberto ? 'false' : 'true');
+    const abertoAntes = modal.dataset.a11yOpen === '1';
+    if (aberto && !abertoAntes) {
+      modal.dataset.a11yOpen = '1';
+      focarAoAbrirModal(modal);
+    } else if (!aberto && abertoAntes) {
+      modal.dataset.a11yOpen = '0';
+      restaurarFocoAoFechar(modal);
+    }
+    atualizarEstadoBodyModal();
+  }
+
+  function fecharModalPorInteracao(modal) {
+    if (!modal) return false;
+    const btnFechar = modal.querySelector('.modal-close-square');
+    if (btnFechar && !btnFechar.disabled) {
+      btnFechar.click();
+      return true;
+    }
+    modal.classList.add('hidden');
+    atualizarAriaModal(modal);
+    return true;
+  }
+
+  function initModalA11y() {
+    const modais = [...document.querySelectorAll('.modal')];
+    if (modais.length === 0) return;
+
+    modais.forEach((modal, idx) => {
+      if (!modal.id) {
+        modal.id = `modal_auto_${idx + 1}`;
+      }
+      modal.setAttribute('role', 'dialog');
+      modal.setAttribute('aria-modal', 'true');
+
+      const titulo = modal.querySelector('.modal-content h1, .modal-content h2, .modal-content h3');
+      if (titulo) {
+        if (!titulo.id) {
+          titulo.id = `${modal.id}_title`;
+        }
+        modal.setAttribute('aria-labelledby', titulo.id);
+      }
+
+      atualizarAriaModal(modal);
+
+      modal.addEventListener('click', evento => {
+        if (evento.target !== modal) return;
+        if (window.AppMutationUI?.isLocked?.()) return;
+        fecharModalPorInteracao(modal);
+      });
+
+      if (typeof MutationObserver !== 'undefined') {
+        const observer = new MutationObserver(() => {
+          atualizarAriaModal(modal);
+        });
+        observer.observe(modal, { attributes: true, attributeFilter: ['class'] });
+      }
+    });
+
+    document.addEventListener('keydown', evento => {
+      const abertos = listarModaisAbertos();
+      if (abertos.length === 0) return;
+      const topo = abertos[abertos.length - 1];
+
+      if (evento.key === 'Escape') {
+        if (window.AppMutationUI?.isLocked?.()) return;
+        evento.preventDefault();
+        fecharModalPorInteracao(topo);
+        return;
+      }
+
+      if (evento.key !== 'Tab') return;
+      const conteudo = topo.querySelector('.modal-content');
+      if (!conteudo) return;
+      const focaveis = listarFocaveis(conteudo);
+      if (focaveis.length === 0) {
+        evento.preventDefault();
+        conteudo.setAttribute('tabindex', '-1');
+        conteudo.focus({ preventScroll: true });
+        return;
+      }
+      const primeiro = focaveis[0];
+      const ultimo = focaveis[focaveis.length - 1];
+      if (evento.shiftKey && document.activeElement === primeiro) {
+        evento.preventDefault();
+        ultimo.focus({ preventScroll: true });
+      } else if (!evento.shiftKey && document.activeElement === ultimo) {
+        evento.preventDefault();
+        primeiro.focus({ preventScroll: true });
+      }
+    });
+  }
+
+  function initCampoAjudaA11y() {
+    let seq = 0;
+    const wrappers = document.querySelectorAll('.campo-ajuda-wrap');
+    wrappers.forEach(wrap => {
+      const tag = wrap.querySelector('.campo-ajuda-tag');
+      const label = String(tag?.textContent || '').trim();
+      if (!label) return;
+
+      const campos = [...wrap.querySelectorAll('input, select, textarea')];
+      campos.forEach(campo => {
+        if (!campo.getAttribute('aria-label')) {
+          campo.setAttribute('aria-label', label);
+        }
+        if (!campo.id) {
+          seq += 1;
+          campo.id = `campo_auto_${seq}`;
+        }
+        const existente = wrap.querySelector(`label.sr-only[for="${campo.id}"]`);
+        if (existente) return;
+        const labelEl = document.createElement('label');
+        labelEl.className = 'sr-only';
+        labelEl.setAttribute('for', campo.id);
+        labelEl.textContent = label;
+        wrap.insertBefore(labelEl, campo);
+      });
+    });
+  }
+
   document.addEventListener('DOMContentLoaded', () => {
     initLongTaskMonitor();
     initNavbarHamburger();
     registrarListenersFiltrosStore();
+    initModalA11y();
+    initCampoAjudaA11y();
     trocarAba(lerUltimaAba() || ABA_INICIAL_PADRAO);
     initBuscaEFiltroEstoque();
     initBuscaEFiltroCompras();

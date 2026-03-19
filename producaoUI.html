@@ -405,7 +405,7 @@
             >
             <span class="etapa-nome">${escapeHtml(et.nome_etapa || '')}</span>
             <div class="etapa-acoes">
-              <button class="btn-etapa-subir" data-producao-id="${escapeAttr(producaoId)}" data-etapa-id="${escapeAttr(et.id)}" aria-label="Mover etapa para cima" ${podeSubir ? '' : 'disabled'}>↑</button>
+              <button class="btn-etapa-subir" data-producao-id="${escapeAttr(producaoId)}" data-etapa-id="${escapeAttr(et.id)}" aria-label="Mover etapa para cima" ${podeSubir ? '' : 'disabled'}>&#8593;</button>
               <button class="btn-etapa-editar" data-producao-id="${escapeAttr(producaoId)}" data-etapa-id="${escapeAttr(et.id)}">Editar</button>
               <button class="btn-etapa-deletar" data-producao-id="${escapeAttr(producaoId)}" data-etapa-id="${escapeAttr(et.id)}">Excluir</button>
             </div>
