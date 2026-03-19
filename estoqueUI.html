@@ -110,6 +110,21 @@
       return `R$ ${seguro.toFixed(2)}`;
     }
 
+    function ehTipoProduto(valor) {
+      return String(valor || '').trim().toUpperCase() === 'PRODUTO';
+    }
+
+    function obterCustoUnitarioItem(item) {
+      return parseNumeroInput(item?.custo_unitario ?? item?.valor_unit ?? 0);
+    }
+
+    function obterPrecoVendaUnitarioItem(item) {
+      const bruto = String(item?.preco_venda ?? '').trim();
+      if (!bruto) return null;
+      const valor = parseNumeroInput(item?.preco_venda ?? 0);
+      return isNaN(valor) ? 0 : valor;
+    }
+
     function escapeHtml(valor) {
       return String(valor ?? '')
         .replace(/&/g, '&amp;')
@@ -578,7 +593,15 @@
       div.className = 'card';
       div.dataset.id = i.ID;
       const isMadeira = String(i.tipo || '').toUpperCase() === 'MADEIRA';
-      const valorTotal = Number(i.quantidade || 0) * Number(i.custo_unitario ?? i.valor_unit ?? 0);
+      const isProduto = ehTipoProduto(i.tipo);
+      const quantidade = Number(i.quantidade || 0);
+      const custoUnit = obterCustoUnitarioItem(i);
+      const precoVendaUnit = obterPrecoVendaUnitarioItem(i);
+      const valorUnitExibicao = isProduto ? Number(precoVendaUnit ?? 0) : custoUnit;
+      const valorTotalExibicao = quantidade * valorUnitExibicao;
+      const resumoValor = isProduto
+        ? `Valor venda unit.: ${formatarMoeda(valorUnitExibicao)} | Total: ${formatarMoeda(valorTotalExibicao)}`
+        : `Valor: ${formatarMoeda(valorTotalExibicao)}`;
       const itemLabel = escapeHtml(i.item || '-');
       const tipoLabel = escapeHtml(i.tipo || '-');
       const categoriaLabel = escapeHtml(i.categoria || '-');
@@ -594,7 +617,7 @@
           ${tipoLabel} - ${categoriaLabel}<br>
           ${quantidadeLabel} ${unidadeLabel}
           ${isMadeira ? `<br><span>(${comprimentoLabel} x ${larguraLabel} x ${espessuraLabel}) cm</span>` : ''}
-          <div class="card-resumo-valor">Valor: ${formatarMoeda(valorTotal)}</div>
+          <div class="card-resumo-valor">${resumoValor}</div>
         </div>
 
         <button class="ver-mais">Ver mais</button>
@@ -605,6 +628,12 @@
 
     function montarDetalhesCard(i) {
       const isMadeira = String(i.tipo || '').toUpperCase() === 'MADEIRA';
+      const isProduto = ehTipoProduto(i.tipo);
+      const quantidade = Number(i.quantidade || 0);
+      const custoUnit = obterCustoUnitarioItem(i);
+      const custoTotal = quantidade * custoUnit;
+      const precoVendaUnit = obterPrecoVendaUnitarioItem(i);
+      const precoVendaTotal = precoVendaUnit === null ? null : quantidade * precoVendaUnit;
       const idJs = JSON.stringify(String(i.ID || ''));
       const fornecedor = escapeHtml(i.fornecedor || '-');
       const pagoPor = escapeHtml(i.pago_por || '-');
@@ -622,9 +651,11 @@
         <p><b>Data de pagamento:</b> ${dataPagamento}</p>
         <p><b>Forma de pagamento:</b> ${formaPagamento}</p>
         <p><b>Parcelas:</b> ${Number(i.parcelas || 1)}</p>
-        <p><b>Custo unitario:</b> R$ ${Number(i.custo_unitario ?? i.valor_unit ?? 0).toFixed(2)}</p>
-        <p><b>Custo total item:</b> ${formatarMoeda(Number(i.quantidade || 0) * Number(i.custo_unitario ?? i.valor_unit ?? 0))}</p>
-        <p><b>Preco de venda:</b> ${String(i.preco_venda ?? '').trim() === '' ? '-' : `R$ ${Number(i.preco_venda || 0).toFixed(2)}`}</p>
+        <p><b>Custo unitario:</b> ${formatarMoeda(custoUnit)}</p>
+        <p><b>Custo total item:</b> ${formatarMoeda(custoTotal)}</p>
+        <p><b>Preco de venda unitario:</b> ${precoVendaUnit === null ? '-' : formatarMoeda(precoVendaUnit)}</p>
+        <p><b>Valor total de venda:</b> ${precoVendaTotal === null ? '-' : formatarMoeda(precoVendaTotal)}</p>
+        ${isProduto ? '<p><b>Regra PRODUTO:</b> cards/dashboard usam valor de venda para valorizacao de estoque.</p>' : ''}
         <p><b>Observacao:</b> ${observacao}</p>
 
         ${isMadeira ? `

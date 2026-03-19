@@ -82,15 +82,18 @@ function parseBooleanFinanceiro(valor) {
   return s === 'true' || s === '1' || s === 'sim' || s === 'yes';
 }
 
-function obterCustoUnitarioEstoqueDashboard(item) {
+function obterValorUnitarioEstoqueDashboard(item) {
   const tipo = String(item?.tipo || '').trim().toUpperCase();
+  const precoVendaBruto = String(item?.preco_venda ?? '').trim();
+  const precoVenda = parseNumeroBR(precoVendaBruto);
   const custoBruto = String(item?.custo_unitario ?? '').trim();
   const custoUnitario = parseNumeroBR(custoBruto);
 
-  // Para PRODUTO, valuation deve usar custo de producao (custo_unitario), nao preco/venda legado.
+  // Para PRODUTO, valuation de estoque usa preco de venda.
+  // Sem fallback para custo: se preco de venda estiver vazio, valor do item no dashboard = 0.
   if (tipo === 'PRODUTO') {
-    if (custoBruto === '') return 0;
-    return custoUnitario;
+    if (precoVendaBruto === '') return 0;
+    return precoVenda;
   }
 
   if (custoBruto !== '') {
@@ -1771,7 +1774,7 @@ function obterResumoDashboardFinanceiro(referenciaYm, forcarRecarregar) {
   const valorEstoquePorTipo = {};
   estoque.forEach(item => {
     const quantidade = parseNumeroBR(item.quantidade);
-    const valorUnit = obterCustoUnitarioEstoqueDashboard(item);
+    const valorUnit = obterValorUnitarioEstoqueDashboard(item);
     const valor = round2Financeiro(Math.max(0, quantidade * valorUnit));
     valorEstoqueTotal = round2Financeiro(valorEstoqueTotal + valor);
 
@@ -2307,14 +2310,14 @@ function obterComposicaoCardDashboardFinanceiro(referenciaYm, cardKey, forcarRec
       const meta = obterMetaOrigem(ORIGEM_TIPO_ESTOQUE, id);
       if (!meta) return null;
       const quantidade = round2Financeiro(parseNumeroBR(item.quantidade));
-      const custo = round2Financeiro(obterCustoUnitarioEstoqueDashboard(item));
+      const valorUnit = round2Financeiro(obterValorUnitarioEstoqueDashboard(item));
       return {
         linha_id: `EST:${id}`,
         tipo_linha: 'estoque',
         titulo: meta.titulo,
         detalhe: `${meta.detalhe} | Qtd: ${quantidade} ${String(item.unidade || '').trim() || ''}`.trim(),
         data: formatarDataYmdFinanceiroSafe(item.comprado_em),
-        valor: round2Financeiro(Math.max(0, quantidade * custo)),
+        valor: round2Financeiro(Math.max(0, quantidade * valorUnit)),
         origem_tipo: meta.origem_tipo,
         origem_id: meta.origem_id,
         origem_aba: meta.origem_aba,
