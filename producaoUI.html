@@ -379,6 +379,35 @@
       }).join('');
     }
 
+    function renderSaidasPrevistas(saidasPrevistas) {
+      const lista = Array.isArray(saidasPrevistas) ? saidasPrevistas : [];
+      if (lista.length === 0) {
+        return '<p>As saidas serao geradas ao atualizar o estoque.</p>';
+      }
+
+      const cards = lista.map(s => {
+        const nome = String(s.nome_saida || '').trim() || '-';
+        const qtd = Number(s.quantidade || 0).toFixed(2);
+        const unidade = String(s.unidade || '').trim();
+        const tipo = String(s.tipo_item || '').trim();
+        const categoria = String(s.categoria || '').trim();
+        const meta = [
+          `Qtd prevista: ${qtd} ${unidade}`,
+          tipo ? `Tipo: ${tipo}` : '',
+          categoria ? `Categoria: ${categoria}` : ''
+        ].filter(Boolean).join(' | ');
+
+        return `
+          <div class="receita-card">
+            <div><strong>${escapeHtml(nome)}</strong></div>
+            <div class="comp-meta">${escapeHtml(meta)}</div>
+          </div>
+        `;
+      }).join('');
+
+      return `<p>As saidas serao geradas ao atualizar o estoque.</p>${cards}`;
+    }
+
     function renderChecklist(etapas, producaoId) {
       if (!Array.isArray(etapas) || etapas.length === 0) {
         return '<p>Nenhuma etapa cadastrada.</p>';
@@ -481,7 +510,7 @@
       const labelEstoque = estoqueAtualizado ? 'Estoque atualizado' : 'Atualizar estoque';
       const idJs = JSON.stringify(String(i.producao_id || ''));
       const saidasHtml = !estoqueAtualizado
-        ? '<p>As saidas serao geradas ao atualizar o estoque.</p>'
+        ? renderSaidasPrevistas(i.saidas_previstas)
         : (Array.isArray(i.saidasLotes)
           ? renderSaidasLotes(i.saidasLotes, i.producao_id, true)
           : '<p>Carregando saidas geradas...</p>');
