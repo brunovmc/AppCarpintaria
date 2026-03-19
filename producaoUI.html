@@ -478,6 +478,23 @@
       const tiposSaida = Number(
         i.saidas_previstas_tipos || (Array.isArray(i.saidas_previstas) ? i.saidas_previstas.length : 0)
       );
+      const etapasOrdenadas = Array.isArray(i.etapas)
+        ? [...i.etapas].sort((a, b) => {
+          const ordemA = Number(a?.ordem || 0);
+          const ordemB = Number(b?.ordem || 0);
+          if (ordemA === ordemB) return 0;
+          return ordemA - ordemB;
+        })
+        : [];
+      const totalEtapas = etapasOrdenadas.length;
+      const etapasConcluidas = etapasOrdenadas
+        .filter(et => String(et?.feito).toLowerCase() === 'true')
+        .length;
+      const proximaEtapaPendente = etapasOrdenadas
+        .find(et => String(et?.feito).toLowerCase() !== 'true');
+      const etapaAtual = proximaEtapaPendente
+        ? (String(proximaEtapaPendente.nome_etapa || '').trim() || '-')
+        : (totalEtapas > 0 ? 'Concluida' : '-');
       const resumoSaidas = totalSaidasPrevistas > 0
         ? `${formatQuantidadeResumo(totalSaidasPrevistas)} saidas previstas${tiposSaida > 1 ? ` (${tiposSaida} tipos)` : ''}`
         : 'Sem saidas previstas';
@@ -486,12 +503,16 @@
       const qtdPlanejada = escapeHtml(i.qtd_planejada || 0);
       const unidadeLabel = escapeHtml(unidade);
       const resumoSaidasLabel = escapeHtml(resumoSaidas);
+      const etapasConcluidasLabel = escapeHtml(`Etapas concluidas: ${etapasConcluidas}/${totalEtapas}`);
+      const etapaAtualLabel = escapeHtml(`Etapa atual: ${etapaAtual}`);
 
       div.innerHTML = `
         <div class="card-resumo">
           <strong>${nomeLabel}</strong><br>
           ${statusLabel}<br>
           ${qtdPlanejada} ${unidadeLabel}<br>
+          ${etapasConcluidasLabel}<br>
+          ${etapaAtualLabel}<br>
           ${resumoSaidasLabel}
         </div>
 
