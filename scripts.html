@@ -2005,7 +2005,17 @@
         labelEl.className = 'sr-only';
         labelEl.setAttribute('for', campo.id);
         labelEl.textContent = label;
-        wrap.insertBefore(labelEl, campo);
+        const campoDentroLabel = campo.closest('label');
+        if (campoDentroLabel && wrap.contains(campoDentroLabel) && campoDentroLabel !== wrap) {
+          wrap.insertBefore(labelEl, campoDentroLabel);
+          return;
+        }
+        const parent = campo.parentElement;
+        if (parent && wrap.contains(parent)) {
+          parent.insertBefore(labelEl, campo);
+          return;
+        }
+        wrap.insertBefore(labelEl, wrap.firstChild);
       });
     });
   }
