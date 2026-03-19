@@ -332,15 +332,34 @@
         return '<p>Nenhuma saida gerada para esta OP.</p>';
       }
 
+      const montarContextoSaida = lote => {
+        const estoqueId = String(lote?.estoque_id || '').trim();
+        if (!estoqueId) return 'Destino no estoque: -';
+
+        const itemEstoque = (estoqueOpcoes || []).find(i => String(i?.ID || '').trim() === estoqueId);
+        if (!itemEstoque) {
+          return `Destino no estoque: ID ${estoqueId}`;
+        }
+
+        const partes = [`Destino no estoque: ${String(itemEstoque.item || estoqueId).trim()}`];
+        const tipo = String(itemEstoque.tipo || '').trim();
+        const categoria = String(itemEstoque.categoria || '').trim();
+        if (tipo) partes.push(`Tipo: ${tipo}`);
+        if (categoria) partes.push(`Categoria: ${categoria}`);
+        return partes.join(' | ');
+      };
+
       return lista.map(l => {
         const quantidade = Number(l.quantidade || 0).toFixed(2);
         const custoUnit = Number(l.custo_unitario || 0).toFixed(4);
         const custoTotal = Number(l.custo_total || 0).toFixed(2);
         const inputId = `custoLote_${String(l.id || '').replace(/[^a-zA-Z0-9_-]/g, '')}`;
+        const contextoSaida = montarContextoSaida(l);
 
         return `
           <div class="receita-card">
             <div><strong>${escapeHtml(l.nome_saida || l.estoque_id || l.id)}</strong></div>
+            <div class="comp-meta">${escapeHtml(contextoSaida)}</div>
             <div class="comp-meta">
               Qtd: ${quantidade} ${escapeHtml(l.unidade || '')} | Custo total lote: R$ ${custoTotal}
             </div>
