@@ -85,12 +85,13 @@
     function filter({ texto } = {}) {
       let resultado = [...itens];
       if (texto) {
-        const t = String(texto || '').toLowerCase();
-        const toText = v => String(v ?? '');
+        const incluiTexto = window.AppSearch?.includesText
+          ? window.AppSearch.includesText
+          : (base, termo) => String(base ?? '').toLowerCase().includes(String(termo ?? '').toLowerCase());
         resultado = resultado.filter(i =>
-          toText(i.item).toLowerCase().includes(t) ||
-          toText(i.recebido_por).toLowerCase().includes(t) ||
-          toText(i.forma_pagamento).toLowerCase().includes(t)
+          incluiTexto(i.item, texto) ||
+          incluiTexto(i.recebido_por, texto) ||
+          incluiTexto(i.forma_pagamento, texto)
         );
       }
       return ordenar(resultado);

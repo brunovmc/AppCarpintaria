@@ -282,7 +282,10 @@
 
     function filtrarDespesas(lista, texto) {
       const arr = Array.isArray(lista) ? lista : [];
-      const termo = String(texto || '').trim().toLowerCase();
+      const normalizarTexto = window.AppSearch?.normalizeText
+        ? window.AppSearch.normalizeText
+        : valor => String(valor ?? '').toLowerCase().trim();
+      const termo = normalizarTexto(texto);
       if (!termo) return arr;
       return arr.filter(d => {
         const blob = [
@@ -294,7 +297,7 @@
           d?.forma_pagamento,
           d?.observacao
         ]
-          .map(v => String(v || '').toLowerCase())
+          .map(v => normalizarTexto(v))
           .join(' ');
         return blob.includes(termo);
       });

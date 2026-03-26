@@ -72,10 +72,11 @@
       let resultado = [...itens];
 
       if (texto) {
-        const t = texto.toLowerCase();
-        const toText = v => String(v ?? '');
+        const incluiTexto = window.AppSearch?.includesText
+          ? window.AppSearch.includesText
+          : (base, termo) => String(base ?? '').toLowerCase().includes(String(termo ?? '').toLowerCase());
         resultado = resultado.filter(i =>
-          toText(i.nome_produto).toLowerCase().includes(t)
+          incluiTexto(i.nome_produto, texto)
         );
       }
 

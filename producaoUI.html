@@ -16,6 +16,7 @@
     function el() {
       return {
         formulario: document.getElementById('formularioProducao'),
+        miniDashboard: document.getElementById('miniDashboardProducao'),
         lista: document.getElementById('listaProducao'),
         modalDetalhes: document.getElementById('modalDetalhesProducao'),
         modalDetalhesConteudo: document.getElementById('modalDetalhesProducaoConteudo'),
@@ -379,6 +380,96 @@
       }).join('');
     }
 
+    function normalizarCategoriaDashboard(valor) {
+      const categoria = String(valor || '').trim();
+      return categoria || 'Sem categoria';
+    }
+
+    function agregarSaidasPorCategoria(itens) {
+      const mapaCategorias = {};
+      let totalSaidas = 0;
+
+      (Array.isArray(itens) ? itens : []).forEach(op => {
+        const saidasPrevistas = Array.isArray(op?.saidas_previstas) ? op.saidas_previstas : [];
+        saidasPrevistas.forEach(saida => {
+          const quantidade = Number(saida?.quantidade || 0);
+          if (!isFinite(quantidade) || quantidade <= 0) return;
+
+          const categoria = normalizarCategoriaDashboard(saida?.categoria);
+          mapaCategorias[categoria] = (mapaCategorias[categoria] || 0) + quantidade;
+          totalSaidas += quantidade;
+        });
+      });
+
+      const categorias = Object.keys(mapaCategorias)
+        .map(categoria => ({
+          categoria,
+          quantidade: Number(mapaCategorias[categoria] || 0)
+        }))
+        .sort((a, b) => {
+          if (b.quantidade !== a.quantidade) return b.quantidade - a.quantidade;
+          return a.categoria.localeCompare(b.categoria);
+        });
+
+      return {
+        categorias,
+        totalSaidas
+      };
+    }
+
+    function calcularValorPrevistoVendaPecas(_itens) {
+      // Preparado para evolucao futura: somar valor previsto de venda das pecas.
+      return null;
+    }
+
+    function renderMiniDashboardProducao(itens) {
+      const { miniDashboard } = el();
+      if (!miniDashboard) return;
+
+      const lista = Array.isArray(itens) ? itens : [];
+      const resumoCategorias = agregarSaidasPorCategoria(lista);
+      const totalOps = lista.length;
+      const valorPrevistoPecas = calcularValorPrevistoVendaPecas(lista);
+
+      const cardCategoriasHtml = resumoCategorias.categorias.length === 0
+        ? '<p class="producao-mini-dashboard-empty">Sem saidas previstas no filtro atual.</p>'
+        : resumoCategorias.categorias.map(item => `
+          <div class="producao-mini-dashboard-linha">
+            <span>${escapeHtml(item.categoria)}</span>
+            <strong>${escapeHtml(formatQuantidadeResumo(item.quantidade))} un</strong>
+          </div>
+        `).join('');
+
+      const valorPrevistoHtml = valorPrevistoPecas === null
+        ? 'Em breve'
+        : `R$ ${formatMoeda(valorPrevistoPecas)}`;
+
+      miniDashboard.innerHTML = `
+        <div class="producao-mini-dashboard-head">
+          <div class="producao-mini-dashboard-card">
+            <div class="producao-mini-dashboard-label">OPs no filtro</div>
+            <div class="producao-mini-dashboard-valor">${escapeHtml(String(totalOps))}</div>
+          </div>
+
+          <div class="producao-mini-dashboard-card">
+            <div class="producao-mini-dashboard-label">Saidas previstas</div>
+            <div class="producao-mini-dashboard-valor">${escapeHtml(formatQuantidadeResumo(resumoCategorias.totalSaidas))} un</div>
+          </div>
+
+          <div class="producao-mini-dashboard-card producao-mini-dashboard-card-placeholder">
+            <div class="producao-mini-dashboard-label">Valor previsto venda pecas</div>
+            <div class="producao-mini-dashboard-valor">${escapeHtml(valorPrevistoHtml)}</div>
+            <div class="producao-mini-dashboard-sub">Preparado para calculo futuro</div>
+          </div>
+        </div>
+
+        <div class="producao-mini-dashboard-categorias">
+          <div class="producao-mini-dashboard-titulo">Saidas por categoria</div>
+          ${cardCategoriasHtml}
+        </div>
+      `;
+    }
+
     function renderSaidasPrevistas(saidasPrevistas) {
       const lista = Array.isArray(saidasPrevistas) ? saidasPrevistas : [];
       if (lista.length === 0) {
@@ -604,6 +695,7 @@
       const jobId = renderJobSeq;
       lista.innerHTML = '';
       listaFiltradaAtual = Array.isArray(listaItens) ? listaItens : [];
+      renderMiniDashboardProducao(listaFiltradaAtual);
       qtdRenderizada = 0;
 
       if (listaFiltradaAtual.length === 0) {

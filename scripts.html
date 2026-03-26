@@ -1068,6 +1068,29 @@
     }, 2500);
   }
 
+  function createSearchHelper() {
+    function normalizeText(valor) {
+      const bruto = String(valor ?? '');
+      const semAcento = (typeof bruto.normalize === 'function')
+        ? bruto.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+        : bruto;
+      return semAcento.toLowerCase().trim();
+    }
+
+    function includesText(base, termo) {
+      const needle = normalizeText(termo);
+      if (!needle) return true;
+      return normalizeText(base).includes(needle);
+    }
+
+    return {
+      normalizeText,
+      includesText
+    };
+  }
+
+  window.AppSearch = window.AppSearch || createSearchHelper();
+
   /* =========================
      BUSCA + FILTROS (STATE)
   ========================== */
