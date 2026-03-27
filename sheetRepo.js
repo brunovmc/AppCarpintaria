@@ -1,4 +1,9 @@
-function getDataSpreadsheet() {
+function getDataSpreadsheet(opcoes) {
+  const opts = opcoes || {};
+  if (!opts.skipAccessCheck && typeof assertCanRead === 'function') {
+    assertCanRead('Acesso aos dados');
+  }
+
   const id = (typeof DATA_SPREADSHEET_ID === 'string')
     ? DATA_SPREADSHEET_ID.trim()
     : '';
@@ -25,6 +30,18 @@ function getAppCacheKey(scope) {
 }
 
 function appCacheGetJson(scope) {
+  const escopo = String(scope || '').trim().toUpperCase();
+  const scopeLiberadoAcesso = (typeof USUARIOS_ACESSO_CACHE_SCOPE === 'string')
+    ? String(USUARIOS_ACESSO_CACHE_SCOPE || '').trim().toUpperCase()
+    : 'USUARIOS_ACESSO_MAPA';
+  if (
+    typeof assertCanRead === 'function' &&
+    escopo &&
+    escopo !== scopeLiberadoAcesso
+  ) {
+    assertCanRead(`Leitura de cache ${escopo}`);
+  }
+
   const key = getAppCacheKey(scope);
   try {
     const raw = CacheService.getScriptCache().get(key);

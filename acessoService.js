@@ -102,7 +102,7 @@ function carregarUsuariosAcessoConfig(forcarRecarregar) {
     }
   }
 
-  const sheet = getDataSpreadsheet().getSheetByName(ABA_USUARIOS_ACESSO);
+  const sheet = getDataSpreadsheet({ skipAccessCheck: true }).getSheetByName(ABA_USUARIOS_ACESSO);
   if (!sheet) {
     const vazio = { configurado: false, mapa: {}, total_usuarios_ativos: 0 };
     salvarCacheUsuariosAcesso(vazio);
@@ -154,6 +154,7 @@ function obterContextoUsuario(forcarRecarregar) {
       email,
       role: 'admin',
       ativo: true,
+      can_read: true,
       can_write: true,
       read_only: false,
       motivo: '',
@@ -166,6 +167,7 @@ function obterContextoUsuario(forcarRecarregar) {
       email: '',
       role: 'viewer',
       ativo: false,
+      can_read: false,
       can_write: false,
       read_only: true,
       motivo: 'Nao foi possivel identificar seu email no Apps Script.',
@@ -179,6 +181,7 @@ function obterContextoUsuario(forcarRecarregar) {
       email,
       role: 'viewer',
       ativo: false,
+      can_read: false,
       can_write: false,
       read_only: true,
       motivo: 'Usuario nao cadastrado como ativo na aba USUARIOS.',
@@ -191,11 +194,20 @@ function obterContextoUsuario(forcarRecarregar) {
     email,
     role: usuario.role,
     ativo: true,
+    can_read: true,
     can_write: canWrite,
     read_only: !canWrite,
     motivo: canWrite ? '' : 'Perfil somente leitura.',
     configurado: true
   };
+}
+
+function assertCanRead(acao) {
+  const contexto = String(acao || 'Operacao de leitura').trim() || 'Operacao de leitura';
+  const acesso = obterContextoUsuario(false);
+  if (acesso.can_read) return true;
+  const motivo = String(acesso.motivo || 'Usuario sem permissao de leitura.').trim();
+  throw new Error(`${contexto} bloqueada. ${motivo} Entre em contato com o administrador.`);
 }
 
 function assertCanWrite(acao) {

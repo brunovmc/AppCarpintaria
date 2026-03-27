@@ -12,6 +12,19 @@
     <!-- 🔔 TOAST -->
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
+    <section id="appAccessDenied" class="app-access-denied hidden" role="alert" aria-live="assertive">
+      <h1>Acesso nao autorizado</h1>
+      <p id="appAccessDeniedMsg">
+        Seu usuario nao possui permissao para acessar os dados deste app.
+      </p>
+      <p class="app-access-denied-email">
+        Conta atual: <strong id="appAccessDeniedEmail">-</strong>
+      </p>
+      <p class="app-access-denied-help">
+        Entre em contato com o administrador para solicitar acesso.
+      </p>
+    </section>
+
     <!-- NAVBAR -->
     <div class="navbar">
       <button type="button" data-aba="dashboard" onclick="trocarAba('dashboard')">Inicio</button>

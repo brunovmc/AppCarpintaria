@@ -710,16 +710,43 @@
     let inFlight = null;
     let mutationLockToken = null;
 
+    function aplicarTelaAcesso(ctx) {
+      const bloqueado = ctx?.can_read === false;
+      const painel = document.getElementById('appAccessDenied');
+      const emailEl = document.getElementById('appAccessDeniedEmail');
+      const msgEl = document.getElementById('appAccessDeniedMsg');
+
+      if (emailEl) {
+        emailEl.textContent = String(ctx?.email || '-').trim() || '-';
+      }
+      if (msgEl) {
+        msgEl.textContent = bloqueado
+          ? (String(ctx?.motivo || '').trim() || 'Seu usuario nao possui permissao para acessar os dados deste app.')
+          : 'Seu usuario nao possui permissao para acessar os dados deste app.';
+      }
+      if (painel) {
+        painel.classList.toggle('hidden', !bloqueado);
+      }
+
+      const ocultar = bloqueado;
+      document.querySelectorAll('.navbar, #appSyncBanner, .top-bar, #painelFiltroEstoque, #painelFiltroCompras, .aba, .bottom-bar')
+        .forEach(el => el.classList.toggle('hidden', ocultar));
+    }
+
     function normalizarContexto(raw) {
       const base = raw && typeof raw === 'object' ? raw : {};
-      const canWrite = base.can_write === true;
+      const canRead = base.can_read !== false;
+      const canWrite = canRead && base.can_write === true;
       const motivo = String(base.motivo || '').trim();
       return {
         ...base,
+        can_read: canRead,
         can_write: canWrite,
         read_only: !canWrite,
         role: String(base.role || (canWrite ? 'admin' : 'viewer') || '').trim(),
-        motivo: canWrite ? '' : (motivo || 'Perfil somente leitura.')
+        motivo: canRead
+          ? (canWrite ? '' : (motivo || 'Perfil somente leitura.'))
+          : (motivo || 'Usuario sem permissao para visualizar os dados.')
       };
     }
 
@@ -748,6 +775,7 @@
       }
 
       sincronizarBloqueioMutacao(ctx.can_write);
+      aplicarTelaAcesso(ctx);
 
       if (typeof window !== 'undefined') {
         try {
@@ -779,9 +807,10 @@
 
       if (!window.google?.script?.run) {
         const offline = aplicar({
+          can_read: false,
           can_write: false,
           role: 'viewer',
-          motivo: 'Sem conexao com backend - escrita bloqueada.'
+          motivo: 'Sem conexao com backend - nao foi possivel validar seu acesso.'
         });
         return Promise.resolve(offline);
       }
@@ -794,6 +823,7 @@
           .withFailureHandler(err => {
             const mensagem = String(err?.message || err || '').trim();
             resolve(aplicar({
+              can_read: false,
               can_write: false,
               role: 'viewer',
               motivo: mensagem || 'Falha ao validar perfil de acesso.'
@@ -2564,13 +2594,24 @@
     });
   }
 
-  document.addEventListener('DOMContentLoaded', () => {
+  document.addEventListener('DOMContentLoaded', async () => {
     initLongTaskMonitor();
+
+    let contextoAcesso = null;
+    if (window.AppUserAccess?.load) {
+      try {
+        contextoAcesso = await window.AppUserAccess.load();
+      } catch (error) {
+        contextoAcesso = null;
+      }
+    }
+
+    if (contextoAcesso && contextoAcesso.can_read === false) {
+      return;
+    }
+
     initNavbarHamburger();
     registrarListenersFiltrosStore();
-    if (window.AppUserAccess?.load) {
-      window.AppUserAccess.load();
-    }
     initModalA11y();
     initCampoAjudaA11y();
     trocarAba(lerUltimaAba() || ABA_INICIAL_PADRAO);
