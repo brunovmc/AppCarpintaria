@@ -84,6 +84,12 @@
       return true;
     }
 
+    function marcarDashboardComoSujo() {
+      if (window.AppTabRefresh?.markDirty) {
+        window.AppTabRefresh.markDirty('dashboard');
+      }
+    }
+
     function isTipoValidacao(tipo) {
       const t = String(tipo || '').toUpperCase();
       return (tiposValidacao || []).some(v => String(v || '').toUpperCase() === t);
@@ -519,6 +525,7 @@
           editandoId = null;
           carregarProdutos();
           atualizarOpcoesReceitas();
+          marcarDashboardComoSujo();
           mostrarToast('Salvo com sucesso');
           setSalvando(false);
         })
@@ -602,6 +609,7 @@
         })
         .withSuccessHandler(() => {
           atualizarOpcoesReceitas();
+          marcarDashboardComoSujo();
         })
         .deletarProduto(id);
     }

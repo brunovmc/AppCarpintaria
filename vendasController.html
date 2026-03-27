@@ -18,6 +18,9 @@
     }
 
     function invalidarCacheDashboardPorImpacto() {
+      if (window.AppTabRefresh?.markDirty) {
+        window.AppTabRefresh.markDirty('dashboard');
+      }
       const dash = window.DashboardController;
       if (!dash?.invalidarCacheMeses) return;
       const refs = dash.coletarMesesImpactados ? dash.coletarMesesImpactados(...arguments) : [];
@@ -148,7 +151,7 @@
           }
           mostrarToast(err?.message || 'Erro ao carregar vendas', 'erro');
         })
-        .listarVendas();
+        .listarVendas(!!forcarRecarregar);
     }
 
     function salvar() {

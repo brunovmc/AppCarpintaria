@@ -225,6 +225,13 @@
       };
     }
 
+    function composicaoPersistidaEhFresca(entry) {
+      if (!entry || typeof entry !== 'object') return false;
+      const ts = Number(entry.updatedAt || 0);
+      if (!ts) return false;
+      return (Date.now() - ts) <= DASHBOARD_CACHE_TTL_COMPOSICAO_MS;
+    }
+
     function salvarComposicaoPersistida(referencia, cardKey, data, updatedAt, hashForcado = '') {
       const key = getStorageKeyComposicao(referencia, cardKey);
       if (!key) return;
@@ -433,6 +440,9 @@
         .map(r => String(r || '').trim())
         .filter(referenciaEhValida);
       const refs = lista.length > 0 ? [...new Set(lista)] : [getMesReferenciaAtiva()];
+      if (window.AppTabRefresh?.markDirty) {
+        window.AppTabRefresh.markDirty('dashboard');
+      }
 
       refs.forEach(ref => {
         delete cacheResumoLocal[ref];
@@ -864,6 +874,9 @@
           }
           atualizarTextoUltimaAtualizacao(tsAtualizacao);
           setModoSomenteLeitura(false);
+          if (window.AppTabRefresh?.clearDirty) {
+            window.AppTabRefresh.clearDirty('dashboard');
+          }
           if (typeof onDone === 'function') onDone();
         })
         .withFailureHandler(() => {
@@ -983,19 +996,27 @@
       const cacheSessao = lerComposicaoCacheLocal(referencia, key);
       const cachePersistido = lerComposicaoPersistida(referencia, key);
       const payloadCache = cacheSessao || cachePersistido?.data || null;
+      const cachePersistidoFresco = composicaoPersistidaEhFresca(cachePersistido);
+      const cacheFresco = !!cacheSessao || cachePersistidoFresco;
+      const haviaCache = !!payloadCache;
 
       if (payloadCache) {
         renderObservabilidadeCard(payloadCache, key);
         setModoSomenteLeitura(false);
+      }
+
+      if (haviaCache && cacheFresco) {
         return;
       }
 
-      f.obsCardTitulo.textContent = 'Buscando dados';
-      const loadingHtml = window.AppLoading?.inlineHtml
-        ? window.AppLoading.inlineHtml('Carregando')
-        : 'Carregando...';
-      f.obsCardResumo.innerHTML = `<span>${loadingHtml}</span>`;
-      f.obsCardLista.innerHTML = `<p class="dash-empty">${loadingHtml}</p>`;
+      if (!haviaCache) {
+        f.obsCardTitulo.textContent = 'Buscando dados';
+        const loadingHtml = window.AppLoading?.inlineHtml
+          ? window.AppLoading.inlineHtml('Carregando')
+          : 'Carregando...';
+        f.obsCardResumo.innerHTML = `<span>${loadingHtml}</span>`;
+        f.obsCardLista.innerHTML = `<p class="dash-empty">${loadingHtml}</p>`;
+      }
 
       carregandoObservabilidade = true;
       google.script.run
@@ -1013,6 +1034,11 @@
         })
         .withFailureHandler(err => {
           carregandoObservabilidade = false;
+          if (haviaCache) {
+            setModoSomenteLeitura(true, 'Sem conexao com backend - exibindo cache local');
+            mostrarToast('Exibindo ultimo snapshot em cache', 'erro');
+            return;
+          }
           f.obsCardTitulo.textContent = 'Buscando dados';
           f.obsCardResumo.innerHTML = '<span>Falha ao carregar.</span>';
           f.obsCardLista.innerHTML = '<p class="dash-empty">Nao foi possivel carregar os dados deste card.</p>';

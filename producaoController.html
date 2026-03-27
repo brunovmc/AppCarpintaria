@@ -118,6 +118,12 @@
       return true;
     }
 
+    function marcarDashboardComoSujo() {
+      if (window.AppTabRefresh?.markDirty) {
+        window.AppTabRefresh.markDirty('dashboard');
+      }
+    }
+
     function toDateString(value) {
       if (!value) return '';
       if (value instanceof Date) {
@@ -348,6 +354,7 @@
         })
         .withSuccessHandler(() => {
           mostrarToast('Salvo com sucesso');
+          marcarDashboardComoSujo();
           setSalvando(false);
         })
         .atualizarProducao(idAtual, dados);
@@ -387,6 +394,7 @@
 
           if (!itemSalvo || !itemSalvo.producao_id) {
             mostrarToast('Salvo. Atualizando lista...');
+            marcarDashboardComoSujo();
             carregarProducao();
             setSalvando(false);
             return;
@@ -395,6 +403,7 @@
           ProducaoStore.add(itemSalvo);
           renderListaAtual();
           mostrarToast('Salvo com sucesso');
+          marcarDashboardComoSujo();
           setSalvando(false);
         })
         .criarProducao(dados);
@@ -458,6 +467,9 @@
           ProducaoStore.add(snapshot);
           renderListaAtual();
           mostrarToast('Erro ao remover', 'erro');
+        })
+        .withSuccessHandler(() => {
+          marcarDashboardComoSujo();
         })
         .deletarProducao(id);
     }
@@ -568,6 +580,7 @@
             EstoqueController.syncFromBackend();
           }
           renderListaAtual();
+          marcarDashboardComoSujo();
           mostrarToast('Custo da saida atualizado');
         })
         .atualizarCustoLoteSaidaProducao(prodId, lotId, custo);
@@ -602,6 +615,7 @@
           if (window.ProdutosController?.syncFromBackend) {
             ProdutosController.syncFromBackend();
           }
+          marcarDashboardComoSujo();
           carregarProducao(true);
           const msg = resp?.produtoCriado
             ? 'Preco salvo e produto criado automaticamente'
@@ -776,6 +790,7 @@
           carregarVinculosMateriais(payload.producaoId, true);
           carregarSaidasLotes(payload.producaoId, true);
           ProducaoUI.fecharModalConsumo();
+          marcarDashboardComoSujo();
           mostrarToast('Estoque atualizado');
         })
         .consumirEstoque(payload.producaoId, payload.itens);

@@ -267,6 +267,9 @@
 
     function notificarDashboardAlterado() {
       try {
+        if (window.AppTabRefresh?.markDirty) {
+          window.AppTabRefresh.markDirty('dashboard');
+        }
         const dash = window.DashboardController;
         if (dash?.invalidarCacheMeses) {
           const refs = dash.coletarMesesImpactados ? dash.coletarMesesImpactados(...arguments) : [];

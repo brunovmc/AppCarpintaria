@@ -827,20 +827,63 @@
     return `${yyyy}-${mm}`;
   }
 
+  function obterEstadoRefreshAba(nome) {
+    const aba = String(nome || '').trim();
+    if (!aba) return null;
+    if (!abaRefreshState[aba]) {
+      abaRefreshState[aba] = {
+        last: 0,
+        initialized: false,
+        dirty: false
+      };
+    }
+    return abaRefreshState[aba];
+  }
+
+  function marcarAbaComoSuja(nome) {
+    const state = obterEstadoRefreshAba(nome);
+    if (!state) return false;
+    state.dirty = true;
+    return true;
+  }
+
+  function limparAbaSuja(nome) {
+    const state = obterEstadoRefreshAba(nome);
+    if (!state) return false;
+    state.dirty = false;
+    return true;
+  }
+
+  function abaEstaSuja(nome) {
+    const state = obterEstadoRefreshAba(nome);
+    return !!state?.dirty;
+  }
+
+  window.AppTabRefresh = window.AppTabRefresh || {
+    markDirty: marcarAbaComoSuja,
+    clearDirty: limparAbaSuja,
+    isDirty: abaEstaSuja
+  };
+
   function deveRecarregarAba(nome, force = false) {
     const aba = String(nome || '').trim();
     if (!aba) return false;
     const agoraMs = Date.now();
-    const state = abaRefreshState[aba] || { last: 0, initialized: false };
+    const state = obterEstadoRefreshAba(aba);
+    if (!state) return false;
     const ttl = Number(ABA_REFRESH_INTERVAL_MS[aba] || 30000);
 
-    if (force || !state.initialized) {
-      abaRefreshState[aba] = { initialized: true, last: agoraMs };
+    if (force || !state.initialized || !!state.dirty) {
+      state.initialized = true;
+      state.last = agoraMs;
+      state.dirty = false;
       return true;
     }
 
     if (agoraMs - Number(state.last || 0) >= ttl) {
-      abaRefreshState[aba] = { initialized: true, last: agoraMs };
+      state.initialized = true;
+      state.last = agoraMs;
+      state.dirty = false;
       return true;
     }
 

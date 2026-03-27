@@ -16,6 +16,12 @@
       window.AppPerf?.end(token, extra);
     }
 
+    function marcarDashboardComoSujo() {
+      if (window.AppTabRefresh?.markDirty) {
+        window.AppTabRefresh.markDirty('dashboard');
+      }
+    }
+
     function podeAlterarDados(contexto = 'Operacao') {
       if (window.AppRuntime?.ensureWritable) {
         return window.AppRuntime.ensureWritable(contexto);
@@ -177,7 +183,7 @@
           }
           mostrarToast('Erro ao carregar estoque', 'erro');
         })
-        .listarEstoque();
+        .listarEstoque(!!forcarRecarregar);
     }
 
     function syncFromBackend() {
@@ -320,6 +326,7 @@
           })
           .withSuccessHandler(() => {
             mostrarToast('Salvo com sucesso');
+            marcarDashboardComoSujo();
             setSalvando(false);
           })
           .atualizarItemEstoque(idAtual, dados);
@@ -352,6 +359,7 @@
 
           if (!itemSalvo || !itemSalvo.ID) {
             mostrarToast('Salvo. Atualizando lista...');
+            marcarDashboardComoSujo();
             carregarEstoque();
             setSalvando(false);
             return;
@@ -360,6 +368,7 @@
           EstoqueStore.add(itemSalvo);
           EstoqueUI.renderLista(EstoqueStore.get());
           mostrarToast('Salvo com sucesso');
+          marcarDashboardComoSujo();
           setSalvando(false);
         })
         .criarItemEstoque(dados);
@@ -398,6 +407,9 @@
           EstoqueStore.add(snapshot);
           EstoqueUI.renderLista(EstoqueStore.get());
           mostrarToast('Erro ao remover', 'erro');
+        })
+        .withSuccessHandler(() => {
+          marcarDashboardComoSujo();
         })
         .deletarItemEstoque(id);
     }

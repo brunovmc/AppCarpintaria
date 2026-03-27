@@ -59,6 +59,15 @@ function appCacheRemove(scope) {
 function invalidarCachesRelacionadosAba(sheetName) {
   const aba = String(sheetName || '').trim().toUpperCase();
   if (!aba) return;
+  const afetaDashboardFinanceiro =
+    aba === 'ESTOQUE' ||
+    aba === 'COMPRAS' ||
+    aba === 'VENDAS' ||
+    aba === 'DESPESAS_GERAIS' ||
+    aba === 'PAGAMENTOS' ||
+    aba === 'PARCELAS_FINANCEIRAS' ||
+    aba.startsWith('PRODUCAO') ||
+    aba.startsWith('PRODUTOS');
 
   if (aba === 'ESTOQUE' && typeof limparCacheEstoque === 'function') {
     limparCacheEstoque();
@@ -99,10 +108,7 @@ function invalidarCachesRelacionadosAba(sheetName) {
     limparCacheValidacoes();
   }
 
-  if (
-    (aba === 'ESTOQUE' || aba === 'COMPRAS' || aba === 'VENDAS' || aba === 'DESPESAS_GERAIS' || aba === 'PAGAMENTOS' || aba === 'PARCELAS_FINANCEIRAS') &&
-    typeof limparCacheDashboardFinanceiro === 'function'
-  ) {
+  if (afetaDashboardFinanceiro && typeof limparCacheDashboardFinanceiro === 'function') {
     limparCacheDashboardFinanceiro();
   }
 }
