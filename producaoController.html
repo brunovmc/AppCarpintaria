@@ -121,6 +121,10 @@
     function marcarDashboardComoSujo() {
       if (window.AppTabRefresh?.markDirty) {
         window.AppTabRefresh.markDirty('dashboard');
+        window.AppTabRefresh.markDirty('estoque');
+      }
+      if (window.DashboardController?.invalidarCacheMeses) {
+        window.DashboardController.invalidarCacheMeses();
       }
     }
 
@@ -165,26 +169,32 @@
       }));
     }
 
-    function carregarProdutos() {
+    function carregarProdutos(forcarRecarregar = false, onDone) {
       google.script.run
         .withSuccessHandler(lista => {
           produtos = Array.isArray(lista) ? lista : [];
           ProducaoUI.renderProdutos(produtos);
+          if (typeof onDone === 'function') onDone();
         })
-        .listarProdutos();
+        .withFailureHandler(() => {
+          if (typeof onDone === 'function') onDone();
+        })
+        .listarProdutos(!!forcarRecarregar);
     }
 
-    function carregarEstoqueOpcoes() {
+    function carregarEstoqueOpcoes(forcarRecarregar = false, onDone) {
       google.script.run
         .withSuccessHandler(lista => {
           estoqueOpcoes = Array.isArray(lista) ? lista : [];
           ProducaoUI.setEstoqueOpcoes?.(estoqueOpcoes);
+          if (typeof onDone === 'function') onDone();
         })
         .withFailureHandler(() => {
           estoqueOpcoes = [];
           ProducaoUI.setEstoqueOpcoes?.([]);
+          if (typeof onDone === 'function') onDone();
         })
-        .listarEstoque();
+        .listarEstoque(!!forcarRecarregar);
     }
 
     function carregarValidacoes() {
@@ -252,7 +262,7 @@
         .listarReceitasProduto(produtoId);
     }
 
-    function carregarProducao(forcarRecarregar = false) {
+    function carregarProducao(forcarRecarregar = false, onDone) {
       const exibindoCache = !forcarRecarregar && hidratarProducaoDoCache();
       google.script.run
         .withSuccessHandler(lista => {
@@ -261,6 +271,7 @@
           }
           ProducaoStore.set(lista);
           renderListaAtual();
+          if (typeof onDone === 'function') onDone();
         })
         .withFailureHandler(err => {
           if (exibindoCache) {
@@ -268,18 +279,26 @@
               window.AppRuntime.setReadOnly(true, 'Sem conexao com backend - exibindo cache local');
             }
             mostrarToast('Exibindo ultimo snapshot em cache', 'erro');
+            if (typeof onDone === 'function') onDone();
             return;
           }
           const msg = err?.message || 'Erro ao carregar producao';
           mostrarToast(msg, 'erro');
+          if (typeof onDone === 'function') onDone();
         })
-        .listarProducao();
+        .listarProducao(!!forcarRecarregar);
     }
 
-    function syncFromBackend() {
-      carregarProdutos();
-      carregarEstoqueOpcoes();
-      carregarProducao(true);
+    function syncFromBackend(onDone) {
+      let pendencias = 3;
+      const concluir = () => {
+        pendencias -= 1;
+        if (pendencias > 0) return;
+        if (typeof onDone === 'function') onDone();
+      };
+      carregarProdutos(true, concluir);
+      carregarEstoqueOpcoes(true, concluir);
+      carregarProducao(true, concluir);
     }
 
     function salvar() {
@@ -393,10 +412,18 @@
           ProducaoStore.remove(tempId);
 
           if (!itemSalvo || !itemSalvo.producao_id) {
-            mostrarToast('Salvo. Atualizando lista...');
+            const concluirSync = window.AppSyncFeedback?.iniciar
+              ? window.AppSyncFeedback.iniciar('Salvo com sucesso. Atualizando dados...')
+              : null;
             marcarDashboardComoSujo();
-            carregarProducao();
-            setSalvando(false);
+            carregarProducao(true, () => {
+              if (concluirSync) {
+                concluirSync('Dados atualizados');
+              } else {
+                mostrarToast('Dados atualizados');
+              }
+              setSalvando(false);
+            });
             return;
           }
 
@@ -474,9 +501,10 @@
         .deletarProducao(id);
     }
 
-    function carregarMateriaisPrevistos(id, forcar = false) {
+    function carregarMateriaisPrevistos(id, forcar = false, onDone) {
       const item = ProducaoStore.getById(id);
       if (item && item.materiaisPrevistos && !forcar) {
+        if (typeof onDone === 'function') onDone();
         return;
       }
 
@@ -487,17 +515,20 @@
             custo_previsto: resp.custoPrevisto || 0
           });
           renderListaAtual();
+          if (typeof onDone === 'function') onDone();
         })
         .withFailureHandler(err => {
           const msg = err?.message || 'Erro ao carregar materiais';
           mostrarToast(msg, 'erro');
+          if (typeof onDone === 'function') onDone();
         })
         .obterMateriaisPrevistosProducao(id);
     }
 
-    function carregarVinculosMateriais(id, forcar = false) {
+    function carregarVinculosMateriais(id, forcar = false, onDone) {
       const item = ProducaoStore.getById(id);
       if (item && item.vinculosMateriais && !forcar) {
+        if (typeof onDone === 'function') onDone();
         return;
       }
 
@@ -507,17 +538,20 @@
             vinculosMateriais: Array.isArray(lista) ? lista : []
           });
           renderListaAtual();
+          if (typeof onDone === 'function') onDone();
         })
         .withFailureHandler(err => {
           const msg = err?.message || 'Erro ao carregar vinculos';
           mostrarToast(msg, 'erro');
+          if (typeof onDone === 'function') onDone();
         })
         .listarVinculosMateriaisProducao(id);
     }
 
-    function carregarSaidasLotes(id, forcar = false) {
+    function carregarSaidasLotes(id, forcar = false, onDone) {
       const item = ProducaoStore.getById(id);
       if (item && item.saidasLotes && !forcar) {
+        if (typeof onDone === 'function') onDone();
         return;
       }
 
@@ -527,10 +561,12 @@
             saidasLotes: Array.isArray(lista) ? lista : []
           });
           renderListaAtual();
+          if (typeof onDone === 'function') onDone();
         })
         .withFailureHandler(err => {
           const msg = err?.message || 'Erro ao carregar saidas da OP';
           mostrarToast(msg, 'erro');
+          if (typeof onDone === 'function') onDone();
         })
         .listarSaidasLotesProducao(id);
     }
@@ -612,15 +648,40 @@
           mostrarToast(msg, 'erro');
         })
         .withSuccessHandler(resp => {
-          if (window.ProdutosController?.syncFromBackend) {
-            ProdutosController.syncFromBackend();
-          }
-          marcarDashboardComoSujo();
-          carregarProducao(true);
-          const msg = resp?.produtoCriado
+          const msgBase = resp?.produtoCriado
             ? 'Preco salvo e produto criado automaticamente'
             : 'Preco de venda atualizado';
-          mostrarToast(msg);
+          const concluirSync = window.AppSyncFeedback?.iniciar
+            ? window.AppSyncFeedback.iniciar(`${msgBase}. Atualizando dados...`)
+            : null;
+          let pendenciasSync = 0;
+          const concluirUmaSync = () => {
+            pendenciasSync -= 1;
+            if (pendenciasSync > 0) return;
+            if (concluirSync) {
+              concluirSync('Dados atualizados');
+            } else {
+              mostrarToast('Dados atualizados');
+            }
+          };
+          const agendarSync = fn => {
+            if (typeof fn !== 'function') return;
+            pendenciasSync += 1;
+            fn(() => concluirUmaSync());
+          };
+
+          if (window.ProdutosController?.syncFromBackend) {
+            agendarSync(done => ProdutosController.syncFromBackend(done));
+          }
+          marcarDashboardComoSujo();
+          agendarSync(done => carregarProducao(true, done));
+          if (pendenciasSync === 0) {
+            if (concluirSync) {
+              concluirSync('Dados atualizados');
+            } else {
+              mostrarToast('Dados atualizados');
+            }
+          }
         })
         .atualizarPrecoVendaProdutoSaidaProducao(prodId, nome, preco);
     }
@@ -777,8 +838,27 @@
               EstoqueStore.update(i.ID, { quantidade: i.quantidade });
             });
           }
+          const concluirSync = window.AppSyncFeedback?.iniciar
+            ? window.AppSyncFeedback.iniciar('Estoque atualizado. Atualizando dados...')
+            : null;
+          let pendenciasSync = 0;
+          const concluirUmaSync = () => {
+            pendenciasSync -= 1;
+            if (pendenciasSync > 0) return;
+            if (concluirSync) {
+              concluirSync('Dados atualizados');
+            } else {
+              mostrarToast('Dados atualizados');
+            }
+          };
+          const agendarSync = fn => {
+            if (typeof fn !== 'function') return;
+            pendenciasSync += 1;
+            fn(() => concluirUmaSync());
+          };
+
           if (window.EstoqueController?.syncFromBackend) {
-            EstoqueController.syncFromBackend();
+            agendarSync(done => EstoqueController.syncFromBackend(done));
           }
           if (resp?.producaoAtualizada) {
             ProducaoStore.update(payload.producaoId, resp.producaoAtualizada);
@@ -786,12 +866,18 @@
           if (resp?.saidasLotes) {
             ProducaoStore.update(payload.producaoId, { saidasLotes: resp.saidasLotes });
           }
-          carregarMateriaisPrevistos(payload.producaoId, true);
-          carregarVinculosMateriais(payload.producaoId, true);
-          carregarSaidasLotes(payload.producaoId, true);
+          agendarSync(done => carregarMateriaisPrevistos(payload.producaoId, true, done));
+          agendarSync(done => carregarVinculosMateriais(payload.producaoId, true, done));
+          agendarSync(done => carregarSaidasLotes(payload.producaoId, true, done));
           ProducaoUI.fecharModalConsumo();
           marcarDashboardComoSujo();
-          mostrarToast('Estoque atualizado');
+          if (pendenciasSync === 0) {
+            if (concluirSync) {
+              concluirSync('Dados atualizados');
+            } else {
+              mostrarToast('Dados atualizados');
+            }
+          }
         })
         .consumirEstoque(payload.producaoId, payload.itens);
     }

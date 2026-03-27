@@ -87,6 +87,10 @@
     function marcarDashboardComoSujo() {
       if (window.AppTabRefresh?.markDirty) {
         window.AppTabRefresh.markDirty('dashboard');
+        window.AppTabRefresh.markDirty('producao');
+      }
+      if (window.DashboardController?.invalidarCacheMeses) {
+        window.DashboardController.invalidarCacheMeses();
       }
     }
 
@@ -186,7 +190,7 @@
       return true;
     }
 
-    function carregarProdutos(forcarRecarregar = false) {
+    function carregarProdutos(forcarRecarregar = false, onDone) {
       const exibindoCache = !forcarRecarregar && hidratarProdutosDoCache();
       google.script.run
         .withSuccessHandler(lista => {
@@ -213,6 +217,7 @@
           ProdutosStore.set(normalizada);
           atualizarOpcoesReceitas();
           renderListaAtual();
+          if (typeof onDone === 'function') onDone();
         })
         .withFailureHandler(() => {
           if (exibindoCache) {
@@ -220,15 +225,17 @@
               window.AppRuntime.setReadOnly(true, 'Sem conexao com backend - exibindo cache local');
             }
             mostrarToast('Exibindo ultimo snapshot em cache', 'erro');
+            if (typeof onDone === 'function') onDone();
             return;
           }
           mostrarToast('Erro ao carregar produtos', 'erro');
+          if (typeof onDone === 'function') onDone();
         })
-        .listarProdutos();
+        .listarProdutos(!!forcarRecarregar);
     }
 
-    function syncFromBackend() {
-      carregarProdutos(true);
+    function syncFromBackend(onDone) {
+      carregarProdutos(true, onDone);
     }
 
     function carregarReceitas(produtoId, forcar = false) {
@@ -523,11 +530,22 @@
         })
         .withSuccessHandler(() => {
           editandoId = null;
-          carregarProdutos();
           atualizarOpcoesReceitas();
           marcarDashboardComoSujo();
-          mostrarToast('Salvo com sucesso');
-          setSalvando(false);
+          if (window.AppTabRefresh?.markDirty) {
+            window.AppTabRefresh.markDirty('producao');
+          }
+          const concluirSync = window.AppSyncFeedback?.iniciar
+            ? window.AppSyncFeedback.iniciar('Salvo com sucesso. Atualizando dados...')
+            : null;
+          carregarProdutos(true, () => {
+            if (concluirSync) {
+              concluirSync('Dados atualizados');
+            } else {
+              mostrarToast('Dados atualizados');
+            }
+            setSalvando(false);
+          });
         })
         .salvarProdutoComModelo(
           produtoId,

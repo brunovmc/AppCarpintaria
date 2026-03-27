@@ -1114,6 +1114,32 @@
     }, 2500);
   }
 
+  function createSyncFeedbackHelper() {
+    const MIN_FINAL_DELAY_MS = 450;
+
+    function iniciar(msgInicial = 'Salvo com sucesso. Atualizando dados...', msgFinalPadrao = 'Dados atualizados') {
+      const inicio = Date.now();
+      if (msgInicial) {
+        mostrarToast(msgInicial);
+      }
+      let concluido = false;
+      return function concluir(msgFinal = msgFinalPadrao) {
+        if (concluido) return;
+        concluido = true;
+        const atrasar = Math.max(0, MIN_FINAL_DELAY_MS - (Date.now() - inicio));
+        setTimeout(() => {
+          mostrarToast(msgFinal);
+        }, atrasar);
+      };
+    }
+
+    return {
+      iniciar
+    };
+  }
+
+  window.AppSyncFeedback = window.AppSyncFeedback || createSyncFeedbackHelper();
+
   function createSearchHelper() {
     function normalizeText(valor) {
       const bruto = String(valor ?? '');

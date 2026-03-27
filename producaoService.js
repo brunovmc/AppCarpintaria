@@ -6,6 +6,8 @@ const ABA_PRODUCAO_MATERIAIS_PREVISTOS = 'PRODUCAO_MATERIAIS_PREVISTOS';
 const ABA_PRODUCAO_VINCULOS = 'PRODUCAO_VINCULOS_MATERIAIS';
 const ABA_PRODUCAO_DESTINOS = 'PRODUCAO_DESTINOS';
 const ABA_PRODUCAO_SAIDAS_LOTES = 'PRODUCAO_SAIDAS_LOTES';
+const PRODUCAO_CACHE_SCOPE = 'PRODUCAO_LISTA_ATIVAS';
+const PRODUCAO_CACHE_TTL_SEC = 90;
 
 const PRODUCAO_SCHEMA = [
   'producao_id',
@@ -121,6 +123,29 @@ function formatDateSafe(value, pattern) {
   return Utilities.formatDate(dt, Session.getScriptTimeZone(), fmt);
 }
 
+function lerCacheProducao() {
+  return appCacheGetJson(PRODUCAO_CACHE_SCOPE);
+}
+
+function salvarCacheProducao(lista) {
+  appCachePutJson(PRODUCAO_CACHE_SCOPE, Array.isArray(lista) ? lista : [], PRODUCAO_CACHE_TTL_SEC);
+}
+
+function limparCacheProducao() {
+  return appCacheRemove(PRODUCAO_CACHE_SCOPE);
+}
+
+function recarregarCacheProducao() {
+  limparCacheProducao();
+  const dados = listarProducao(true);
+  return {
+    ok: true,
+    scope: PRODUCAO_CACHE_SCOPE,
+    ttl_segundos: PRODUCAO_CACHE_TTL_SEC,
+    total_itens: Array.isArray(dados) ? dados.length : 0
+  };
+}
+
 function listarProdutosAtivosMapeadosPorNomeProducao() {
   const produtosSheet = getDataSpreadsheet().getSheetByName(ABA_PRODUTOS);
   const produtosRows = produtosSheet ? rowsToObjects(produtosSheet) : [];
@@ -168,9 +193,19 @@ function obterProdutoAtivoPorNomeSaidaProducao(nomeSaida, mapaProdutosPorNome) {
   return mapa[nomeNorm] || null;
 }
 
-function listarProducao() {
+function listarProducao(forcarRecarregar) {
+  if (!forcarRecarregar) {
+    const cached = lerCacheProducao();
+    if (Array.isArray(cached)) {
+      return cached;
+    }
+  }
+
   const sheet = getDataSpreadsheet().getSheetByName(ABA_PRODUCAO);
-  if (!sheet) return [];
+  if (!sheet) {
+    salvarCacheProducao([]);
+    return [];
+  }
 
   const produtosSheet = getDataSpreadsheet().getSheetByName(ABA_PRODUTOS);
   const produtos = produtosSheet ? rowsToObjects(produtosSheet) : [];
@@ -253,7 +288,7 @@ function listarProducao() {
   });
 
   const rows = rowsToObjects(sheet);
-  return rows
+  const lista = rows
     .filter(i => String(i.ativo).toLowerCase() === 'true')
     .map(i => {
       const prod = produtosMap[i.produto_id] || {};
@@ -331,6 +366,9 @@ function listarProducao() {
         etapas: etapasMap[i.producao_id] || []
       };
     });
+
+  salvarCacheProducao(lista);
+  return lista;
 }
 
 function criarProducao(payload) {
@@ -579,6 +617,7 @@ function salvarMateriaisPrevistosSnapshot(producaoId, itens) {
     insert(ABA_PRODUCAO_MATERIAIS_PREVISTOS, novo, PRODUCAO_MATERIAIS_PREVISTOS_SCHEMA);
   });
 
+  invalidarCachesRelacionadosAba(ABA_PRODUCAO);
   return true;
 }
 
@@ -686,6 +725,7 @@ function salvarVinculosMateriaisProducao(producaoId, receitaId, vinculos, opcoes
     insert(ABA_PRODUCAO_VINCULOS, novo, PRODUCAO_VINCULOS_SCHEMA);
   });
 
+  invalidarCachesRelacionadosAba(ABA_PRODUCAO);
   return true;
 }
 
@@ -763,6 +803,7 @@ function salvarDestinosProducao(producaoId, receitaId, destinos, opcoes) {
     insert(ABA_PRODUCAO_DESTINOS, novo, PRODUCAO_DESTINOS_SCHEMA);
   });
 
+  invalidarCachesRelacionadosAba(ABA_PRODUCAO);
   return true;
 }
 
@@ -1031,6 +1072,7 @@ function concluirDestinosProducao(producaoId) {
       : (qtd > 0 ? 'Concluido' : 'Sem quantidade');
     sheet.getRange(i + 1, idxStatus + 1).setValue(status);
   }
+  invalidarCachesRelacionadosAba(ABA_PRODUCAO);
 }
 
 function recalcularMateriaisPrevistosFromVinculos(producaoId) {
@@ -1533,6 +1575,7 @@ function atualizarConsumoVinculosProducao(producaoId, itensConsumidos) {
     sheet.getRange(i + 1, idxConsumida + 1).setValue(novaConsumida);
     sheet.getRange(i + 1, idxStatus + 1).setValue(novoStatus);
   }
+  invalidarCachesRelacionadosAba(ABA_PRODUCAO);
 }
 
 function atualizarEtapasProducao(producaoId, etapas) {

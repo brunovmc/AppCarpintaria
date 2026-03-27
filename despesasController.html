@@ -737,9 +737,17 @@
           });
         })
         .withSuccessHandler(() => {
-          mostrarToast('Despesa salva');
           setSalvandoDespesa(false);
-          carregarDespesas(true);
+          const concluirSync = window.AppSyncFeedback?.iniciar
+            ? window.AppSyncFeedback.iniciar('Despesa salva. Atualizando dados...')
+            : null;
+          carregarDespesas(true, () => {
+            if (concluirSync) {
+              concluirSync('Dados atualizados');
+            } else {
+              mostrarToast('Dados atualizados');
+            }
+          });
           notificarDashboardAlterado(despesaAnterior, payload);
         });
 
@@ -970,8 +978,16 @@
         })
         .withSuccessHandler(() => {
           setSalvandoPagamentoDespesa(false);
-          mostrarToast('Pagamento registrado');
-          carregarDespesas(true);
+          const concluirSync = window.AppSyncFeedback?.iniciar
+            ? window.AppSyncFeedback.iniciar('Pagamento registrado. Atualizando dados...')
+            : null;
+          carregarDespesas(true, () => {
+            if (concluirSync) {
+              concluirSync('Dados atualizados');
+            } else {
+              mostrarToast('Dados atualizados');
+            }
+          });
           notificarDashboardAlterado(despesaAtual, {
             data_pagamento: dataPagamento
           });

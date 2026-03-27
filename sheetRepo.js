@@ -81,6 +81,14 @@ function invalidarCachesRelacionadosAba(sheetName) {
     limparCacheVendas();
   }
 
+  if (aba === 'PRODUTOS' && typeof limparCacheProdutos === 'function') {
+    limparCacheProdutos();
+  }
+
+  if (aba === 'PRODUCAO' && typeof limparCacheProducao === 'function') {
+    limparCacheProducao();
+  }
+
   if (aba === 'DESPESAS_GERAIS' && typeof limparCacheDespesasGerais === 'function') {
     limparCacheDespesasGerais();
   }
@@ -106,6 +114,14 @@ function invalidarCachesRelacionadosAba(sheetName) {
 
   if ((aba === 'VALIDACAO' || aba === 'VALIDACAO_TIPO_CATEGORIA') && typeof limparCacheValidacoes === 'function') {
     limparCacheValidacoes();
+  }
+
+  if (aba.startsWith('PRODUTOS') && typeof limparCacheProdutos === 'function') {
+    limparCacheProdutos();
+  }
+
+  if (aba.startsWith('PRODUCAO') && typeof limparCacheProducao === 'function') {
+    limparCacheProducao();
   }
 
   if (afetaDashboardFinanceiro && typeof limparCacheDashboardFinanceiro === 'function') {

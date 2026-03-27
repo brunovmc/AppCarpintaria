@@ -4,6 +4,8 @@ const ABA_PRODUTOS_ETAPAS = 'PRODUTOS_ETAPAS';
 const ABA_PRODUTOS_RECEITAS = 'PRODUTOS_RECEITAS';
 const ABA_PRODUTOS_RECEITAS_ENTRADAS = 'PRODUTOS_RECEITAS_ENTRADAS';
 const ABA_PRODUTOS_RECEITAS_SAIDAS = 'PRODUTOS_RECEITAS_SAIDAS';
+const PRODUTOS_CACHE_SCOPE = 'PRODUTOS_LISTA_ATIVOS';
+const PRODUTOS_CACHE_TTL_SEC = 120;
 
 const PRODUTOS_SCHEMA = [
   'produto_id',
@@ -156,6 +158,29 @@ function normalizarPrecoVendaProdutoSaida(valor) {
   return Number(n.toFixed(2));
 }
 
+function lerCacheProdutos() {
+  return appCacheGetJson(PRODUTOS_CACHE_SCOPE);
+}
+
+function salvarCacheProdutos(lista) {
+  appCachePutJson(PRODUTOS_CACHE_SCOPE, Array.isArray(lista) ? lista : [], PRODUTOS_CACHE_TTL_SEC);
+}
+
+function limparCacheProdutos() {
+  return appCacheRemove(PRODUTOS_CACHE_SCOPE);
+}
+
+function recarregarCacheProdutos() {
+  limparCacheProdutos();
+  const dados = listarProdutos(true);
+  return {
+    ok: true,
+    scope: PRODUTOS_CACHE_SCOPE,
+    ttl_segundos: PRODUTOS_CACHE_TTL_SEC,
+    total_itens: Array.isArray(dados) ? dados.length : 0
+  };
+}
+
 function getResumoModeloProduto(produtoId) {
   const modelo = obterModeloProduto(produtoId);
   const entradasTotal = Array.isArray(modelo?.entradas) ? modelo.entradas.length : 0;
@@ -172,39 +197,202 @@ function getResumoModeloProduto(produtoId) {
   };
 }
 
-function listarProdutos() {
+function listarProdutos(forcarRecarregar) {
+  if (!forcarRecarregar) {
+    const cached = lerCacheProdutos();
+    if (Array.isArray(cached)) {
+      return cached;
+    }
+  }
+
   const sheet = getDataSpreadsheet().getSheetByName(ABA_PRODUTOS);
-  if (!sheet) return [];
+  if (!sheet) {
+    salvarCacheProdutos([]);
+    return [];
+  }
 
-  const rows = rowsToObjects(sheet);
-  return rows
+  const produtosAtivos = rowsToObjects(sheet)
     .filter(i => String(i.ativo).toLowerCase() === 'true')
-    .map(i => {
-      let custoPrevisto = 0;
-      let custoErro = '';
+    .map(i => ({ ...i }));
 
-      try {
-        custoPrevisto = calcularCustoProduto(i.produto_id);
-      } catch (err) {
-        custoPrevisto = 0;
-        custoErro = err && err.message ? err.message : 'Erro ao calcular custo';
+  const receitasSheet = getDataSpreadsheet().getSheetByName(ABA_PRODUTOS_RECEITAS);
+  const receitasAtivas = receitasSheet
+    ? rowsToObjects(receitasSheet).filter(i => String(i.ativo).toLowerCase() === 'true')
+    : [];
+  const receitasPorProduto = {};
+  receitasAtivas.forEach(r => {
+    const produtoId = String(r.produto_id || '').trim();
+    if (!produtoId) return;
+    if (!Array.isArray(receitasPorProduto[produtoId])) {
+      receitasPorProduto[produtoId] = [];
+    }
+    receitasPorProduto[produtoId].push(r);
+  });
+  const receitaPrincipalPorProduto = {};
+  Object.keys(receitasPorProduto).forEach(produtoId => {
+    const receitas = receitasPorProduto[produtoId] || [];
+    const semParent = receitas.find(r => !String(r.parent_receita_id || '').trim());
+    receitaPrincipalPorProduto[produtoId] = semParent || receitas[0] || null;
+  });
+
+  const entradasSheet = getDataSpreadsheet().getSheetByName(ABA_PRODUTOS_RECEITAS_ENTRADAS);
+  const entradasAtivas = entradasSheet
+    ? rowsToObjects(entradasSheet).filter(i => String(i.ativo).toLowerCase() === 'true')
+    : [];
+  const entradasPorReceita = {};
+  entradasAtivas.forEach(e => {
+    const receitaId = String(e.receita_id || '').trim();
+    if (!receitaId) return;
+    if (!Array.isArray(entradasPorReceita[receitaId])) {
+      entradasPorReceita[receitaId] = [];
+    }
+    entradasPorReceita[receitaId].push(e);
+  });
+
+  const saidasSheet = getDataSpreadsheet().getSheetByName(ABA_PRODUTOS_RECEITAS_SAIDAS);
+  const saidasAtivas = saidasSheet
+    ? rowsToObjects(saidasSheet).filter(i => String(i.ativo).toLowerCase() === 'true')
+    : [];
+  const saidasPorReceita = {};
+  saidasAtivas.forEach(s => {
+    const receitaId = String(s.receita_id || '').trim();
+    if (!receitaId) return;
+    if (!Array.isArray(saidasPorReceita[receitaId])) {
+      saidasPorReceita[receitaId] = [];
+    }
+    saidasPorReceita[receitaId].push(s);
+  });
+
+  const etapasSheet = getDataSpreadsheet().getSheetByName(ABA_PRODUTOS_ETAPAS);
+  const etapasAtivas = etapasSheet
+    ? rowsToObjects(etapasSheet).filter(i => String(i.ativo).toLowerCase() === 'true')
+    : [];
+  const etapasPorProduto = {};
+  etapasAtivas.forEach(et => {
+    const produtoId = String(et.produto_id || '').trim();
+    if (!produtoId) return;
+    if (!Array.isArray(etapasPorProduto[produtoId])) {
+      etapasPorProduto[produtoId] = [];
+    }
+    etapasPorProduto[produtoId].push(et);
+  });
+
+  const estoqueSheet = getDataSpreadsheet().getSheetByName(ABA_ESTOQUE);
+  const estoqueMap = {};
+  if (estoqueSheet) {
+    rowsToObjects(estoqueSheet).forEach(item => {
+      const estoqueId = String(item.ID || '').trim();
+      if (!estoqueId) return;
+      estoqueMap[estoqueId] = item;
+    });
+  }
+
+  const custoProdutoCache = {};
+  function calcularCustoProdutoListagem(produtoId) {
+    const id = String(produtoId || '').trim();
+    if (!id) return 0;
+    if (Object.prototype.hasOwnProperty.call(custoProdutoCache, id)) {
+      return custoProdutoCache[id];
+    }
+
+    const receitaPrincipal = receitaPrincipalPorProduto[id];
+    if (!receitaPrincipal || !receitaPrincipal.receita_id) {
+      throw new Error('Produto sem receita de producao');
+    }
+
+    const receitaId = String(receitaPrincipal.receita_id || '').trim();
+    const entradas = Array.isArray(entradasPorReceita[receitaId]) ? entradasPorReceita[receitaId] : [];
+    let custoPrevisto = 0;
+
+    entradas.forEach(e => {
+      const tipo = String(e.tipo_item || '').toUpperCase();
+      const qtdBase = parseNumeroBR(e.qtd_pecas);
+      if (!qtdBase || qtdBase <= 0) return;
+
+      let valorUnit = parseNumeroBR(e.custo_manual);
+      let quantidade = 0;
+
+      if (tipo === 'MADEIRA') {
+        const comp = parseNumeroBR(e.comprimento_cm);
+        const larg = parseNumeroBR(e.largura_cm);
+        const esp = parseNumeroBR(e.espessura_cm);
+        const volumeM3 = (comp > 0 && larg > 0 && esp > 0)
+          ? ((comp * larg * esp) / 1000000)
+          : 0;
+        const unidadeEntrada = String(e.unidade || '').trim().toUpperCase();
+        const qtdInteira = Math.abs(qtdBase - Math.round(qtdBase)) < 0.000001;
+        const modoLegadoQtdPecas = unidadeEntrada !== 'M3' && volumeM3 > 0 && qtdInteira;
+        quantidade = modoLegadoQtdPecas
+          ? (qtdBase * volumeM3)
+          : qtdBase;
+      } else {
+        quantidade = qtdBase;
       }
 
-      const resumoModelo = getResumoModeloProduto(i.produto_id);
-      const precoVenda = normalizarPrecoVendaProdutoSaida(i.preco_venda);
+      const estoqueId = String(e.estoque_ref_id || '').trim();
+      if (estoqueId) {
+        const estoqueItem = estoqueMap[estoqueId] || null;
+        if (estoqueItem) {
+          const valorEstoque = obterValorUnitarioEstoqueParaCustoProduto(estoqueItem);
+          if (valorEstoque > 0 || !valorUnit) {
+            valorUnit = valorEstoque;
+          }
+        }
+      }
 
-      return {
-        ...i,
-        ...resumoModelo,
-        preco_venda: precoVenda,
-        produto_vendavel: precoVenda !== '',
-        custo_previsto: custoPrevisto,
-        custo_erro: custoErro,
-        criado_em: i.criado_em
-          ? Utilities.formatDate(new Date(i.criado_em), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm')
-          : ''
-      };
+      const total = parseNumeroBR(quantidade) * parseNumeroBR(valorUnit);
+      custoPrevisto += total;
     });
+
+    const totalNormalizado = parseNumeroBR(custoPrevisto);
+    custoProdutoCache[id] = totalNormalizado;
+    return totalNormalizado;
+  }
+
+  const lista = produtosAtivos.map(produto => {
+    const produtoId = String(produto.produto_id || '').trim();
+    const receitaPrincipal = receitaPrincipalPorProduto[produtoId] || null;
+    const receitaId = String(receitaPrincipal?.receita_id || '').trim();
+    const entradasTotal = receitaId && Array.isArray(entradasPorReceita[receitaId])
+      ? entradasPorReceita[receitaId].length
+      : 0;
+    const saidasTotal = receitaId && Array.isArray(saidasPorReceita[receitaId])
+      ? saidasPorReceita[receitaId].length
+      : 0;
+    const etapasTotal = Array.isArray(etapasPorProduto[produtoId])
+      ? etapasPorProduto[produtoId].length
+      : 0;
+    const modeloNome = String(receitaPrincipal?.nome_receita || 'Modelo principal').trim() || 'Modelo principal';
+
+    let custoPrevisto = 0;
+    let custoErro = '';
+    try {
+      custoPrevisto = calcularCustoProdutoListagem(produtoId);
+    } catch (err) {
+      custoPrevisto = 0;
+      custoErro = err && err.message ? err.message : 'Erro ao calcular custo';
+    }
+
+    const precoVenda = normalizarPrecoVendaProdutoSaida(produto.preco_venda);
+    return {
+      ...produto,
+      modelo_nome: modeloNome,
+      modelo_entradas_total: entradasTotal,
+      modelo_saidas_total: saidasTotal,
+      modelo_etapas_total: etapasTotal,
+      modelo_resumo: `${entradasTotal} entradas, ${saidasTotal} saidas, ${etapasTotal} etapas`,
+      preco_venda: precoVenda,
+      produto_vendavel: precoVenda !== '',
+      custo_previsto: custoPrevisto,
+      custo_erro: custoErro,
+      criado_em: produto.criado_em
+        ? Utilities.formatDate(new Date(produto.criado_em), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm')
+        : ''
+    };
+  });
+
+  salvarCacheProdutos(lista);
+  return lista;
 }
 
 function criarProduto(payload) {
@@ -390,6 +578,7 @@ function salvarComposicaoProduto(produtoId, linhas) {
     insert(ABA_PRODUTOS_COMPONENTES, novo, PRODUTOS_COMPONENTES_SCHEMA);
   });
 
+  invalidarCachesRelacionadosAba(ABA_PRODUTOS);
   return true;
 }
 
@@ -530,6 +719,7 @@ function salvarEtapasProduto(produtoId, etapas) {
     ordemSeq += 1;
   });
 
+  invalidarCachesRelacionadosAba(ABA_PRODUTOS);
   return true;
 }
 
@@ -638,6 +828,7 @@ function deletarReceitaProduto(receitaId) {
   inativarLinhasReceita(ABA_PRODUTOS_RECEITAS_ENTRADAS, receitaId);
   inativarLinhasReceita(ABA_PRODUTOS_RECEITAS_SAIDAS, receitaId);
 
+  invalidarCachesRelacionadosAba(ABA_PRODUTOS);
   return ok;
 }
 
@@ -761,6 +952,7 @@ function salvarReceitaCompleta(receitaId, dados, entradas, saidas) {
   atualizarReceitaProduto(receitaId, dados || {});
   salvarEntradasReceita(receitaId, entradas || []);
   salvarSaidasReceita(receitaId, saidas || []);
+  invalidarCachesRelacionadosAba(ABA_PRODUTOS);
   return true;
 }
 
@@ -866,6 +1058,7 @@ function salvarProdutoComModelo(produtoId, payloadProduto, dadosReceita, entrada
     produtoAtual.preco_venda || dadosProduto.preco_venda
   );
 
+  invalidarCachesRelacionadosAba(ABA_PRODUTOS);
   return {
     ...produtoAtual,
     ...resumoModelo,

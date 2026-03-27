@@ -20,6 +20,7 @@
     function invalidarCacheDashboardPorImpacto() {
       if (window.AppTabRefresh?.markDirty) {
         window.AppTabRefresh.markDirty('dashboard');
+        window.AppTabRefresh.markDirty('estoque');
       }
       const dash = window.DashboardController;
       if (!dash?.invalidarCacheMeses) return;
@@ -104,13 +105,15 @@
         });
     }
 
-    function carregarEstoqueVendavel() {
+    function carregarEstoqueVendavel(onDone) {
       google.script.run
         .withSuccessHandler(lista => {
           VendasUI.renderEstoqueVendavel?.(Array.isArray(lista) ? lista : []);
+          if (typeof onDone === 'function') onDone();
         })
         .withFailureHandler(() => {
           VendasUI.renderEstoqueVendavel?.([]);
+          if (typeof onDone === 'function') onDone();
         })
         .listarItensEstoqueVendaveis();
     }
@@ -131,7 +134,7 @@
       return true;
     }
 
-    function carregarVendas(forcarRecarregar = false) {
+    function carregarVendas(forcarRecarregar = false, onDone) {
       const exibindoCache = !forcarRecarregar && hidratarVendasDoCache();
       google.script.run
         .withSuccessHandler(lista => {
@@ -140,6 +143,7 @@
           }
           VendasStore.set(lista);
           renderListaAtual();
+          if (typeof onDone === 'function') onDone();
         })
         .withFailureHandler(err => {
           if (exibindoCache) {
@@ -147,9 +151,11 @@
               window.AppRuntime.setReadOnly(true, 'Sem conexao com backend - exibindo cache local');
             }
             mostrarToast('Exibindo ultimo snapshot em cache', 'erro');
+            if (typeof onDone === 'function') onDone();
             return;
           }
           mostrarToast(err?.message || 'Erro ao carregar vendas', 'erro');
+          if (typeof onDone === 'function') onDone();
         })
         .listarVendas(!!forcarRecarregar);
     }
@@ -259,8 +265,17 @@
         .withSuccessHandler(itemSalvo => {
           VendasStore.remove(tempId);
           if (!itemSalvo || !itemSalvo.ID) {
-            carregarVendas();
-            setSalvando(false);
+            const concluirSync = window.AppSyncFeedback?.iniciar
+              ? window.AppSyncFeedback.iniciar('Venda salva. Atualizando dados...')
+              : null;
+            carregarVendas(true, () => {
+              if (concluirSync) {
+                concluirSync('Dados atualizados');
+              } else {
+                mostrarToast('Dados atualizados');
+              }
+              setSalvando(false);
+            });
             return;
           }
           VendasStore.add(itemSalvo);
@@ -386,12 +401,30 @@
         .withSuccessHandler(resp => {
           salvandoRecebimento = false;
           setBloqueioMutacaoRecebimento(false);
+          const concluirSync = window.AppSyncFeedback?.iniciar
+            ? window.AppSyncFeedback.iniciar('Recebimento registrado. Atualizando dados...')
+            : null;
+          let pendenciasSync = 0;
+          const concluirUmaSync = () => {
+            pendenciasSync -= 1;
+            if (pendenciasSync > 0) return;
+            if (concluirSync) {
+              concluirSync('Dados atualizados');
+            } else {
+              mostrarToast('Dados atualizados');
+            }
+          };
+          const agendarSync = (fn) => {
+            if (typeof fn !== 'function') return;
+            pendenciasSync += 1;
+            fn(() => concluirUmaSync());
+          };
 
           if (resp?.vendaAtualizada?.ID) {
             VendasStore.update(resp.vendaAtualizada.ID, resp.vendaAtualizada);
             renderListaAtual();
           } else {
-            carregarVendas();
+            agendarSync(done => carregarVendas(true, done));
           }
 
           if (resp?.baixaEstoque?.estoqueAtualizado && window.EstoqueStore) {
@@ -400,12 +433,18 @@
             });
           }
           if (window.EstoqueController?.syncFromBackend) {
-            EstoqueController.syncFromBackend();
+            agendarSync(done => EstoqueController.syncFromBackend(done));
           }
 
           invalidarCacheDashboardPorImpacto(itemAntes, dados, resp?.vendaAtualizada);
-          carregarEstoqueVendavel();
-          mostrarToast('Recebimento registrado');
+          agendarSync(done => carregarEstoqueVendavel(done));
+          if (pendenciasSync === 0) {
+            if (concluirSync) {
+              concluirSync('Dados atualizados');
+            } else {
+              mostrarToast('Dados atualizados');
+            }
+          }
         })
         .registrarRecebimentoVenda(vendaId, {
           data_pagamento: dados.data_pagamento,
@@ -427,9 +466,15 @@
       editandoId = null;
     }
 
-    function syncFromBackend() {
-      carregarVendas(true);
-      carregarEstoqueVendavel();
+    function syncFromBackend(onDone) {
+      let pendencias = 2;
+      const concluir = () => {
+        pendencias -= 1;
+        if (pendencias > 0) return;
+        if (typeof onDone === 'function') onDone();
+      };
+      carregarVendas(true, concluir);
+      carregarEstoqueVendavel(concluir);
     }
 
     return {

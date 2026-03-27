@@ -196,7 +196,7 @@
       return true;
     }
 
-    function carregarCompras(forcarRecarregar = false) {
+    function carregarCompras(forcarRecarregar = false, onDone) {
       const exibindoCache = !forcarRecarregar && hidratarComprasDoCache();
       const perf = perfStart('rpc.compras.listarCompras');
       google.script.run
@@ -210,6 +210,7 @@
           if (typeof popularFiltrosDoPainelCompras === 'function') {
             popularFiltrosDoPainelCompras();
           }
+          if (typeof onDone === 'function') onDone();
         })
         .withFailureHandler(() => {
           perfEnd(perf, { ok: false });
@@ -218,15 +219,17 @@
               window.AppRuntime.setReadOnly(true, 'Sem conexao com backend - exibindo cache local');
             }
             mostrarToast('Exibindo ultimo snapshot em cache', 'erro');
+            if (typeof onDone === 'function') onDone();
             return;
           }
           mostrarToast('Erro ao carregar compras', 'erro');
+          if (typeof onDone === 'function') onDone();
         })
         .listarCompras(!!forcarRecarregar);
     }
 
-    function syncFromBackend() {
-      carregarCompras(true);
+    function syncFromBackend(onDone) {
+      carregarCompras(true, onDone);
     }
 
     function salvar() {
@@ -443,10 +446,18 @@
           ComprasStore.remove(tempId);
 
           if (!itemSalvo || !itemSalvo.ID) {
-            mostrarToast('Salvo. Atualizando lista...');
-            carregarCompras();
+            const concluirSync = window.AppSyncFeedback?.iniciar
+              ? window.AppSyncFeedback.iniciar('Salvo com sucesso. Atualizando dados...')
+              : null;
+            carregarCompras(true, () => {
+              if (concluirSync) {
+                concluirSync('Dados atualizados');
+              } else {
+                mostrarToast('Dados atualizados');
+              }
+              setSalvando(false);
+            });
             invalidarCacheDashboardPorImpacto(dados);
-            setSalvando(false);
             return;
           }
 
@@ -570,6 +581,10 @@
           if (window.EstoqueController?.syncFromBackend) {
             EstoqueController.syncFromBackend();
           }
+          if (window.AppTabRefresh?.markDirty) {
+            window.AppTabRefresh.markDirty('estoque');
+            window.AppTabRefresh.markDirty('vendas');
+          }
           invalidarCacheDashboardPorImpacto(snapshot, resp?.compraAtualizada, resp?.itemEstoqueCriado);
           mostrarToast('Adicionado ao estoque');
         })
@@ -670,12 +685,21 @@
           if (resp?.compraAtualizada?.ID) {
             ComprasStore.update(resp.compraAtualizada.ID, resp.compraAtualizada);
             renderListaAtual();
+            invalidarCacheDashboardPorImpacto(itemAntes, dados, resp?.compraAtualizada);
+            mostrarToast('Pagamento registrado');
           } else {
-            carregarCompras();
+            const concluirSync = window.AppSyncFeedback?.iniciar
+              ? window.AppSyncFeedback.iniciar('Pagamento registrado. Atualizando dados...')
+              : null;
+            carregarCompras(true, () => {
+              if (concluirSync) {
+                concluirSync('Dados atualizados');
+              } else {
+                mostrarToast('Dados atualizados');
+              }
+            });
+            invalidarCacheDashboardPorImpacto(itemAntes, dados);
           }
-
-          invalidarCacheDashboardPorImpacto(itemAntes, dados, resp?.compraAtualizada);
-          mostrarToast('Pagamento registrado');
         })
         .registrarPagamentoCompra(compraId, {
           data_pagamento: dados.data_pagamento,

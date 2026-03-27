@@ -228,7 +228,9 @@ function criarItemEstoque(payload) {
     criado_em: new Date()
   };
 
-  return insert(ABA_ESTOQUE, novo, ESTOQUE_SCHEMA);
+  const ok = insert(ABA_ESTOQUE, novo, ESTOQUE_SCHEMA);
+  if (!ok) return null;
+  return obterItemEstoque(novo.ID);
 }
 
 

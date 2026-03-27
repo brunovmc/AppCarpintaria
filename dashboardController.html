@@ -894,11 +894,12 @@
       return requestSeq;
     }
 
-    function atualizar(forcarRecarregar = false) {
+    function atualizar(forcarRecarregar = false, onDone) {
       setCarregandoDashboard(true);
       const requestSeq = carregarResumo(!!forcarRecarregar, () => {
         if (requestSeq !== resumoRequestSeq) return;
         setCarregandoDashboard(false);
+        if (typeof onDone === 'function') onDone();
       });
     }
 
@@ -1205,10 +1206,18 @@
             mostrarToast('Nao foi possivel remover o pagamento', 'erro');
             return;
           }
-          mostrarToast('Pagamento removido');
+          const concluirSync = window.AppSyncFeedback?.iniciar
+            ? window.AppSyncFeedback.iniciar('Pagamento removido. Atualizando dados...')
+            : null;
           invalidarCacheMeses(coletarMesesImpactados(item, getMesReferenciaAtiva()));
-          atualizar(true);
-          if (cardAtual) abrirObservabilidadeCard(cardAtual);
+          atualizar(true, () => {
+            if (concluirSync) {
+              concluirSync('Dados atualizados');
+            } else {
+              mostrarToast('Dados atualizados');
+            }
+            if (cardAtual) abrirObservabilidadeCard(cardAtual);
+          });
         })
         .removerPagamento(pagamentoId);
     }
@@ -1411,9 +1420,17 @@
         .withSuccessHandler(() => {
           setSalvandoDespesa(false);
           cancelarFormularioDespesa();
-          mostrarToast('Despesa salva');
+          const concluirSync = window.AppSyncFeedback?.iniciar
+            ? window.AppSyncFeedback.iniciar('Despesa salva. Atualizando dados...')
+            : null;
           invalidarCacheMeses(coletarMesesImpactados(despesaAnterior, payload));
-          atualizar(true);
+          atualizar(true, () => {
+            if (concluirSync) {
+              concluirSync('Dados atualizados');
+            } else {
+              mostrarToast('Dados atualizados');
+            }
+          });
         });
 
       if (despesaEditandoId) {
@@ -1654,11 +1671,19 @@
         .withSuccessHandler(() => {
           setSalvandoPagamentoDespesa(false);
           cancelarPagamentoDespesa();
-          mostrarToast('Pagamento registrado');
+          const concluirSync = window.AppSyncFeedback?.iniciar
+            ? window.AppSyncFeedback.iniciar('Pagamento registrado. Atualizando dados...')
+            : null;
           invalidarCacheMeses(coletarMesesImpactados(despesaAtual, {
             data_pagamento: dataPagamento
           }));
-          atualizar(true);
+          atualizar(true, () => {
+            if (concluirSync) {
+              concluirSync('Dados atualizados');
+            } else {
+              mostrarToast('Dados atualizados');
+            }
+          });
         })
         .registrarPagamentoDespesaGeral(despesaPagamentoId, {
           data_pagamento: dataPagamento,

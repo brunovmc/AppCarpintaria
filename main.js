@@ -58,6 +58,8 @@ function atualizarCachesManualmente() {
       estoque: executar("recarregarCacheEstoque", recarregarCacheEstoque),
       compras: executar("recarregarCacheCompras", recarregarCacheCompras),
       vendas: executar("recarregarCacheVendas", recarregarCacheVendas),
+      produtos: executar("recarregarCacheProdutos", recarregarCacheProdutos),
+      producao: executar("recarregarCacheProducao", recarregarCacheProducao),
       despesas_gerais: executar(
         "recarregarCacheDespesasGerais",
         recarregarCacheDespesasGerais,

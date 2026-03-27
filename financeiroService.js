@@ -1591,7 +1591,7 @@ function obterResumoDashboardFinanceiro(referenciaYm, forcarRecarregar) {
   const vendas = (typeof listarVendas === 'function') ? listarVendas(!!forcarRecarregar) : [];
   const pagamentos = listarPagamentos(!!forcarRecarregar);
   const estoque = (typeof listarEstoque === 'function') ? listarEstoque(!!forcarRecarregar) : [];
-  const producoes = (typeof listarProducao === 'function') ? listarProducao() : [];
+  const producoes = (typeof listarProducao === 'function') ? listarProducao(!!forcarRecarregar) : [];
   const produtosSheet = getSheet(ABA_PRODUTOS_FINANCEIRO);
   const produtosRows = produtosSheet ? rowsToObjects(produtosSheet) : [];
   const precoVendaProdutoPorId = {};
@@ -1957,7 +1957,7 @@ function obterComposicaoCardDashboardFinanceiro(referenciaYm, cardKey, forcarRec
   const vendas = (typeof listarVendas === 'function') ? listarVendas(!!forcarRecarregar) : [];
   const pagamentos = listarPagamentos(!!forcarRecarregar);
   const estoque = (typeof listarEstoque === 'function') ? listarEstoque(!!forcarRecarregar) : [];
-  const producoes = (typeof listarProducao === 'function') ? listarProducao() : [];
+  const producoes = (typeof listarProducao === 'function') ? listarProducao(!!forcarRecarregar) : [];
   const produtosSheet = getSheet(ABA_PRODUTOS_FINANCEIRO);
   const produtosRows = produtosSheet ? rowsToObjects(produtosSheet) : [];
   const precoVendaProdutoPorId = {};

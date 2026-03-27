@@ -19,6 +19,10 @@
     function marcarDashboardComoSujo() {
       if (window.AppTabRefresh?.markDirty) {
         window.AppTabRefresh.markDirty('dashboard');
+        window.AppTabRefresh.markDirty('vendas');
+      }
+      if (window.DashboardController?.invalidarCacheMeses) {
+        window.DashboardController.invalidarCacheMeses();
       }
     }
 
@@ -153,7 +157,7 @@
       return true;
     }
 
-    function carregarEstoque(forcarRecarregar = false) {
+    function carregarEstoque(forcarRecarregar = false, onDone) {
       const exibindoCache = !forcarRecarregar && hidratarEstoqueDoCache();
       const perf = perfStart('rpc.estoque.listarEstoque');
       google.script.run
@@ -171,6 +175,7 @@
           if (typeof popularFiltrosDoPainel === 'function') {
             popularFiltrosDoPainel();
           }
+          if (typeof onDone === 'function') onDone();
         })
         .withFailureHandler(() => {
           perfEnd(perf, { ok: false });
@@ -179,15 +184,17 @@
               window.AppRuntime.setReadOnly(true, 'Sem conexao com backend - exibindo cache local');
             }
             mostrarToast('Exibindo ultimo snapshot em cache', 'erro');
+            if (typeof onDone === 'function') onDone();
             return;
           }
           mostrarToast('Erro ao carregar estoque', 'erro');
+          if (typeof onDone === 'function') onDone();
         })
         .listarEstoque(!!forcarRecarregar);
     }
 
-    function syncFromBackend() {
-      carregarEstoque(true);
+    function syncFromBackend(onDone) {
+      carregarEstoque(true, onDone);
     }
 
     function salvar() {
@@ -358,10 +365,18 @@
           EstoqueStore.remove(tempId);
 
           if (!itemSalvo || !itemSalvo.ID) {
-            mostrarToast('Salvo. Atualizando lista...');
+            const concluirSync = window.AppSyncFeedback?.iniciar
+              ? window.AppSyncFeedback.iniciar('Salvo com sucesso. Atualizando dados...')
+              : null;
             marcarDashboardComoSujo();
-            carregarEstoque();
-            setSalvando(false);
+            carregarEstoque(true, () => {
+              if (concluirSync) {
+                concluirSync('Dados atualizados');
+              } else {
+                mostrarToast('Dados atualizados');
+              }
+              setSalvando(false);
+            });
             return;
           }
 
