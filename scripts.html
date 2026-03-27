@@ -240,16 +240,36 @@
   window.AppLoading = window.AppLoading || createLoadingHelper();
 
   function createRuntimeState() {
-    let readOnly = false;
-    let reason = '';
+    let offlineReadOnly = false;
+    let offlineReason = '';
+    let accessReadOnly = false;
+    let accessReason = '';
+
+    function estadoAtual() {
+      const readOnly = !!(offlineReadOnly || accessReadOnly);
+      const reason = String(accessReason || offlineReason || '').trim();
+      return {
+        readOnly,
+        reason,
+        offlineReadOnly,
+        accessReadOnly,
+        offlineReason,
+        accessReason
+      };
+    }
 
     function emitirMudanca() {
       if (typeof window === 'undefined') return;
+      const atual = estadoAtual();
       try {
         window.dispatchEvent(new CustomEvent('app:runtime:readonly-changed', {
           detail: {
-            readOnly,
-            reason
+            readOnly: atual.readOnly,
+            reason: atual.reason,
+            offlineReadOnly: atual.offlineReadOnly,
+            accessReadOnly: atual.accessReadOnly,
+            offlineReason: atual.offlineReason,
+            accessReason: atual.accessReason
           }
         }));
       } catch (error) {
@@ -258,23 +278,29 @@
     }
 
     function setReadOnly(ativo, motivo = '') {
-      readOnly = !!ativo;
-      reason = String(motivo || '').trim();
+      offlineReadOnly = !!ativo;
+      offlineReason = String(motivo || '').trim();
+      emitirMudanca();
+    }
+
+    function setAccessReadOnly(ativo, motivo = '') {
+      accessReadOnly = !!ativo;
+      accessReason = String(motivo || '').trim();
       emitirMudanca();
     }
 
     function isReadOnly() {
-      return !!readOnly;
+      return estadoAtual().readOnly;
     }
 
     function getReason() {
-      return reason;
+      return estadoAtual().reason;
     }
 
     function ensureWritable(contexto = 'Operacao bloqueada') {
-      if (!readOnly) return true;
+      if (!isReadOnly()) return true;
       if (typeof mostrarToast === 'function') {
-        const msg = reason || `${String(contexto || '').trim() || 'Operacao'} indisponivel em modo somente leitura`;
+        const msg = getReason() || `${String(contexto || '').trim() || 'Operacao'} indisponivel em modo somente leitura`;
         mostrarToast(msg, 'erro');
       }
       return false;
@@ -282,9 +308,11 @@
 
     return {
       setReadOnly,
+      setAccessReadOnly,
       isReadOnly,
       getReason,
-      ensureWritable
+      ensureWritable,
+      getState: estadoAtual
     };
   }
 
@@ -676,6 +704,117 @@
   }
 
   window.AppMutationUI = window.AppMutationUI || createMutationUiLock();
+
+  function createUserAccessHelper() {
+    let contexto = null;
+    let inFlight = null;
+    let mutationLockToken = null;
+
+    function normalizarContexto(raw) {
+      const base = raw && typeof raw === 'object' ? raw : {};
+      const canWrite = base.can_write === true;
+      const motivo = String(base.motivo || '').trim();
+      return {
+        ...base,
+        can_write: canWrite,
+        read_only: !canWrite,
+        role: String(base.role || (canWrite ? 'admin' : 'viewer') || '').trim(),
+        motivo: canWrite ? '' : (motivo || 'Perfil somente leitura.')
+      };
+    }
+
+    function sincronizarBloqueioMutacao(canWrite) {
+      if (canWrite) {
+        if (mutationLockToken && window.AppMutationUI?.unlock) {
+          window.AppMutationUI.unlock(mutationLockToken);
+          mutationLockToken = null;
+        }
+        return;
+      }
+
+      if (!mutationLockToken && window.AppMutationUI?.lock) {
+        mutationLockToken = window.AppMutationUI.lock();
+      }
+    }
+
+    function aplicar(raw) {
+      const ctx = normalizarContexto(raw);
+      contexto = ctx;
+
+      if (window.AppRuntime?.setAccessReadOnly) {
+        window.AppRuntime.setAccessReadOnly(ctx.read_only, ctx.motivo);
+      } else if (window.AppRuntime?.setReadOnly) {
+        window.AppRuntime.setReadOnly(ctx.read_only, ctx.motivo);
+      }
+
+      sincronizarBloqueioMutacao(ctx.can_write);
+
+      if (typeof window !== 'undefined') {
+        try {
+          window.dispatchEvent(new CustomEvent('app:user:context-changed', {
+            detail: ctx
+          }));
+        } catch (error) {
+          // sem acao
+        }
+      }
+
+      return ctx;
+    }
+
+    function getContext() {
+      return contexto;
+    }
+
+    function load(options = {}) {
+      const force = !!options.force;
+      if (inFlight && !force) return inFlight;
+
+      // Ate validar o perfil, fica bloqueado por seguranca.
+      aplicar({
+        can_write: false,
+        role: 'viewer',
+        motivo: 'Validando perfil de acesso...'
+      });
+
+      if (!window.google?.script?.run) {
+        const offline = aplicar({
+          can_write: false,
+          role: 'viewer',
+          motivo: 'Sem conexao com backend - escrita bloqueada.'
+        });
+        return Promise.resolve(offline);
+      }
+
+      inFlight = new Promise(resolve => {
+        google.script.run
+          .withSuccessHandler(raw => {
+            resolve(aplicar(raw || {}));
+          })
+          .withFailureHandler(err => {
+            const mensagem = String(err?.message || err || '').trim();
+            resolve(aplicar({
+              can_write: false,
+              role: 'viewer',
+              motivo: mensagem || 'Falha ao validar perfil de acesso.'
+            }));
+          })
+          .obterContextoUsuario(force);
+      }).finally(() => {
+        inFlight = null;
+      });
+
+      return inFlight;
+    }
+
+    return {
+      load,
+      apply: aplicar,
+      getContext
+    };
+  }
+
+  window.AppUserAccess = window.AppUserAccess || createUserAccessHelper();
 
   /* =========================
      PERF + CICLO DE ABAS
@@ -2429,6 +2568,9 @@
     initLongTaskMonitor();
     initNavbarHamburger();
     registrarListenersFiltrosStore();
+    if (window.AppUserAccess?.load) {
+      window.AppUserAccess.load();
+    }
     initModalA11y();
     initCampoAjudaA11y();
     trocarAba(lerUltimaAba() || ABA_INICIAL_PADRAO);

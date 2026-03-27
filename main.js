@@ -68,6 +68,10 @@ function atualizarCachesManualmente() {
         "recarregarCachePagamentos",
         recarregarCachePagamentos,
       ),
+      usuarios: executar(
+        "recarregarCacheUsuariosAcesso",
+        recarregarCacheUsuariosAcesso,
+      ),
     },
   };
 
@@ -101,6 +105,7 @@ function atualizarCachesManualmente() {
 }
 
 function prepararAbasFinanceiroVendas() {
+  assertCanWrite("Preparacao de abas financeiras");
   const ss = getDataSpreadsheet();
 
   function removerColunasPorHeader(sheet, headersParaRemover) {

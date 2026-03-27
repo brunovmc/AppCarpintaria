@@ -215,6 +215,7 @@ function listarCompras(forcarRecarregar) {
 }
 
 function criarItemCompra(payload) {
+  assertCanWrite('Criacao de compra');
   const dados = normalizarCamposFinanceirosCompra(normalizarPayloadMadeiraCompra(payload));
   const novo = {
     ...dados,
@@ -234,6 +235,7 @@ function criarItemCompra(payload) {
 }
 
 function atualizarItemCompra(id, payload) {
+  assertCanWrite('Atualizacao de compra');
   const dados = normalizarCamposFinanceirosCompra(normalizarPayloadMadeiraCompra(payload));
   const ok = updateById(
     ABA_COMPRAS,
@@ -251,6 +253,7 @@ function atualizarItemCompra(id, payload) {
 }
 
 function deletarItemCompra(id) {
+  assertCanWrite('Exclusao de compra');
   const ok = updateById(
     ABA_COMPRAS,
     'ID',
@@ -265,6 +268,7 @@ function deletarItemCompra(id) {
 }
 
 function adicionarCompraAoEstoque(compraId) {
+  assertCanWrite('Adicao de compra ao estoque');
   const lock = LockService.getScriptLock();
   lock.waitLock(10000);
 

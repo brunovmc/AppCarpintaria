@@ -220,6 +220,7 @@ function testeDebugEstoque() {
 
 
 function criarItemEstoque(payload) {
+  assertCanWrite('Criacao de item em estoque');
   const dados = normalizarPayloadMadeiraEstoque(payload);
   const novo = {
     ...dados,
@@ -292,6 +293,7 @@ function obterItemEstoque(id) {
 
 
 function atualizarItemEstoque(id, payload) {
+  assertCanWrite('Atualizacao de item em estoque');
   const dados = normalizarPayloadMadeiraEstoque(payload);
   return updateById(
     ABA_ESTOQUE,
@@ -305,6 +307,7 @@ function atualizarItemEstoque(id, payload) {
 
 
 function deletarItemEstoque(id) {
+  assertCanWrite('Exclusao de item em estoque');
   return updateById(
     ABA_ESTOQUE,
     'ID',

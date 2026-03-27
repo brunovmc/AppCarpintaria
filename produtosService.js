@@ -158,6 +158,10 @@ function normalizarPrecoVendaProdutoSaida(valor) {
   return Number(n.toFixed(2));
 }
 
+function assertCanWriteProdutos(acao) {
+  assertCanWrite(acao || 'Operacao de produtos');
+}
+
 function lerCacheProdutos() {
   return appCacheGetJson(PRODUTOS_CACHE_SCOPE);
 }
@@ -396,6 +400,7 @@ function listarProdutos(forcarRecarregar) {
 }
 
 function criarProduto(payload) {
+  assertCanWriteProdutos('Criacao de produto');
   const nome = String(payload?.nome_produto || '').trim();
   if (!nome) {
     throw new Error('Nome do produto obrigatorio');
@@ -430,6 +435,7 @@ function obterProduto(produtoId) {
 }
 
 function atualizarProduto(produtoId, payload) {
+  assertCanWriteProdutos('Atualizacao de produto');
   return updateById(
     ABA_PRODUTOS,
     'produto_id',
@@ -440,6 +446,7 @@ function atualizarProduto(produtoId, payload) {
 }
 
 function deletarProduto(produtoId) {
+  assertCanWriteProdutos('Exclusao de produto');
   return updateById(
     ABA_PRODUTOS,
     'produto_id',
@@ -510,6 +517,7 @@ function validarCicloComposicao(produtoId, linhas) {
 }
 
 function criarComponenteProduto(payload) {
+  assertCanWriteProdutos('Criacao de componente de produto');
   const novo = {
     ...payload,
     id: gerarId('CMP'),
@@ -521,6 +529,7 @@ function criarComponenteProduto(payload) {
 }
 
 function atualizarComponenteProduto(id, payload) {
+  assertCanWriteProdutos('Atualizacao de componente de produto');
   return updateById(
     ABA_PRODUTOS_COMPONENTES,
     'id',
@@ -531,6 +540,7 @@ function atualizarComponenteProduto(id, payload) {
 }
 
 function deletarComponenteProduto(id) {
+  assertCanWriteProdutos('Exclusao de componente de produto');
   return updateById(
     ABA_PRODUTOS_COMPONENTES,
     'id',
@@ -541,6 +551,7 @@ function deletarComponenteProduto(id) {
 }
 
 function salvarComposicaoProduto(produtoId, linhas) {
+  assertCanWriteProdutos('Salvamento de composicao de produto');
   const ss = getDataSpreadsheet();
   let sheet = ss.getSheetByName(ABA_PRODUTOS_COMPONENTES);
   if (!sheet) {
@@ -583,6 +594,7 @@ function salvarComposicaoProduto(produtoId, linhas) {
 }
 
 function adicionarMaterialProduto(produtoId, estoqueId, quantidade) {
+  assertCanWriteProdutos('Adicao de material em produto');
   if (!produtoId || !estoqueId) {
     throw new Error('Produto ou estoque invalido');
   }
@@ -640,6 +652,7 @@ function listarEtapasProduto(produtoId) {
 }
 
 function criarEtapaProduto(payload) {
+  assertCanWriteProdutos('Criacao de etapa de produto');
   const novo = {
     ...payload,
     id: gerarId('ETP'),
@@ -651,6 +664,7 @@ function criarEtapaProduto(payload) {
 }
 
 function atualizarEtapaProduto(id, payload) {
+  assertCanWriteProdutos('Atualizacao de etapa de produto');
   return updateById(
     ABA_PRODUTOS_ETAPAS,
     'id',
@@ -661,6 +675,7 @@ function atualizarEtapaProduto(id, payload) {
 }
 
 function deletarEtapaProduto(id) {
+  assertCanWriteProdutos('Exclusao de etapa de produto');
   return updateById(
     ABA_PRODUTOS_ETAPAS,
     'id',
@@ -671,6 +686,7 @@ function deletarEtapaProduto(id) {
 }
 
 function limparEtapasProduto(produtoId) {
+  assertCanWriteProdutos('Limpeza de etapas de produto');
   const ss = getDataSpreadsheet();
   let sheet = ss.getSheetByName(ABA_PRODUTOS_ETAPAS);
   if (!sheet) {
@@ -693,6 +709,7 @@ function limparEtapasProduto(produtoId) {
 }
 
 function salvarEtapasProduto(produtoId, etapas) {
+  assertCanWriteProdutos('Salvamento de etapas de produto');
   if (!produtoId) throw new Error('Produto invalido');
 
   limparEtapasProduto(produtoId);
@@ -761,6 +778,7 @@ function listarReceitasProduto(produtoId) {
 }
 
 function criarReceitaProduto(produtoId, payload) {
+  assertCanWriteProdutos('Criacao de receita de produto');
   if (!produtoId) {
     throw new Error('Produto invalido');
   }
@@ -789,6 +807,7 @@ function criarReceitaProduto(produtoId, payload) {
 }
 
 function atualizarReceitaProduto(receitaId, payload) {
+  assertCanWriteProdutos('Atualizacao de receita de produto');
   return updateById(
     ABA_PRODUTOS_RECEITAS,
     'receita_id',
@@ -799,6 +818,7 @@ function atualizarReceitaProduto(receitaId, payload) {
 }
 
 function inativarLinhasReceita(sheetName, receitaId) {
+  assertCanWriteProdutos('Inativacao de linhas de receita');
   const sheet = getDataSpreadsheet().getSheetByName(sheetName);
   if (!sheet) return;
 
@@ -817,6 +837,7 @@ function inativarLinhasReceita(sheetName, receitaId) {
 }
 
 function deletarReceitaProduto(receitaId) {
+  assertCanWriteProdutos('Exclusao de receita de produto');
   const ok = updateById(
     ABA_PRODUTOS_RECEITAS,
     'receita_id',
@@ -833,6 +854,7 @@ function deletarReceitaProduto(receitaId) {
 }
 
 function limparLinhasReceita(sheetName, receitaId) {
+  assertCanWriteProdutos('Limpeza de linhas de receita');
   const ss = getDataSpreadsheet();
   let sheet = ss.getSheetByName(sheetName);
   if (!sheet) {
@@ -853,6 +875,7 @@ function limparLinhasReceita(sheetName, receitaId) {
 }
 
 function salvarEntradasReceita(receitaId, linhas) {
+  assertCanWriteProdutos('Salvamento de entradas da receita');
   const ss = getDataSpreadsheet();
   let sheet = ss.getSheetByName(ABA_PRODUTOS_RECEITAS_ENTRADAS);
   if (!sheet) {
@@ -906,6 +929,7 @@ function salvarEntradasReceita(receitaId, linhas) {
 }
 
 function salvarSaidasReceita(receitaId, linhas) {
+  assertCanWriteProdutos('Salvamento de saidas da receita');
   const ss = getDataSpreadsheet();
   let sheet = ss.getSheetByName(ABA_PRODUTOS_RECEITAS_SAIDAS);
   if (!sheet) {
@@ -949,6 +973,7 @@ function duplicarReceitaProduto(receitaId) {
 }
 
 function salvarReceitaCompleta(receitaId, dados, entradas, saidas) {
+  assertCanWriteProdutos('Salvamento completo da receita');
   atualizarReceitaProduto(receitaId, dados || {});
   salvarEntradasReceita(receitaId, entradas || []);
   salvarSaidasReceita(receitaId, saidas || []);
@@ -957,6 +982,7 @@ function salvarReceitaCompleta(receitaId, dados, entradas, saidas) {
 }
 
 function inativarReceitasSecundariasProduto(produtoId, receitaPrincipalId) {
+  assertCanWriteProdutos('Inativacao de receitas secundarias');
   const sheet = getDataSpreadsheet().getSheetByName(ABA_PRODUTOS_RECEITAS);
   if (!sheet) return true;
 
@@ -1017,6 +1043,7 @@ function obterModeloProduto(produtoId) {
 }
 
 function salvarProdutoComModelo(produtoId, payloadProduto, dadosReceita, entradas, saidas, etapas) {
+  assertCanWriteProdutos('Salvamento de produto com modelo');
   const dadosProduto = {
     nome_produto: String(payloadProduto?.nome_produto || '').trim(),
     unidade_produto: String(payloadProduto?.unidade_produto || 'UN').trim() || 'UN',

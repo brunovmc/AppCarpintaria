@@ -146,6 +146,10 @@ function recarregarCacheProducao() {
   };
 }
 
+function assertCanWriteProducao(acao) {
+  assertCanWrite(acao || 'Operacao de producao');
+}
+
 function listarProdutosAtivosMapeadosPorNomeProducao() {
   const produtosSheet = getDataSpreadsheet().getSheetByName(ABA_PRODUTOS);
   const produtosRows = produtosSheet ? rowsToObjects(produtosSheet) : [];
@@ -372,6 +376,7 @@ function listarProducao(forcarRecarregar) {
 }
 
 function criarProducao(payload) {
+  assertCanWriteProducao('Criacao de producao');
   const novo = {
     ...payload,
     producao_id: gerarId('OP'),
@@ -445,6 +450,7 @@ function criarProducao(payload) {
 }
 
 function atualizarProducao(id, payload) {
+  assertCanWriteProducao('Atualizacao de producao');
   const sheet = getDataSpreadsheet().getSheetByName(ABA_PRODUCAO);
   if (!sheet) return false;
 
@@ -498,6 +504,7 @@ function atualizarProducao(id, payload) {
 }
 
 function deletarProducao(id) {
+  assertCanWriteProducao('Exclusao de producao');
   return updateById(
     ABA_PRODUCAO,
     'producao_id',
@@ -568,6 +575,7 @@ function listarMateriaisPrevistosSnapshot(producaoId) {
 }
 
 function limparMateriaisPrevistosSnapshot(producaoId) {
+  assertCanWriteProducao('Limpeza de snapshot de materiais previstos');
   const ss = getDataSpreadsheet();
   let sheet = ss.getSheetByName(ABA_PRODUCAO_MATERIAIS_PREVISTOS);
   if (!sheet) {
@@ -588,6 +596,7 @@ function limparMateriaisPrevistosSnapshot(producaoId) {
 }
 
 function salvarMateriaisPrevistosSnapshot(producaoId, itens) {
+  assertCanWriteProducao('Salvamento de snapshot de materiais previstos');
   const ss = getDataSpreadsheet();
   let sheet = ss.getSheetByName(ABA_PRODUCAO_MATERIAIS_PREVISTOS);
   if (!sheet) {
@@ -655,6 +664,7 @@ function agruparMateriaisPorEstoque(itens) {
 }
 
 function limparVinculosMateriaisProducao(producaoId, opcoes) {
+  assertCanWriteProducao('Limpeza de vinculos de materiais da producao');
   const cfg = opcoes || {};
   const preservarManuais = !!cfg.preservarManuais;
 
@@ -684,6 +694,7 @@ function limparVinculosMateriaisProducao(producaoId, opcoes) {
 }
 
 function salvarVinculosMateriaisProducao(producaoId, receitaId, vinculos, opcoes) {
+  assertCanWriteProducao('Salvamento de vinculos de materiais da producao');
   const cfg = opcoes || {};
   const preservarManuais = !!cfg.preservarManuais;
 
@@ -730,6 +741,7 @@ function salvarVinculosMateriaisProducao(producaoId, receitaId, vinculos, opcoes
 }
 
 function limparDestinosProducao(producaoId, opcoes) {
+  assertCanWriteProducao('Limpeza de destinos da producao');
   const cfg = opcoes || {};
   const preservarManuais = !!cfg.preservarManuais;
 
@@ -759,6 +771,7 @@ function limparDestinosProducao(producaoId, opcoes) {
 }
 
 function salvarDestinosProducao(producaoId, receitaId, destinos, opcoes) {
+  assertCanWriteProducao('Salvamento de destinos da producao');
   const cfg = opcoes || {};
   const preservarManuais = !!cfg.preservarManuais;
 
@@ -862,6 +875,7 @@ function listarDestinosProducao(producaoId) {
 }
 
 function vincularDestinoProducaoAoEstoque(producaoId, destinoId, estoqueId) {
+  assertCanWriteProducao('Vinculacao de destino da producao ao estoque');
   if (!producaoId || !destinoId) {
     throw new Error('Destino invalido');
   }
@@ -916,6 +930,7 @@ function vincularDestinoProducaoAoEstoque(producaoId, destinoId, estoqueId) {
 }
 
 function atualizarDestinoProducao(producaoId, destinoId, payload) {
+  assertCanWriteProducao('Atualizacao de destino da producao');
   if (!producaoId || !destinoId) {
     throw new Error('Destino invalido');
   }
@@ -984,6 +999,7 @@ function atualizarDestinoProducao(producaoId, destinoId, payload) {
 }
 
 function adicionarDestinoManualProducao(producaoId, payload) {
+  assertCanWriteProducao('Adicao manual de destino da producao');
   if (!producaoId) {
     throw new Error('Producao invalida');
   }
@@ -1047,6 +1063,7 @@ function adicionarDestinoManualProducao(producaoId, payload) {
 }
 
 function concluirDestinosProducao(producaoId) {
+  assertCanWriteProducao('Conclusao de destinos da producao');
   const sheet = getDataSpreadsheet().getSheetByName(ABA_PRODUCAO_DESTINOS);
   if (!sheet) return;
 
@@ -1168,6 +1185,7 @@ function listarVinculosMateriaisProducao(producaoId) {
 }
 
 function vincularItemProducaoAoEstoque(producaoId, vinculoId, estoqueId) {
+  assertCanWriteProducao('Vinculacao de item da producao ao estoque');
   if (!producaoId || !vinculoId) {
     throw new Error('Vinculo invalido');
   }
@@ -1222,6 +1240,7 @@ function vincularItemProducaoAoEstoque(producaoId, vinculoId, estoqueId) {
 }
 
 function vincularPendenciasEntradaProducao(producaoId, vinculacoes) {
+  assertCanWriteProducao('Vinculacao de pendencias da producao');
   if (!producaoId) {
     throw new Error('Producao invalida');
   }
@@ -1301,6 +1320,7 @@ function vincularPendenciasEntradaProducao(producaoId, vinculacoes) {
 }
 
 function adicionarItemManualProducao(producaoId, payload) {
+  assertCanWriteProducao('Adicao manual de item na producao');
   if (!producaoId) {
     throw new Error('Producao invalida');
   }
@@ -1427,6 +1447,7 @@ function gerarMateriaisPrevistosReceita(produtoId, receitaId, qtdPlanejada) {
 }
 
 function adicionarMaterialExtraProducao(producaoId, estoqueId, quantidade) {
+  assertCanWriteProducao('Adicao de material extra na producao');
   if (!producaoId || !estoqueId) {
     throw new Error('Producao ou estoque invalido');
   }
@@ -1464,6 +1485,7 @@ function adicionarMaterialExtraProducao(producaoId, estoqueId, quantidade) {
 }
 
 function aplicarBaixaMateriaisExtras(producaoId, itensValidos) {
+  assertCanWriteProducao('Baixa de materiais extras da producao');
   const sheet = getDataSpreadsheet().getSheetByName(ABA_PRODUCAO_MATERIAIS);
   if (!sheet) return;
 
@@ -1515,6 +1537,7 @@ function aplicarBaixaMateriaisExtras(producaoId, itensValidos) {
 }
 
 function atualizarConsumoVinculosProducao(producaoId, itensConsumidos) {
+  assertCanWriteProducao('Atualizacao de consumo dos vinculos da producao');
   const ss = getDataSpreadsheet();
   let sheet = ss.getSheetByName(ABA_PRODUCAO_VINCULOS);
   if (!sheet) return;
@@ -1579,6 +1602,7 @@ function atualizarConsumoVinculosProducao(producaoId, itensConsumidos) {
 }
 
 function atualizarEtapasProducao(producaoId, etapas) {
+  assertCanWriteProducao('Atualizacao de etapas da producao');
   if (!Array.isArray(etapas)) return false;
 
   etapas.forEach(et => {
@@ -1621,6 +1645,7 @@ function atualizarEtapasProducao(producaoId, etapas) {
 }
 
 function deletarEtapaProducao(id) {
+  assertCanWriteProducao('Exclusao de etapa da producao');
   return updateById(
     ABA_PRODUCAO_ETAPAS,
     'id',
@@ -2023,6 +2048,7 @@ function lancarSaidasProducaoNoEstoque(producaoId, saidasAgrupadas, estoqueRows,
 }
 
 function consumirEstoque(producaoId, itensParaBaixar) {
+  assertCanWriteProducao('Consumo de estoque da producao');
   const lock = LockService.getScriptLock();
   lock.waitLock(10000);
 
@@ -2319,6 +2345,7 @@ function recalcularCustoMedioSaidasNoEstoque(estoqueId) {
 }
 
 function atualizarCustoLoteSaidaProducao(producaoId, loteId, custoUnitario) {
+  assertCanWriteProducao('Atualizacao de custo de lote de saida');
   const prodId = String(producaoId || '').trim();
   const lotId = String(loteId || '').trim();
   const novoCusto = parseNumeroBR(custoUnitario);
@@ -2385,6 +2412,7 @@ function atualizarCustoLoteSaidaProducao(producaoId, loteId, custoUnitario) {
 }
 
 function atualizarPrecoVendaProdutoSaidaProducao(producaoId, nomeSaida, precoVendaInput) {
+  assertCanWriteProducao('Atualizacao de preco de venda da saida da producao');
   const prodId = String(producaoId || '').trim();
   const nome = String(nomeSaida || '').trim();
   const novoPreco = parseNumeroBR(precoVendaInput);

@@ -206,6 +206,7 @@ function listarItensEstoqueVendaveis() {
 }
 
 function criarVenda(payload) {
+  assertCanWrite('Criacao de venda');
   const dados = normalizarPayloadVenda(payload);
   const novo = {
     ...dados,
@@ -223,6 +224,7 @@ function criarVenda(payload) {
 }
 
 function atualizarVenda(id, payload) {
+  assertCanWrite('Atualizacao de venda');
   const vendaId = String(id || '').trim();
   if (!vendaId) {
     throw new Error('ID da venda nao informado.');
@@ -263,6 +265,7 @@ function atualizarVenda(id, payload) {
 }
 
 function deletarVenda(id) {
+  assertCanWrite('Exclusao de venda');
   const vendaId = String(id || '').trim();
   const sheet = getSheet(ABA_VENDAS);
   if (!sheet) return false;
@@ -286,6 +289,7 @@ function deletarVenda(id) {
 }
 
 function aplicarBaixaEstoqueVendaNoPrimeiroRecebimento(vendaId) {
+  assertCanWrite('Baixa de estoque da venda');
   const id = String(vendaId || '').trim();
   if (!id) throw new Error('Venda invalida.');
 
@@ -365,6 +369,7 @@ function aplicarBaixaEstoqueVendaNoPrimeiroRecebimento(vendaId) {
 }
 
 function registrarRecebimentoVenda(vendaId, payload) {
+  assertCanWrite('Registro de recebimento de venda');
   const id = String(vendaId || '').trim();
   if (!id) throw new Error('Venda invalida.');
 

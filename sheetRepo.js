@@ -116,6 +116,10 @@ function invalidarCachesRelacionadosAba(sheetName) {
     limparCacheValidacoes();
   }
 
+  if (aba === 'USUARIOS' && typeof limparCacheUsuariosAcesso === 'function') {
+    limparCacheUsuariosAcesso();
+  }
+
   if (aba.startsWith('PRODUTOS') && typeof limparCacheProdutos === 'function') {
     limparCacheProdutos();
   }
@@ -169,6 +173,10 @@ function rowsToObjects(sheet) {
 }
 
 function insert(sheetName, payload, schema) {
+  if (typeof assertCanWrite === 'function') {
+    assertCanWrite(`Criacao na aba ${String(sheetName || '').trim().toUpperCase() || 'SEM_NOME'}`);
+  }
+
   const ss = getDataSpreadsheet();
   let sheet = ss.getSheetByName(sheetName);
   if (!sheet) {
@@ -191,6 +199,10 @@ function insert(sheetName, payload, schema) {
 
 
 function updateById(sheetName, idField, id, payload, schema) {
+  if (typeof assertCanWrite === 'function') {
+    assertCanWrite(`Atualizacao na aba ${String(sheetName || '').trim().toUpperCase() || 'SEM_NOME'}`);
+  }
+
   const ss = getDataSpreadsheet();
   let sheet = ss.getSheetByName(sheetName);
   if (!sheet) {

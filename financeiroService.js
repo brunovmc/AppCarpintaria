@@ -1290,6 +1290,7 @@ function recarregarCacheDespesasGerais() {
 }
 
 function criarDespesaGeral(payload) {
+  assertCanWrite('Criacao de despesa geral');
   const dados = normalizarPayloadDespesaGeral(payload);
   const novoId = gerarId('DES');
   const novo = {
@@ -1307,6 +1308,7 @@ function criarDespesaGeral(payload) {
 }
 
 function atualizarDespesaGeral(id, payload) {
+  assertCanWrite('Atualizacao de despesa geral');
   const dados = normalizarPayloadDespesaGeral(payload);
   const despesaId = String(id || '').trim();
   if (!despesaId) {
@@ -1343,6 +1345,7 @@ function atualizarDespesaGeral(id, payload) {
 }
 
 function deletarDespesaGeral(id) {
+  assertCanWrite('Exclusao de despesa geral');
   const ok = updateById(
     ABA_DESPESAS_GERAIS,
     'ID',
@@ -1429,6 +1432,7 @@ function calcularTotalPagoOrigemFinanceiro(origemTipo, origemId, forcarRecarrega
 }
 
 function registrarPagamento(origemTipo, origemId, payload) {
+  assertCanWrite('Registro de pagamento');
   const origem = obterOrigemPagamentoFinanceiro(origemTipo, origemId);
   const dados = { ...(payload || {}) };
 
@@ -1520,6 +1524,7 @@ function registrarPagamento(origemTipo, origemId, payload) {
 }
 
 function registrarPagamentoCompra(compraId, payload) {
+  assertCanWrite('Registro de pagamento de compra');
   const pagamentoCriado = registrarPagamento(ORIGEM_TIPO_COMPRA, compraId, payload);
   const compraAtualizada = (typeof listarCompras === 'function')
     ? (listarCompras(true).find(i => i.ID === compraId) || null)
@@ -1531,6 +1536,7 @@ function registrarPagamentoCompra(compraId, payload) {
 }
 
 function registrarPagamentoDespesaGeral(despesaId, payload) {
+  assertCanWrite('Registro de pagamento de despesa geral');
   const pagamentoCriado = registrarPagamento(ORIGEM_TIPO_DESPESA, despesaId, payload);
   const despesaAtualizada = listarDespesasGerais(true).find(i => i.ID === despesaId) || null;
   return {
@@ -1540,6 +1546,7 @@ function registrarPagamentoDespesaGeral(despesaId, payload) {
 }
 
 function removerPagamento(id) {
+  assertCanWrite('Exclusao de pagamento');
   const pagamento = listarPagamentos(true).find(p => String(p.ID || '').trim() === String(id || '').trim());
   const ok = updateById(
     ABA_PAGAMENTOS,
