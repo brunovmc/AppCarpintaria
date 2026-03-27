@@ -3,6 +3,7 @@ const ABA_PAGAMENTOS = 'PAGAMENTOS';
 const ABA_PARCELAS_FINANCEIRAS = 'PARCELAS_FINANCEIRAS';
 const ABA_COMPRAS_FINANCEIRO = 'COMPRAS';
 const ABA_VENDAS_FINANCEIRO = 'VENDAS';
+const ABA_PRODUTOS_FINANCEIRO = 'PRODUTOS';
 
 const DESPESAS_GERAIS_CACHE_SCOPE = 'DESPESAS_GERAIS_LISTA_ATIVAS';
 const DESPESAS_GERAIS_CACHE_TTL_SEC = 90;
@@ -17,6 +18,7 @@ const ORIGEM_TIPO_COMPRA = 'COMPRA';
 const ORIGEM_TIPO_DESPESA = 'DESPESA_GERAL';
 const ORIGEM_TIPO_VENDA = 'VENDA';
 const ORIGEM_TIPO_ESTOQUE = 'ESTOQUE';
+const ORIGEM_TIPO_PRODUCAO = 'PRODUCAO';
 const NATUREZA_PAGAMENTO = 'PAGAMENTO';
 const NATUREZA_RECEBIMENTO = 'RECEBIMENTO';
 
@@ -1589,6 +1591,18 @@ function obterResumoDashboardFinanceiro(referenciaYm, forcarRecarregar) {
   const vendas = (typeof listarVendas === 'function') ? listarVendas(!!forcarRecarregar) : [];
   const pagamentos = listarPagamentos(!!forcarRecarregar);
   const estoque = (typeof listarEstoque === 'function') ? listarEstoque(!!forcarRecarregar) : [];
+  const producoes = (typeof listarProducao === 'function') ? listarProducao() : [];
+  const produtosSheet = getSheet(ABA_PRODUTOS_FINANCEIRO);
+  const produtosRows = produtosSheet ? rowsToObjects(produtosSheet) : [];
+  const precoVendaProdutoPorId = {};
+  produtosRows
+    .filter(i => String(i.ativo).toLowerCase() === 'true')
+    .forEach(p => {
+      const produtoId = String(p.produto_id || '').trim();
+      if (!produtoId || Object.prototype.hasOwnProperty.call(precoVendaProdutoPorId, produtoId)) return;
+      const preco = round2Financeiro(parseNumeroBR(p.preco_venda));
+      precoVendaProdutoPorId[produtoId] = preco > 0 ? preco : 0;
+    });
 
   const comprasPorId = {};
   compras.forEach(i => { comprasPorId[String(i.ID || '').trim()] = i; });
@@ -1772,6 +1786,7 @@ function obterResumoDashboardFinanceiro(referenciaYm, forcarRecarregar) {
 
   let valorEstoqueTotal = 0;
   const valorEstoquePorTipo = {};
+  let valorProdutosEstoque = 0;
   estoque.forEach(item => {
     const quantidade = parseNumeroBR(item.quantidade);
     const valorUnit = obterValorUnitarioEstoqueDashboard(item);
@@ -1780,7 +1795,29 @@ function obterResumoDashboardFinanceiro(referenciaYm, forcarRecarregar) {
 
     const tipo = String(item.tipo || 'SEM_TIPO').trim() || 'SEM_TIPO';
     valorEstoquePorTipo[tipo] = round2Financeiro((valorEstoquePorTipo[tipo] || 0) + valor);
+
+    if (normalizarTextoSemAcentoFinanceiro(tipo) === 'PRODUTO') {
+      valorProdutosEstoque = round2Financeiro(valorProdutosEstoque + valor);
+    }
   });
+
+  const statusContaComoEmProducao = status => {
+    const s = normalizarTextoSemAcentoFinanceiro(status);
+    return s === 'EM PRODUCAO' || s === 'FINALIZACAO';
+  };
+
+  const valorProdutosProducao = round2Financeiro(
+    (Array.isArray(producoes) ? producoes : [])
+      .reduce((acc, op) => {
+        if (!statusContaComoEmProducao(op?.status)) return acc;
+        const produtoId = String(op?.produto_id || '').trim();
+        const precoVenda = round2Financeiro(precoVendaProdutoPorId[produtoId] || 0);
+        if (precoVenda <= 0) return acc;
+        const quantidade = round2Financeiro(parseNumeroBR(op?.qtd_planejada));
+        if (quantidade <= 0) return acc;
+        return acc + round2Financeiro(quantidade * precoVenda);
+      }, 0)
+  );
 
   const meses = [];
   for (let i = 5; i >= 0; i--) {
@@ -1803,6 +1840,8 @@ function obterResumoDashboardFinanceiro(referenciaYm, forcarRecarregar) {
       vencido_total: vencidoTotal,
       avencer_7_dias: aVencer7Dias,
       valor_estoque_total: round2Financeiro(valorEstoqueTotal),
+      valor_produtos_estoque: round2Financeiro(valorProdutosEstoque),
+      valor_produtos_producao: round2Financeiro(valorProdutosProducao),
       contador_bruno_mes: round2Financeiro(contadoresMes.bruno),
       contador_zizu_mes: round2Financeiro(contadoresMes.zizu)
     },
@@ -1830,6 +1869,8 @@ function normalizarCardKeyDashboardFinanceiro(cardKey) {
     vencido_total: true,
     avencer_7_dias: true,
     valor_estoque_total: true,
+    valor_produtos_estoque: true,
+    valor_produtos_producao: true,
     contador_bruno_mes: true,
     contador_zizu_mes: true
   };
@@ -1849,6 +1890,8 @@ function getRotuloCardDashboardFinanceiro(cardKey) {
     vencido_total: 'Vencido',
     avencer_7_dias: 'A vencer (7 dias)',
     valor_estoque_total: 'Valor em estoque',
+    valor_produtos_estoque: 'Valor de produtos em estoque',
+    valor_produtos_producao: 'Valor de produtos em producao',
     contador_bruno_mes: 'BRUNO (pago no mes)',
     contador_zizu_mes: 'ZIZU (pago no mes)'
   };
@@ -1861,6 +1904,7 @@ function getAbaOrigemDashboardFinanceiro(origemTipo) {
   if (tipo === ORIGEM_TIPO_DESPESA) return 'despesas';
   if (tipo === ORIGEM_TIPO_VENDA) return 'vendas';
   if (tipo === ORIGEM_TIPO_ESTOQUE) return 'estoque';
+  if (tipo === ORIGEM_TIPO_PRODUCAO) return 'producao';
   return '';
 }
 
@@ -1913,6 +1957,18 @@ function obterComposicaoCardDashboardFinanceiro(referenciaYm, cardKey, forcarRec
   const vendas = (typeof listarVendas === 'function') ? listarVendas(!!forcarRecarregar) : [];
   const pagamentos = listarPagamentos(!!forcarRecarregar);
   const estoque = (typeof listarEstoque === 'function') ? listarEstoque(!!forcarRecarregar) : [];
+  const producoes = (typeof listarProducao === 'function') ? listarProducao() : [];
+  const produtosSheet = getSheet(ABA_PRODUTOS_FINANCEIRO);
+  const produtosRows = produtosSheet ? rowsToObjects(produtosSheet) : [];
+  const precoVendaProdutoPorId = {};
+  produtosRows
+    .filter(i => String(i.ativo).toLowerCase() === 'true')
+    .forEach(p => {
+      const produtoId = String(p.produto_id || '').trim();
+      if (!produtoId || Object.prototype.hasOwnProperty.call(precoVendaProdutoPorId, produtoId)) return;
+      const preco = round2Financeiro(parseNumeroBR(p.preco_venda));
+      precoVendaProdutoPorId[produtoId] = preco > 0 ? preco : 0;
+    });
 
   const comprasPorId = {};
   compras.forEach(i => { comprasPorId[String(i.ID || '').trim()] = i; });
@@ -1922,6 +1978,8 @@ function obterComposicaoCardDashboardFinanceiro(referenciaYm, cardKey, forcarRec
   vendas.forEach(i => { vendasPorId[String(i.ID || '').trim()] = i; });
   const estoquePorId = {};
   estoque.forEach(i => { estoquePorId[String(i.ID || '').trim()] = i; });
+  const producoesPorId = {};
+  producoes.forEach(i => { producoesPorId[String(i.producao_id || '').trim()] = i; });
 
   function obterMetaOrigem(origemTipo, origemId) {
     const tipo = String(origemTipo || '').trim().toUpperCase();
@@ -1981,6 +2039,22 @@ function obterComposicaoCardDashboardFinanceiro(referenciaYm, cardKey, forcarRec
         detalhe: `${String(item.tipo || 'SEM_TIPO').trim() || 'SEM_TIPO'} | ${String(item.categoria || 'SEM_CATEGORIA').trim() || 'SEM_CATEGORIA'}`,
         pago_por: String(item.pago_por || '').trim(),
         fornecedor: String(item.fornecedor || '').trim()
+      };
+    }
+
+    if (tipo === ORIGEM_TIPO_PRODUCAO) {
+      const op = producoesPorId[id];
+      if (!op) return null;
+      const nomeProduto = String(op.nome_produto || '').trim();
+      const nomeOrdem = String(op.nome_ordem || '').trim();
+      return {
+        origem_tipo: tipo,
+        origem_id: id,
+        origem_aba: getAbaOrigemDashboardFinanceiro(tipo),
+        titulo: `Producao: ${nomeOrdem || nomeProduto || id}`,
+        detalhe: `Produto: ${nomeProduto || '-'} | Status: ${String(op.status || '').trim() || '-'}`,
+        pago_por: '',
+        fornecedor: ''
       };
     }
 
@@ -2080,6 +2154,10 @@ function obterComposicaoCardDashboardFinanceiro(referenciaYm, cardKey, forcarRec
 
   let itens = [];
   let campoValor = 'valor';
+  const statusContaComoEmProducao = status => {
+    const s = normalizarTextoSemAcentoFinanceiro(status);
+    return s === 'EM PRODUCAO' || s === 'FINALIZACAO';
+  };
 
   if (chave === 'gasto_pago_mes') {
     itens = itensPagamentosMes;
@@ -2304,6 +2382,65 @@ function obterComposicaoCardDashboardFinanceiro(referenciaYm, cardKey, forcarRec
         eh_contagem: false
       });
     });
+  } else if (chave === 'valor_produtos_estoque') {
+    itens = estoque
+      .filter(item => normalizarTextoSemAcentoFinanceiro(item.tipo) === 'PRODUTO')
+      .map(item => {
+        const id = String(item.ID || '').trim();
+        const meta = obterMetaOrigem(ORIGEM_TIPO_ESTOQUE, id);
+        if (!meta) return null;
+        const quantidade = round2Financeiro(parseNumeroBR(item.quantidade));
+        const valorUnit = round2Financeiro(obterValorUnitarioEstoqueDashboard(item));
+        const valor = round2Financeiro(Math.max(0, quantidade * valorUnit));
+        if (valor <= 0) return null;
+        return {
+          linha_id: `EST_PRD:${id}`,
+          tipo_linha: 'estoque_produto',
+          titulo: meta.titulo,
+          detalhe: `${meta.detalhe} | Qtd: ${quantidade} ${String(item.unidade || '').trim() || ''}`.trim(),
+          data: formatarDataYmdFinanceiroSafe(item.comprado_em),
+          valor,
+          origem_tipo: meta.origem_tipo,
+          origem_id: meta.origem_id,
+          origem_aba: meta.origem_aba,
+          pagamento_id: '',
+          pode_editar_origem: true,
+          pode_excluir_origem: true,
+          pode_remover_pagamento: false,
+          eh_contagem: false
+        };
+      })
+      .filter(Boolean);
+  } else if (chave === 'valor_produtos_producao') {
+    itens = producoes
+      .filter(op => statusContaComoEmProducao(op?.status))
+      .map(op => {
+        const opId = String(op?.producao_id || '').trim();
+        const produtoId = String(op?.produto_id || '').trim();
+        const meta = obterMetaOrigem(ORIGEM_TIPO_PRODUCAO, opId);
+        if (!meta) return null;
+        const precoVenda = round2Financeiro(precoVendaProdutoPorId[produtoId] || 0);
+        if (precoVenda <= 0) return null;
+        const quantidade = round2Financeiro(parseNumeroBR(op?.qtd_planejada));
+        if (quantidade <= 0) return null;
+        return {
+          linha_id: `OP_VAL:${opId}`,
+          tipo_linha: 'producao_produto',
+          titulo: meta.titulo,
+          detalhe: `${meta.detalhe} | Qtd planejada: ${quantidade} ${String(op?.unidade_produto || '').trim() || ''}`.trim(),
+          data: formatarDataYmdFinanceiroSafe(op?.data_inicio || op?.criado_em),
+          valor: round2Financeiro(quantidade * precoVenda),
+          origem_tipo: meta.origem_tipo,
+          origem_id: meta.origem_id,
+          origem_aba: meta.origem_aba,
+          pagamento_id: '',
+          pode_editar_origem: false,
+          pode_excluir_origem: false,
+          pode_remover_pagamento: false,
+          eh_contagem: false
+        };
+      })
+      .filter(Boolean);
   } else if (chave === 'valor_estoque_total') {
     itens = estoque.map(item => {
       const id = String(item.ID || '').trim();
