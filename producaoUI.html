@@ -355,7 +355,16 @@
         const custoUnit = Number(l.custo_unitario || 0).toFixed(4);
         const custoTotal = Number(l.custo_total || 0).toFixed(2);
         const inputId = `custoLote_${String(l.id || '').replace(/[^a-zA-Z0-9_-]/g, '')}`;
+        const precoInputId = `precoVendaLote_${String(l.id || '').replace(/[^a-zA-Z0-9_-]/g, '')}`;
         const contextoSaida = montarContextoSaida(l);
+        const precoVenda = Number(l.preco_venda_produto || 0);
+        const precoVendaFormatado = isFinite(precoVenda) && precoVenda > 0
+          ? Number(precoVenda.toFixed(2))
+          : '';
+        const precoVendaTexto = precoVendaFormatado === ''
+          ? '-'
+          : `R$ ${precoVendaFormatado.toFixed(2)}`;
+        const nomeSaida = String(l.nome_saida || '').trim();
 
         return `
           <div class="receita-card">
@@ -364,12 +373,31 @@
             <div class="comp-meta">
               Qtd: ${quantidade} ${escapeHtml(l.unidade || '')} | Custo total lote: R$ ${custoTotal}
             </div>
+            <div class="comp-meta">Preco de venda do produto: ${escapeHtml(precoVendaTexto)}</div>
             <div class="comp-meta">Criado em: ${escapeHtml(l.criado_em || '-')}</div>
             ${permiteEdicao ? `
               <div class="linha-add-destino">
                 <input id="${escapeAttr(inputId)}" type="number" step="0.01" min="0" value="${escapeAttr(custoUnit)}">
                 <button class="btn-salvar-custo-lote" data-producao-id="${escapeAttr(producaoId)}" data-lote-id="${escapeAttr(l.id)}">
                   Salvar custo
+                </button>
+              </div>
+              <div class="linha-add-destino">
+                <input
+                  id="${escapeAttr(precoInputId)}"
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  placeholder="Preco venda"
+                  value="${escapeAttr(precoVendaFormatado)}"
+                >
+                <button
+                  class="btn-salvar-preco-venda-saida"
+                  data-producao-id="${escapeAttr(producaoId)}"
+                  data-nome-saida="${escapeAttr(nomeSaida)}"
+                  data-preco-input-id="${escapeAttr(precoInputId)}"
+                >
+                  Salvar preco venda
                 </button>
               </div>
             ` : `
@@ -417,9 +445,25 @@
       };
     }
 
-    function calcularValorPrevistoVendaPecas(_itens) {
-      // Preparado para evolucao futura: somar valor previsto de venda das pecas.
-      return null;
+    function calcularValorPrevistoVendaPecas(itens) {
+      return (Array.isArray(itens) ? itens : [])
+        .reduce((acc, op) => {
+          const saidas = Array.isArray(op?.saidas_previstas) ? op.saidas_previstas : [];
+          if (saidas.length > 0) {
+            const subtotal = saidas.reduce((acSaida, s) => {
+              const preco = Number(s?.preco_venda_produto || 0);
+              const qtd = Number(s?.quantidade || 0);
+              if (!isFinite(preco) || preco <= 0) return acSaida;
+              if (!isFinite(qtd) || qtd <= 0) return acSaida;
+              return acSaida + (qtd * preco);
+            }, 0);
+            if (subtotal > 0) return acc + subtotal;
+          }
+
+          const valor = Number(op?.valor_previsto_venda_pecas || 0);
+          if (!isFinite(valor) || valor <= 0) return acc;
+          return acc + valor;
+        }, 0);
     }
 
     function renderMiniDashboardProducao(itens) {
@@ -440,9 +484,7 @@
           </div>
         `).join('');
 
-      const valorPrevistoHtml = valorPrevistoPecas === null
-        ? 'Em breve'
-        : `R$ ${formatMoeda(valorPrevistoPecas)}`;
+      const valorPrevistoHtml = `R$ ${formatMoeda(valorPrevistoPecas)}`;
 
       miniDashboard.innerHTML = `
         <div class="producao-mini-dashboard-head">
@@ -456,10 +498,9 @@
             <div class="producao-mini-dashboard-valor">${escapeHtml(formatQuantidadeResumo(resumoCategorias.totalSaidas))} un</div>
           </div>
 
-          <div class="producao-mini-dashboard-card producao-mini-dashboard-card-placeholder">
+          <div class="producao-mini-dashboard-card">
             <div class="producao-mini-dashboard-label">Valor previsto venda pecas</div>
             <div class="producao-mini-dashboard-valor">${escapeHtml(valorPrevistoHtml)}</div>
-            <div class="producao-mini-dashboard-sub">Preparado para calculo futuro</div>
           </div>
         </div>
 
@@ -470,18 +511,26 @@
       `;
     }
 
-    function renderSaidasPrevistas(saidasPrevistas) {
+    function renderSaidasPrevistas(saidasPrevistas, producaoId, permiteEdicao) {
       const lista = Array.isArray(saidasPrevistas) ? saidasPrevistas : [];
       if (lista.length === 0) {
         return '<p>As saidas serao geradas ao atualizar o estoque.</p>';
       }
 
-      const cards = lista.map(s => {
+      const cards = lista.map((s, idx) => {
         const nome = String(s.nome_saida || '').trim() || '-';
         const qtd = Number(s.quantidade || 0).toFixed(2);
         const unidade = String(s.unidade || '').trim();
         const tipo = String(s.tipo_item || '').trim();
         const categoria = String(s.categoria || '').trim();
+        const precoVenda = Number(s.preco_venda_produto || 0);
+        const precoVendaFormatado = isFinite(precoVenda) && precoVenda > 0
+          ? Number(precoVenda.toFixed(2))
+          : '';
+        const precoVendaTexto = precoVendaFormatado === ''
+          ? '-'
+          : `R$ ${precoVendaFormatado.toFixed(2)}`;
+        const precoInputId = `precoVendaPrevisto_${String(producaoId || '').replace(/[^a-zA-Z0-9_-]/g, '')}_${idx}`;
         const meta = [
           `Qtd prevista: ${qtd} ${unidade}`,
           tipo ? `Tipo: ${tipo}` : '',
@@ -492,6 +541,27 @@
           <div class="receita-card">
             <div><strong>${escapeHtml(nome)}</strong></div>
             <div class="comp-meta">${escapeHtml(meta)}</div>
+            <div class="comp-meta">Preco de venda do produto: ${escapeHtml(precoVendaTexto)}</div>
+            ${permiteEdicao ? `
+              <div class="linha-add-destino">
+                <input
+                  id="${escapeAttr(precoInputId)}"
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  placeholder="Preco venda"
+                  value="${escapeAttr(precoVendaFormatado)}"
+                >
+                <button
+                  class="btn-salvar-preco-venda-saida"
+                  data-producao-id="${escapeAttr(producaoId)}"
+                  data-nome-saida="${escapeAttr(nome)}"
+                  data-preco-input-id="${escapeAttr(precoInputId)}"
+                >
+                  Salvar preco venda
+                </button>
+              </div>
+            ` : ''}
           </div>
         `;
       }).join('');
@@ -622,7 +692,7 @@
       const labelEstoque = estoqueAtualizado ? 'Estoque atualizado' : 'Atualizar estoque';
       const idJs = JSON.stringify(String(i.producao_id || ''));
       const saidasHtml = !estoqueAtualizado
-        ? renderSaidasPrevistas(i.saidas_previstas)
+        ? renderSaidasPrevistas(i.saidas_previstas, i.producao_id, true)
         : (Array.isArray(i.saidasLotes)
           ? renderSaidasLotes(i.saidasLotes, i.producao_id, true)
           : '<p>Carregando saidas geradas...</p>');
@@ -1000,6 +1070,18 @@
           const custo = input ? input.value : '';
           if (window.ProducaoController) {
             ProducaoController.atualizarCustoLoteSaida(producaoId, loteId, custo);
+          }
+          return;
+        }
+
+        if (e.target.classList.contains('btn-salvar-preco-venda-saida')) {
+          const producaoId = e.target.dataset.producaoId;
+          const nomeSaida = e.target.dataset.nomeSaida || '';
+          const precoInputId = e.target.dataset.precoInputId || '';
+          const input = precoInputId ? document.getElementById(precoInputId) : null;
+          const preco = input ? input.value : '';
+          if (window.ProducaoController) {
+            ProducaoController.atualizarPrecoVendaProdutoSaida(producaoId, nomeSaida, preco);
           }
           return;
         }

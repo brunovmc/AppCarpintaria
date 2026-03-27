@@ -9,6 +9,7 @@ const PRODUTOS_SCHEMA = [
   'produto_id',
   'nome_produto',
   'unidade_produto',
+  'preco_venda',
   'ativo',
   'criado_em'
 ];
@@ -135,6 +136,26 @@ function obterValorUnitarioEstoqueParaCustoProduto(itemEstoque) {
   return parseNumeroBR(itemEstoque?.valor_unit);
 }
 
+function normalizarPrecoVendaProdutoEntrada(valor) {
+  const raw = String(valor ?? '').trim();
+  if (raw === '') return '';
+
+  const n = parseNumeroBR(valor);
+  if (!isFinite(n) || n <= 0) {
+    throw new Error('Preco de venda invalido. Informe valor maior que zero ou deixe em branco.');
+  }
+  return Number(n.toFixed(2));
+}
+
+function normalizarPrecoVendaProdutoSaida(valor) {
+  const raw = String(valor ?? '').trim();
+  if (raw === '') return '';
+
+  const n = parseNumeroBR(valor);
+  if (!isFinite(n) || n <= 0) return '';
+  return Number(n.toFixed(2));
+}
+
 function getResumoModeloProduto(produtoId) {
   const modelo = obterModeloProduto(produtoId);
   const entradasTotal = Array.isArray(modelo?.entradas) ? modelo.entradas.length : 0;
@@ -170,10 +191,13 @@ function listarProdutos() {
       }
 
       const resumoModelo = getResumoModeloProduto(i.produto_id);
+      const precoVenda = normalizarPrecoVendaProdutoSaida(i.preco_venda);
 
       return {
         ...i,
         ...resumoModelo,
+        preco_venda: precoVenda,
+        produto_vendavel: precoVenda !== '',
         custo_previsto: custoPrevisto,
         custo_erro: custoErro,
         criado_em: i.criado_em
@@ -192,15 +216,19 @@ function criarProduto(payload) {
   const novo = {
     nome_produto: nome,
     unidade_produto: String(payload?.unidade_produto || 'UN').trim() || 'UN',
+    preco_venda: normalizarPrecoVendaProdutoEntrada(payload?.preco_venda),
     produto_id: gerarId('PRD'),
     ativo: true,
     criado_em: new Date()
   };
 
   insert(ABA_PRODUTOS, novo, PRODUTOS_SCHEMA);
+  const precoVenda = normalizarPrecoVendaProdutoSaida(novo.preco_venda);
 
   return {
     ...novo,
+    preco_venda: precoVenda,
+    produto_vendavel: precoVenda !== '',
     criado_em: Utilities.formatDate(novo.criado_em, Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm')
   };
 }
@@ -799,7 +827,8 @@ function obterModeloProduto(produtoId) {
 function salvarProdutoComModelo(produtoId, payloadProduto, dadosReceita, entradas, saidas, etapas) {
   const dadosProduto = {
     nome_produto: String(payloadProduto?.nome_produto || '').trim(),
-    unidade_produto: String(payloadProduto?.unidade_produto || 'UN').trim() || 'UN'
+    unidade_produto: String(payloadProduto?.unidade_produto || 'UN').trim() || 'UN',
+    preco_venda: normalizarPrecoVendaProdutoEntrada(payloadProduto?.preco_venda)
   };
 
   if (!dadosProduto.nome_produto) {
@@ -833,6 +862,9 @@ function salvarProdutoComModelo(produtoId, payloadProduto, dadosReceita, entrada
 
   const produtoAtual = obterProduto(id) || {};
   const resumoModelo = getResumoModeloProduto(id);
+  const precoVenda = normalizarPrecoVendaProdutoSaida(
+    produtoAtual.preco_venda || dadosProduto.preco_venda
+  );
 
   return {
     ...produtoAtual,
@@ -840,6 +872,8 @@ function salvarProdutoComModelo(produtoId, payloadProduto, dadosReceita, entrada
     produto_id: id,
     nome_produto: produtoAtual.nome_produto || dadosProduto.nome_produto,
     unidade_produto: produtoAtual.unidade_produto || dadosProduto.unidade_produto,
+    preco_venda: precoVenda,
+    produto_vendavel: precoVenda !== '',
     criado_em: produtoAtual.criado_em
       ? Utilities.formatDate(new Date(produtoAtual.criado_em), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm')
       : ''

@@ -573,6 +573,44 @@
         .atualizarCustoLoteSaidaProducao(prodId, lotId, custo);
     }
 
+    function atualizarPrecoVendaProdutoSaida(producaoId, nomeSaida, precoVendaInput) {
+      if (!podeAlterarDados('Atualizacao bloqueada em modo somente leitura')) return;
+      const prodId = String(producaoId || '').trim();
+      const nome = String(nomeSaida || '').trim();
+      const preco = Number(String(precoVendaInput || '').replace(',', '.'));
+
+      if (!prodId) {
+        mostrarToast('Producao invalida', 'erro');
+        return;
+      }
+      if (!nome) {
+        mostrarToast('Saida invalida', 'erro');
+        return;
+      }
+      if (!isFinite(preco) || preco <= 0) {
+        mostrarToast('Preco de venda deve ser maior que zero', 'erro');
+        return;
+      }
+
+      mostrarToast('Atualizando preco de venda...');
+      google.script.run
+        .withFailureHandler(err => {
+          const msg = err?.message || 'Erro ao atualizar preco de venda';
+          mostrarToast(msg, 'erro');
+        })
+        .withSuccessHandler(resp => {
+          if (window.ProdutosController?.syncFromBackend) {
+            ProdutosController.syncFromBackend();
+          }
+          carregarProducao(true);
+          const msg = resp?.produtoCriado
+            ? 'Preco salvo e produto criado automaticamente'
+            : 'Preco de venda atualizado';
+          mostrarToast(msg);
+        })
+        .atualizarPrecoVendaProdutoSaidaProducao(prodId, nome, preco);
+    }
+
     function vincularItemEstoque(producaoId, vinculoId, estoqueId) {
       if (!podeAlterarDados('Vinculo bloqueado em modo somente leitura')) return;
       const prodId = String(producaoId || '').trim();
@@ -1044,6 +1082,7 @@
       carregarVinculosMateriais,
       carregarSaidasLotes,
       atualizarCustoLoteSaida,
+      atualizarPrecoVendaProdutoSaida,
       confirmarPendenciasVinculo,
       limparEdicao,
       iniciarEdicaoEtapa,

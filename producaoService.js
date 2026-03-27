@@ -121,6 +121,53 @@ function formatDateSafe(value, pattern) {
   return Utilities.formatDate(dt, Session.getScriptTimeZone(), fmt);
 }
 
+function listarProdutosAtivosMapeadosPorNomeProducao() {
+  const produtosSheet = getDataSpreadsheet().getSheetByName(ABA_PRODUTOS);
+  const produtosRows = produtosSheet ? rowsToObjects(produtosSheet) : [];
+  const mapa = {};
+
+  produtosRows
+    .filter(i => String(i.ativo).toLowerCase() === 'true')
+    .forEach(p => {
+      const nomeNorm = normalizarTextoSemAcentoProducao(p.nome_produto);
+      if (!nomeNorm) return;
+
+      const precoVenda = parseNumeroBR(p.preco_venda);
+      const proximo = {
+        produto_id: String(p.produto_id || '').trim(),
+        nome_produto: String(p.nome_produto || '').trim(),
+        preco_venda: (isFinite(precoVenda) && precoVenda > 0)
+          ? Number(precoVenda.toFixed(2))
+          : ''
+      };
+
+      const atual = mapa[nomeNorm];
+      if (!atual) {
+        mapa[nomeNorm] = proximo;
+        return;
+      }
+
+      const precoAtual = parseNumeroBR(atual.preco_venda);
+      const precoProximo = parseNumeroBR(proximo.preco_venda);
+      if (precoAtual <= 0 && precoProximo > 0) {
+        mapa[nomeNorm] = proximo;
+      }
+    });
+
+  return mapa;
+}
+
+function obterProdutoAtivoPorNomeSaidaProducao(nomeSaida, mapaProdutosPorNome) {
+  const nomeNorm = normalizarTextoSemAcentoProducao(nomeSaida);
+  if (!nomeNorm) return null;
+
+  const mapa = (mapaProdutosPorNome && typeof mapaProdutosPorNome === 'object')
+    ? mapaProdutosPorNome
+    : listarProdutosAtivosMapeadosPorNomeProducao();
+
+  return mapa[nomeNorm] || null;
+}
+
 function listarProducao() {
   const sheet = getDataSpreadsheet().getSheetByName(ABA_PRODUCAO);
   if (!sheet) return [];
@@ -128,10 +175,35 @@ function listarProducao() {
   const produtosSheet = getDataSpreadsheet().getSheetByName(ABA_PRODUTOS);
   const produtos = produtosSheet ? rowsToObjects(produtosSheet) : [];
   const produtosMap = {};
+  const produtosAtivosPorNome = {};
   produtos
     .filter(i => String(i.ativo).toLowerCase() === 'true')
     .forEach(p => {
       produtosMap[p.produto_id] = p;
+
+      const nomeNorm = normalizarTextoSemAcentoProducao(p.nome_produto);
+      if (!nomeNorm) return;
+
+      const precoVenda = parseNumeroBR(p.preco_venda);
+      const proximo = {
+        produto_id: String(p.produto_id || '').trim(),
+        nome_produto: String(p.nome_produto || '').trim(),
+        preco_venda: (isFinite(precoVenda) && precoVenda > 0)
+          ? Number(precoVenda.toFixed(2))
+          : ''
+      };
+
+      const atual = produtosAtivosPorNome[nomeNorm];
+      if (!atual) {
+        produtosAtivosPorNome[nomeNorm] = proximo;
+        return;
+      }
+
+      const precoAtual = parseNumeroBR(atual.preco_venda);
+      const precoProximo = parseNumeroBR(proximo.preco_venda);
+      if (precoAtual <= 0 && precoProximo > 0) {
+        produtosAtivosPorNome[nomeNorm] = proximo;
+      }
     });
 
   const receitasSheet = getDataSpreadsheet().getSheetByName(ABA_PRODUTOS_RECEITAS);
@@ -190,7 +262,7 @@ function listarProducao() {
       const saidasBaseReceita = Array.isArray(saidasReceitaMap[i.receita_id])
         ? saidasReceitaMap[i.receita_id]
         : [];
-      const saidasPrevistas = agruparSaidasReceitaParaEstoque(
+      const saidasPrevistasBase = agruparSaidasReceitaParaEstoque(
         saidasBaseReceita
           .map(s => {
             const quantidade = parseNumeroBR(s.quantidade_base) * qtdPlanejada;
@@ -205,8 +277,30 @@ function listarProducao() {
           })
           .filter(v => !!v)
       );
+      const saidasPrevistas = saidasPrevistasBase.map(s => {
+        const produtoVinculado = obterProdutoAtivoPorNomeSaidaProducao(
+          s.nome_saida,
+          produtosAtivosPorNome
+        );
+        return {
+          ...s,
+          produto_id_vinculado: produtoVinculado?.produto_id || '',
+          preco_venda_produto: produtoVinculado?.preco_venda || '',
+          permite_editar_preco_venda: true
+        };
+      });
       const totalSaidasPrevistas = saidasPrevistas
         .reduce((acc, s) => acc + parseNumeroBR(s.quantidade), 0);
+      const valorPrevistoVendaPecas = saidasPrevistas
+        .reduce((acc, s) => {
+          const precoVenda = parseNumeroBR(s.preco_venda_produto);
+          if (!isFinite(precoVenda) || precoVenda <= 0) return acc;
+
+          const quantidade = parseNumeroBR(s.quantidade);
+          if (!isFinite(quantidade) || quantidade <= 0) return acc;
+
+          return acc + (quantidade * precoVenda);
+        }, 0);
 
       return {
         ...i,
@@ -217,6 +311,7 @@ function listarProducao() {
         saidas_previstas: saidasPrevistas,
         saidas_previstas_tipos: saidasPrevistas.length,
         saidas_previstas_total: parseNumeroBR(totalSaidasPrevistas),
+        valor_previsto_venda_pecas: Number(valorPrevistoVendaPecas.toFixed(2)),
         estoque_atualizado: String(i.estoque_atualizado).toLowerCase() === 'true',
         criado_em: i.criado_em
           ? formatDateSafe(i.criado_em, 'yyyy-MM-dd HH:mm')
@@ -1579,6 +1674,19 @@ function normalizarTextoProducao(valor) {
   return String(valor || '').trim().toLowerCase();
 }
 
+function normalizarTextoSemAcentoProducao(valor) {
+  const bruto = String(valor || '').trim();
+  if (!bruto) return '';
+  const semAcento = (typeof bruto.normalize === 'function')
+    ? bruto.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    : bruto;
+  return semAcento
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 function listarPendenciasVinculoEntradaProducao(producaoId, estoqueAtivoMap) {
   const mapaAtivos = estoqueAtivoMap || {};
   const vinculos = listarVinculosMateriaisProducao(producaoId);
@@ -2099,21 +2207,31 @@ function listarSaidasLotesProducao(producaoId) {
 
   const sheet = getDataSpreadsheet().getSheetByName(ABA_PRODUCAO_SAIDAS_LOTES);
   if (!sheet) return [];
+  const produtosPorNome = listarProdutosAtivosMapeadosPorNomeProducao();
 
   return rowsToObjects(sheet)
     .filter(i =>
       String(i.ativo).toLowerCase() === 'true' &&
       String(i.producao_id || '').trim() === prodId
     )
-    .map(i => ({
-      ...i,
-      quantidade: parseNumeroBR(i.quantidade),
-      custo_unitario: parseNumeroBR(i.custo_unitario),
-      custo_total: parseNumeroBR(i.custo_total),
-      criado_em: i.criado_em
-        ? formatDateSafe(i.criado_em, 'yyyy-MM-dd HH:mm')
-        : ''
-    }))
+    .map(i => {
+      const produtoVinculado = obterProdutoAtivoPorNomeSaidaProducao(
+        i.nome_saida,
+        produtosPorNome
+      );
+      return {
+        ...i,
+        quantidade: parseNumeroBR(i.quantidade),
+        custo_unitario: parseNumeroBR(i.custo_unitario),
+        custo_total: parseNumeroBR(i.custo_total),
+        preco_venda_produto: produtoVinculado?.preco_venda || '',
+        produto_id_vinculado: produtoVinculado?.produto_id || '',
+        permite_editar_preco_venda: true,
+        criado_em: i.criado_em
+          ? formatDateSafe(i.criado_em, 'yyyy-MM-dd HH:mm')
+          : ''
+      };
+    })
     .sort((a, b) => {
       const da = new Date(a.criado_em || 0).getTime() || 0;
       const db = new Date(b.criado_em || 0).getTime() || 0;
@@ -2220,5 +2338,78 @@ function atualizarCustoLoteSaidaProducao(producaoId, loteId, custoUnitario) {
     loteAtualizado,
     estoqueAtualizado,
     saidasLotes
+  };
+}
+
+function atualizarPrecoVendaProdutoSaidaProducao(producaoId, nomeSaida, precoVendaInput) {
+  const prodId = String(producaoId || '').trim();
+  const nome = String(nomeSaida || '').trim();
+  const novoPreco = parseNumeroBR(precoVendaInput);
+
+  if (!prodId) {
+    throw new Error('Producao invalida.');
+  }
+  if (!nome) {
+    throw new Error('Saida invalida.');
+  }
+  if (!isFinite(novoPreco) || novoPreco <= 0) {
+    throw new Error('Preco de venda deve ser maior que zero.');
+  }
+
+  const sheetProducao = getDataSpreadsheet().getSheetByName(ABA_PRODUCAO);
+  if (!sheetProducao) {
+    throw new Error('Aba PRODUCAO nao encontrada');
+  }
+  const ordem = rowsToObjects(sheetProducao).find(i =>
+    String(i.producao_id || '').trim() === prodId &&
+    String(i.ativo).toLowerCase() === 'true'
+  );
+  if (!ordem) {
+    throw new Error('Producao nao encontrada');
+  }
+
+  const produtosPorNome = listarProdutosAtivosMapeadosPorNomeProducao();
+  const precoVenda = Number(novoPreco.toFixed(2));
+  let produto = obterProdutoAtivoPorNomeSaidaProducao(nome, produtosPorNome);
+  let produtoCriado = false;
+
+  if (!produto || !produto.produto_id) {
+    const novoProduto = {
+      produto_id: gerarId('PRD'),
+      nome_produto: nome,
+      unidade_produto: 'UN',
+      preco_venda: precoVenda,
+      ativo: true,
+      criado_em: new Date()
+    };
+    insert(ABA_PRODUTOS, novoProduto, PRODUTOS_SCHEMA);
+    produtoCriado = true;
+    produto = {
+      produto_id: novoProduto.produto_id,
+      nome_produto: novoProduto.nome_produto,
+      preco_venda
+    };
+  } else {
+    const ok = updateById(
+      ABA_PRODUTOS,
+      'produto_id',
+      produto.produto_id,
+      { preco_venda: precoVenda },
+      PRODUTOS_SCHEMA
+    );
+    if (!ok) {
+      throw new Error('Falha ao atualizar preco do produto vinculado.');
+    }
+  }
+
+  return {
+    ok: true,
+    produtoCriado,
+    produtoAtualizado: {
+      produto_id: produto.produto_id,
+      nome_produto: produto.nome_produto || nome,
+      preco_venda: precoVenda
+    },
+    saidasLotes: listarSaidasLotesProducao(prodId)
   };
 }

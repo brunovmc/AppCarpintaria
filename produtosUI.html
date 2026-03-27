@@ -28,6 +28,7 @@
         modalDetalhesTitulo: document.getElementById('modalDetalhesProdutosTitulo'),
 
         nome: document.getElementById('produtoNome'),
+        precoVenda: document.getElementById('produtoPrecoVenda'),
         modeloCard: document.getElementById('produtoModeloCard'),
         modeloNome: document.getElementById('produtoModeloNome'),
         modeloDescricao: document.getElementById('produtoModeloDescricao'),
@@ -572,6 +573,10 @@
       const f = el();
 
       if (f.nome) f.nome.value = data.nome_produto || '';
+      if (f.precoVenda) {
+        const preco = parseNumero(data.preco_venda);
+        f.precoVenda.value = preco > 0 ? formatarNumeroInput(preco, 2) : '';
+      }
 
       if (f.formTitulo) f.formTitulo.innerText = 'Editar Produto';
     }
@@ -697,7 +702,7 @@
     function resetFormulario() {
       const f = el();
 
-      [f.nome].forEach(i => i && (i.value = ''));
+      [f.nome, f.precoVenda].forEach(i => i && (i.value = ''));
 
       resetModeloFormulario();
 
@@ -943,13 +948,19 @@
       const resumoModelo = (entradasTotal + saidasTotal + etapasTotal) > 0
         ? `Modelo: ${nomeModelo} | ${entradasTotal} entradas, ${saidasTotal} saidas, ${etapasTotal} etapas`
         : 'Modelo: nao configurado';
+      const precoVenda = parseNumero(i.preco_venda);
+      const resumoPrecoVenda = precoVenda > 0
+        ? `Preco venda: R$ ${formatNumero(precoVenda)}`
+        : 'Preco venda: nao informado';
       const nomeProduto = escapeHtml(i.nome_produto || i.produto_id);
       const resumo = escapeHtml(resumoModelo);
+      const resumoPreco = escapeHtml(resumoPrecoVenda);
 
       div.innerHTML = `
         <div class="card-resumo">
           <strong>${nomeProduto}</strong><br>
-          ${resumo}
+          ${resumo}<br>
+          ${resumoPreco}
         </div>
 
         <button class="ver-mais">Ver mais</button>
@@ -962,7 +973,13 @@
       const receitas = Array.isArray(i.receitas) ? i.receitas : [];
       const receitasCarregadas = !!i.receitasCarregadas;
       const idJs = JSON.stringify(String(i.produto_id || ''));
+      const precoVenda = parseNumero(i.preco_venda);
+      const precoVendaLabel = precoVenda > 0
+        ? `R$ ${formatNumero(precoVenda)}`
+        : 'Nao informado';
       return `
+        <p><b>Preco de venda:</b> ${escapeHtml(precoVendaLabel)}</p>
+
         <div class="bloco">
           <p><b>Receitas</b></p>
           ${renderReceitas(receitas, receitasCarregadas, i.produto_id)}

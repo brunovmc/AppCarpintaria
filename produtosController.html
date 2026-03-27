@@ -19,6 +19,12 @@
       return isNaN(n) ? '' : n;
     }
 
+    function formatPrecoVendaInput(valor) {
+      const n = Number(String(valor ?? '').replace(',', '.'));
+      if (!isFinite(n) || n <= 0) return '';
+      return String(Number(n.toFixed(2)));
+    }
+
     function setSalvando(ativo) {
       salvando = !!ativo;
       if (window.AppMutationUI?.lock && window.AppMutationUI?.unlock) {
@@ -59,6 +65,8 @@
 
       const nomeInput = document.getElementById('produtoNome');
       if (nomeInput) nomeInput.value = String(dadosProduto.nome_produto || '').trim();
+      const precoInput = document.getElementById('produtoPrecoVenda');
+      if (precoInput) precoInput.value = formatPrecoVendaInput(dadosProduto.preco_venda);
       if (window.ProdutosUI?.preencherModeloFormulario) {
         ProdutosUI.preencherModeloFormulario(modelo);
       }
@@ -454,10 +462,16 @@
       if (salvando) return;
       const get = id => document.getElementById(id)?.value || '';
       const nomeProduto = String(get('produtoNome') || '').trim();
+      const precoVendaInput = parseNumeroInput(get('produtoPrecoVenda'));
       if (!nomeProduto) {
         mostrarToast('Informe o nome do produto', 'erro');
         return;
       }
+      if (precoVendaInput !== '' && (!isFinite(precoVendaInput) || precoVendaInput <= 0)) {
+        mostrarToast('Preco de venda deve ser maior que zero', 'erro');
+        return;
+      }
+      const precoVenda = precoVendaInput === '' ? '' : Number(precoVendaInput.toFixed(2));
 
       const modelo = window.ProdutosUI?.obterModeloFormularioPayload
         ? ProdutosUI.obterModeloFormularioPayload()
@@ -476,7 +490,8 @@
 
       const dadosProduto = {
         nome_produto: nomeProduto,
-        unidade_produto: 'UN'
+        unidade_produto: 'UN',
+        preco_venda: precoVenda
       };
 
       const produtoId = editandoId || '';
