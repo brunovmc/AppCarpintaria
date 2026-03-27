@@ -383,6 +383,7 @@
     let memoriaTs = 0;
     let inFlightPromise = null;
     let storageDisponivelMemo = null;
+    let backendSincronizadoNaSessao = false;
 
     function storageDisponivel() {
       if (storageDisponivelMemo !== null) return storageDisponivelMemo;
@@ -502,6 +503,7 @@
     function invalidate() {
       memoriaData = null;
       memoriaTs = 0;
+      backendSincronizadoNaSessao = false;
       if (!storageDisponivel()) return;
       try {
         window.localStorage.removeItem(STORAGE_KEY);
@@ -514,18 +516,18 @@
       const force = !!options.force;
       const maxAgeMs = Number(options.maxAgeMs) > 0 ? Number(options.maxAgeMs) : DEFAULT_TTL_MS;
       const staleOnError = options.staleOnError !== false;
+      const cache = !force ? peek(maxAgeMs) : null;
+      const stale = cache || peek(Number.MAX_SAFE_INTEGER);
+      const backendDisponivel = !!window.google?.script?.run;
+      const deveSincronizarBackend = backendDisponivel && (!!force || !backendSincronizadoNaSessao);
 
-      if (!force) {
-        const cache = peek(maxAgeMs);
-        if (cache) {
-          return Promise.resolve({ data: cache, source: 'cache' });
-        }
+      if (!deveSincronizarBackend && cache) {
+        return Promise.resolve({ data: cache, source: 'cache' });
       }
 
       if (inFlightPromise) return inFlightPromise;
 
-      const stale = peek(Number.MAX_SAFE_INTEGER);
-      if (!window.google?.script?.run) {
+      if (!backendDisponivel) {
         if (stale) return Promise.resolve({ data: stale, source: 'stale' });
         return Promise.reject(new Error('google.script.run indisponivel'));
       }
@@ -534,6 +536,7 @@
         google.script.run
           .withSuccessHandler(raw => {
             const data = prime(raw);
+            backendSincronizadoNaSessao = true;
             resolve({ data, source: 'backend' });
           })
           .withFailureHandler(err => {
