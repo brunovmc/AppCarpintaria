@@ -29,6 +29,12 @@
       if (!dash?.invalidarCacheMeses) return;
       const refs = dash.coletarMesesImpactados ? dash.coletarMesesImpactados(...arguments) : [];
       dash.invalidarCacheMeses(refs);
+      if (window.AppTabRefresh?.requestSync) {
+        window.AppTabRefresh.requestSync('dashboard', {
+          delayMs: 420,
+          prefetch: true
+        });
+      }
     }
 
     function podeAlterarDados(contexto = 'Operacao') {
@@ -449,14 +455,28 @@
             const concluirSync = window.AppSyncFeedback?.iniciar
               ? window.AppSyncFeedback.iniciar('Salvo com sucesso. Atualizando dados...')
               : null;
-            carregarCompras(true, () => {
-              if (concluirSync) {
-                concluirSync('Dados atualizados');
-              } else {
-                mostrarToast('Dados atualizados');
-              }
-              setSalvando(false);
-            });
+            setSalvando(false);
+            if (window.AppTabRefresh?.requestSync) {
+              window.AppTabRefresh.requestSync('compras', {
+                delayMs: 280,
+                prefetch: true,
+                onDone: () => {
+                  if (concluirSync) {
+                    concluirSync('Dados atualizados');
+                  } else {
+                    mostrarToast('Dados atualizados');
+                  }
+                }
+              });
+            } else {
+              carregarCompras(true, () => {
+                if (concluirSync) {
+                  concluirSync('Dados atualizados');
+                } else {
+                  mostrarToast('Dados atualizados');
+                }
+              });
+            }
             invalidarCacheDashboardPorImpacto(dados);
             return;
           }
@@ -579,7 +599,14 @@
             }
           }
           if (window.EstoqueController?.syncFromBackend) {
-            EstoqueController.syncFromBackend();
+            if (window.AppTabRefresh?.requestSync) {
+              window.AppTabRefresh.requestSync('estoque', {
+                delayMs: 260,
+                prefetch: true
+              });
+            } else {
+              EstoqueController.syncFromBackend();
+            }
           }
           if (window.AppTabRefresh?.markDirty) {
             window.AppTabRefresh.markDirty('estoque');
@@ -691,13 +718,27 @@
             const concluirSync = window.AppSyncFeedback?.iniciar
               ? window.AppSyncFeedback.iniciar('Pagamento registrado. Atualizando dados...')
               : null;
-            carregarCompras(true, () => {
-              if (concluirSync) {
-                concluirSync('Dados atualizados');
-              } else {
-                mostrarToast('Dados atualizados');
-              }
-            });
+            if (window.AppTabRefresh?.requestSync) {
+              window.AppTabRefresh.requestSync('compras', {
+                delayMs: 280,
+                prefetch: true,
+                onDone: () => {
+                  if (concluirSync) {
+                    concluirSync('Dados atualizados');
+                  } else {
+                    mostrarToast('Dados atualizados');
+                  }
+                }
+              });
+            } else {
+              carregarCompras(true, () => {
+                if (concluirSync) {
+                  concluirSync('Dados atualizados');
+                } else {
+                  mostrarToast('Dados atualizados');
+                }
+              });
+            }
             invalidarCacheDashboardPorImpacto(itemAntes, dados);
           }
         })

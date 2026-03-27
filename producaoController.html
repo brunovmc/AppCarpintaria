@@ -126,6 +126,12 @@
       if (window.DashboardController?.invalidarCacheMeses) {
         window.DashboardController.invalidarCacheMeses();
       }
+      if (window.AppTabRefresh?.requestSync) {
+        window.AppTabRefresh.requestSync('dashboard', {
+          delayMs: 420,
+          prefetch: true
+        });
+      }
     }
 
     function toDateString(value) {
@@ -374,6 +380,12 @@
         .withSuccessHandler(() => {
           mostrarToast('Salvo com sucesso');
           marcarDashboardComoSujo();
+          if (window.AppTabRefresh?.requestSync) {
+            window.AppTabRefresh.requestSync('producao', {
+              delayMs: 300,
+              prefetch: true
+            });
+          }
           setSalvando(false);
         })
         .atualizarProducao(idAtual, dados);
@@ -416,14 +428,28 @@
               ? window.AppSyncFeedback.iniciar('Salvo com sucesso. Atualizando dados...')
               : null;
             marcarDashboardComoSujo();
-            carregarProducao(true, () => {
-              if (concluirSync) {
-                concluirSync('Dados atualizados');
-              } else {
-                mostrarToast('Dados atualizados');
-              }
-              setSalvando(false);
-            });
+            setSalvando(false);
+            if (window.AppTabRefresh?.requestSync) {
+              window.AppTabRefresh.requestSync('producao', {
+                delayMs: 280,
+                prefetch: true,
+                onDone: () => {
+                  if (concluirSync) {
+                    concluirSync('Dados atualizados');
+                  } else {
+                    mostrarToast('Dados atualizados');
+                  }
+                }
+              });
+            } else {
+              carregarProducao(true, () => {
+                if (concluirSync) {
+                  concluirSync('Dados atualizados');
+                } else {
+                  mostrarToast('Dados atualizados');
+                }
+              });
+            }
             return;
           }
 
@@ -431,6 +457,12 @@
           renderListaAtual();
           mostrarToast('Salvo com sucesso');
           marcarDashboardComoSujo();
+          if (window.AppTabRefresh?.requestSync) {
+            window.AppTabRefresh.requestSync('producao', {
+              delayMs: 300,
+              prefetch: true
+            });
+          }
           setSalvando(false);
         })
         .criarProducao(dados);
@@ -613,7 +645,14 @@
             });
           }
           if (window.EstoqueController?.syncFromBackend) {
-            EstoqueController.syncFromBackend();
+            if (window.AppTabRefresh?.requestSync) {
+              window.AppTabRefresh.requestSync('estoque', {
+                delayMs: 260,
+                prefetch: true
+              });
+            } else {
+              EstoqueController.syncFromBackend();
+            }
           }
           renderListaAtual();
           marcarDashboardComoSujo();
@@ -671,10 +710,26 @@
           };
 
           if (window.ProdutosController?.syncFromBackend) {
-            agendarSync(done => ProdutosController.syncFromBackend(done));
+            if (window.AppTabRefresh?.requestSync) {
+              agendarSync(done => window.AppTabRefresh.requestSync('produtos', {
+                delayMs: 240,
+                prefetch: true,
+                onDone: done
+              }));
+            } else {
+              agendarSync(done => ProdutosController.syncFromBackend(done));
+            }
           }
           marcarDashboardComoSujo();
-          agendarSync(done => carregarProducao(true, done));
+          if (window.AppTabRefresh?.requestSync) {
+            agendarSync(done => window.AppTabRefresh.requestSync('producao', {
+              delayMs: 240,
+              prefetch: true,
+              onDone: done
+            }));
+          } else {
+            agendarSync(done => carregarProducao(true, done));
+          }
           if (pendenciasSync === 0) {
             if (concluirSync) {
               concluirSync('Dados atualizados');
@@ -858,7 +913,15 @@
           };
 
           if (window.EstoqueController?.syncFromBackend) {
-            agendarSync(done => EstoqueController.syncFromBackend(done));
+            if (window.AppTabRefresh?.requestSync) {
+              agendarSync(done => window.AppTabRefresh.requestSync('estoque', {
+                delayMs: 220,
+                prefetch: true,
+                onDone: done
+              }));
+            } else {
+              agendarSync(done => EstoqueController.syncFromBackend(done));
+            }
           }
           if (resp?.producaoAtualizada) {
             ProducaoStore.update(payload.producaoId, resp.producaoAtualizada);

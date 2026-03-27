@@ -816,12 +816,111 @@
     producao: 20000
   };
   const abaRefreshState = {};
+  const TAB_SYNC_COALESCE_MS = 380;
+  const abaSyncState = {};
 
   function obterNomeAbaAtiva() {
     const ativa = document.querySelector('.aba:not(.hidden)');
     const id = String(ativa?.id || '').trim();
     return id.startsWith('aba-') ? id.slice(4) : '';
   }
+
+  function obterLabelAbaSync(nomeAba) {
+    const aba = String(nomeAba || '').trim();
+    if (!aba) return 'dados';
+    if (aba === 'dashboard') return 'inicio';
+    const label = obterLabelAbaMenu(aba);
+    if (label) return String(label || '').trim().toLowerCase();
+    return aba;
+  }
+
+  function createSyncStatusHelper() {
+    let seq = 0;
+    const ativos = new Map();
+    let elWrap = null;
+    let elTexto = null;
+
+    function garantirElemento() {
+      if (elWrap && document.body?.contains(elWrap)) return;
+      elWrap = document.getElementById('appSyncBanner');
+      if (!elWrap) return;
+      elTexto = document.getElementById('appSyncBannerText');
+      if (!elTexto) {
+        elTexto = document.createElement('span');
+        elTexto.id = 'appSyncBannerText';
+        elWrap.appendChild(elTexto);
+      }
+    }
+
+    function render() {
+      garantirElemento();
+      if (!elWrap || !elTexto) return;
+
+      if (!ativos.size) {
+        elWrap.classList.add('hidden');
+        elWrap.removeAttribute('data-aba-sync');
+        return;
+      }
+
+      const abaAtiva = obterNomeAbaAtiva();
+      const lista = [...ativos.values()];
+      const daAbaAtiva = abaAtiva
+        ? lista.filter(item => String(item?.aba || '').trim() === abaAtiva)
+        : [];
+      const alvo = daAbaAtiva.length > 0 ? daAbaAtiva[0] : lista[0];
+      const abaAlvo = String(alvo?.aba || '').trim();
+      const texto = String(alvo?.texto || '').trim();
+      const labelAba = obterLabelAbaSync(abaAlvo);
+
+      elTexto.textContent = texto || `Sincronizando ${labelAba}...`;
+      if (abaAlvo) {
+        elWrap.setAttribute('data-aba-sync', abaAlvo);
+      } else {
+        elWrap.removeAttribute('data-aba-sync');
+      }
+      elWrap.classList.remove('hidden');
+    }
+
+    function iniciar(aba, texto = '') {
+      const token = `sync_${++seq}`;
+      ativos.set(token, {
+        aba: normalizarNomeAba(aba),
+        texto: String(texto || '').trim()
+      });
+      render();
+      return token;
+    }
+
+    function finalizar(token) {
+      if (!token) return;
+      ativos.delete(token);
+      render();
+    }
+
+    function limparAba(aba) {
+      const alvo = normalizarNomeAba(aba);
+      if (!alvo) return;
+      [...ativos.keys()].forEach(token => {
+        const item = ativos.get(token);
+        if (String(item?.aba || '').trim() !== alvo) return;
+        ativos.delete(token);
+      });
+      render();
+    }
+
+    function refresh() {
+      render();
+    }
+
+    return {
+      iniciar,
+      finalizar,
+      limparAba,
+      refresh
+    };
+  }
+
+  window.AppSyncStatus = window.AppSyncStatus || createSyncStatusHelper();
 
   function getMesAtualReferencia() {
     const d = new Date();
@@ -862,11 +961,20 @@
     return !!state?.dirty;
   }
 
-  window.AppTabRefresh = window.AppTabRefresh || {
-    markDirty: marcarAbaComoSuja,
-    clearDirty: limparAbaSuja,
-    isDirty: abaEstaSuja
-  };
+  function obterEstadoSyncAba(nome) {
+    const aba = normalizarNomeAba(nome);
+    if (!aba) return null;
+    if (!abaSyncState[aba]) {
+      abaSyncState[aba] = {
+        timer: null,
+        running: false,
+        pendingCallbacks: [],
+        queued: false,
+        queuedPrefetch: false
+      };
+    }
+    return abaSyncState[aba];
+  }
 
   function deveRecarregarAba(nome, force = false) {
     const aba = String(nome || '').trim();
@@ -893,13 +1001,206 @@
     return false;
   }
 
+  function executarSincronizacaoForcadaAba(nome, onDone) {
+    const aba = normalizarNomeAba(nome);
+    const concluir = (() => {
+      let finalizado = false;
+      return () => {
+        if (finalizado) return;
+        finalizado = true;
+        if (typeof onDone === 'function') onDone();
+      };
+    })();
+
+    if (!aba) {
+      concluir();
+      return;
+    }
+
+    if (aba === 'dashboard') {
+      if (window.DashboardController?.atualizar) {
+        window.AppPerf?.measure('tab.dashboard.sync', () => DashboardController.atualizar(true, concluir));
+        return;
+      }
+      if (window.DashboardController?.init) {
+        window.AppPerf?.measure('tab.dashboard.init', () => DashboardController.init());
+      }
+      concluir();
+      return;
+    }
+
+    const map = {
+      estoque: {
+        sync: window.EstoqueController?.syncFromBackend,
+        init: window.EstoqueController?.init,
+        labelSync: 'tab.estoque.sync',
+        labelInit: 'tab.estoque.init'
+      },
+      despesas: {
+        sync: window.DespesasController?.syncFromBackend,
+        init: window.DespesasController?.init,
+        labelSync: 'tab.despesas.sync',
+        labelInit: 'tab.despesas.init'
+      },
+      compras: {
+        sync: window.ComprasController?.syncFromBackend,
+        init: window.ComprasController?.init,
+        labelSync: 'tab.compras.sync',
+        labelInit: 'tab.compras.init'
+      },
+      vendas: {
+        sync: window.VendasController?.syncFromBackend,
+        init: window.VendasController?.init,
+        labelSync: 'tab.vendas.sync',
+        labelInit: 'tab.vendas.init'
+      },
+      produtos: {
+        sync: window.ProdutosController?.syncFromBackend,
+        init: window.ProdutosController?.init,
+        labelSync: 'tab.produtos.sync',
+        labelInit: 'tab.produtos.init'
+      },
+      producao: {
+        sync: window.ProducaoController?.syncFromBackend,
+        init: window.ProducaoController?.init,
+        labelSync: 'tab.producao.sync',
+        labelInit: 'tab.producao.init'
+      }
+    };
+
+    const alvo = map[aba];
+    if (!alvo) {
+      concluir();
+      return;
+    }
+
+    if (typeof alvo.sync === 'function') {
+      if (alvo.sync.length >= 1) {
+        window.AppPerf?.measure(alvo.labelSync, () => alvo.sync(concluir));
+      } else {
+        window.AppPerf?.measure(alvo.labelSync, () => alvo.sync());
+        concluir();
+      }
+      return;
+    }
+
+    if (typeof alvo.init === 'function') {
+      window.AppPerf?.measure(alvo.labelInit, () => alvo.init());
+    }
+    concluir();
+  }
+
+  function requestSyncAba(nome, options = {}) {
+    const aba = normalizarNomeAba(nome);
+    if (!aba) return false;
+
+    marcarAbaComoSuja(aba);
+
+    const state = obterEstadoSyncAba(aba);
+    if (!state) return false;
+    const onDone = typeof options.onDone === 'function' ? options.onDone : null;
+    if (onDone) {
+      state.pendingCallbacks.push(onDone);
+    }
+
+    const delayBase = Number(options.delayMs);
+    const delayMs = Number.isFinite(delayBase) && delayBase >= 0
+      ? delayBase
+      : TAB_SYNC_COALESCE_MS;
+    const immediate = !!options.immediate;
+    const prefetch = !!options.prefetch;
+    const abaAtiva = obterNomeAbaAtiva();
+
+    if (state.running) {
+      state.queued = true;
+      state.queuedPrefetch = state.queuedPrefetch || prefetch;
+      return true;
+    }
+
+    if (state.timer) {
+      clearTimeout(state.timer);
+      state.timer = null;
+    }
+
+    const deveExecutarAgora = abaAtiva === aba || prefetch;
+    if (!deveExecutarAgora) {
+      if (onDone) {
+        state.pendingCallbacks = state.pendingCallbacks.filter(fn => fn !== onDone);
+        try {
+          onDone();
+        } catch (error) {
+          // sem acao
+        }
+      }
+      return true;
+    }
+
+    const iniciarExecucao = () => {
+      if (state.running) {
+        state.queued = true;
+        state.queuedPrefetch = state.queuedPrefetch || prefetch;
+        return;
+      }
+
+      state.running = true;
+      state.queued = false;
+      state.queuedPrefetch = false;
+      const tokenSync = window.AppSyncStatus?.iniciar
+        ? window.AppSyncStatus.iniciar(aba, '')
+        : null;
+
+      executarSincronizacaoForcadaAba(aba, () => {
+        state.running = false;
+        limparAbaSuja(aba);
+        if (tokenSync) {
+          window.AppSyncStatus.finalizar(tokenSync);
+        }
+        const callbacks = state.pendingCallbacks.splice(0);
+        callbacks.forEach(fn => {
+          try {
+            fn();
+          } catch (error) {
+            // sem acao
+          }
+        });
+
+        if (!state.queued) return;
+        const queuedPrefetch = !!state.queuedPrefetch;
+        state.queued = false;
+        state.queuedPrefetch = false;
+        requestSyncAba(aba, {
+          immediate: true,
+          prefetch: queuedPrefetch
+        });
+      });
+    };
+
+    if (immediate || delayMs <= 0) {
+      iniciarExecucao();
+      return true;
+    }
+
+    state.timer = setTimeout(() => {
+      state.timer = null;
+      iniciarExecucao();
+    }, delayMs);
+    return true;
+  }
+
+  const appTabRefreshApi = window.AppTabRefresh || {};
+  appTabRefreshApi.markDirty = marcarAbaComoSuja;
+  appTabRefreshApi.clearDirty = limparAbaSuja;
+  appTabRefreshApi.isDirty = abaEstaSuja;
+  appTabRefreshApi.requestSync = requestSyncAba;
+  window.AppTabRefresh = appTabRefreshApi;
+
   function executarCicloAba(nome) {
     if (nome === 'estoque') {
       const loaded = !!window.EstoqueStore?.isLoaded?.();
       const recarregar = deveRecarregarAba(nome, !loaded);
       if (window.EstoqueController) {
         if (recarregar && loaded && typeof window.EstoqueController.syncFromBackend === 'function') {
-          window.AppPerf?.measure('tab.estoque.sync', () => EstoqueController.syncFromBackend());
+          window.AppTabRefresh?.requestSync?.('estoque', { immediate: true, prefetch: true });
         } else if (!loaded || recarregar) {
           window.AppPerf?.measure('tab.estoque.init', () => EstoqueController.init());
         }
@@ -928,7 +1229,7 @@
       if (window.DespesasController) {
         if (!loaded || recarregar) {
           if (recarregar && loaded && typeof window.DespesasController.syncFromBackend === 'function') {
-            window.AppPerf?.measure('tab.despesas.sync', () => DespesasController.syncFromBackend());
+            window.AppTabRefresh?.requestSync?.('despesas', { immediate: true, prefetch: true });
           } else {
             window.AppPerf?.measure('tab.despesas.init', () => DespesasController.init());
           }
@@ -943,7 +1244,7 @@
       const recarregar = deveRecarregarAba(nome, !loaded);
       if (window.ComprasController) {
         if (recarregar && loaded && typeof window.ComprasController.syncFromBackend === 'function') {
-          window.AppPerf?.measure('tab.compras.sync', () => ComprasController.syncFromBackend());
+          window.AppTabRefresh?.requestSync?.('compras', { immediate: true, prefetch: true });
         } else if (!loaded || recarregar) {
           window.AppPerf?.measure('tab.compras.init', () => ComprasController.init());
         }
@@ -957,7 +1258,7 @@
       const recarregar = deveRecarregarAba(nome, !loaded);
       if (window.VendasController) {
         if (recarregar && loaded && typeof window.VendasController.syncFromBackend === 'function') {
-          window.AppPerf?.measure('tab.vendas.sync', () => VendasController.syncFromBackend());
+          window.AppTabRefresh?.requestSync?.('vendas', { immediate: true, prefetch: true });
         } else if (!loaded || recarregar) {
           window.AppPerf?.measure('tab.vendas.init', () => VendasController.init());
         }
@@ -971,7 +1272,7 @@
       const recarregar = deveRecarregarAba(nome, !loaded);
       if (window.ProdutosController) {
         if (recarregar && loaded && typeof window.ProdutosController.syncFromBackend === 'function') {
-          window.AppPerf?.measure('tab.produtos.sync', () => ProdutosController.syncFromBackend());
+          window.AppTabRefresh?.requestSync?.('produtos', { immediate: true, prefetch: true });
         } else if (!loaded || recarregar) {
           window.AppPerf?.measure('tab.produtos.init', () => ProdutosController.init());
         }
@@ -985,7 +1286,7 @@
       const recarregar = deveRecarregarAba(nome, !loaded);
       if (window.ProducaoController) {
         if (recarregar && loaded && typeof window.ProducaoController.syncFromBackend === 'function') {
-          window.AppPerf?.measure('tab.producao.sync', () => ProducaoController.syncFromBackend());
+          window.AppTabRefresh?.requestSync?.('producao', { immediate: true, prefetch: true });
         } else if (!loaded || recarregar) {
           window.AppPerf?.measure('tab.producao.init', () => ProducaoController.init());
         }
@@ -1006,6 +1307,7 @@
         atualizarEstadoNavbar(alvo);
         setTopBars(alvo);
         executarCicloAba(alvo);
+        window.AppSyncStatus?.refresh?.();
         salvarUltimaAba(alvo);
         return;
       }
@@ -1018,6 +1320,7 @@
       atualizarEstadoNavbar(alvo);
       setTopBars(alvo);
       executarCicloAba(alvo);
+      window.AppSyncStatus?.refresh?.();
       salvarUltimaAba(alvo);
     }, { aba: String(nome || '') });
   }
@@ -1117,8 +1420,12 @@
   function createSyncFeedbackHelper() {
     const MIN_FINAL_DELAY_MS = 450;
 
-    function iniciar(msgInicial = 'Salvo com sucesso. Atualizando dados...', msgFinalPadrao = 'Dados atualizados') {
+    function iniciar(msgInicial = 'Salvo com sucesso. Atualizando dados...', msgFinalPadrao = 'Dados atualizados', opcoes = {}) {
       const inicio = Date.now();
+      const abaSync = normalizarNomeAba(opcoes?.aba || obterNomeAbaAtiva());
+      const tokenSync = window.AppSyncStatus?.iniciar
+        ? window.AppSyncStatus.iniciar(abaSync, String(opcoes?.textoSync || '').trim())
+        : null;
       if (msgInicial) {
         mostrarToast(msgInicial);
       }
@@ -1126,6 +1433,9 @@
       return function concluir(msgFinal = msgFinalPadrao) {
         if (concluido) return;
         concluido = true;
+        if (tokenSync) {
+          window.AppSyncStatus.finalizar(tokenSync);
+        }
         const atrasar = Math.max(0, MIN_FINAL_DELAY_MS - (Date.now() - inicio));
         setTimeout(() => {
           mostrarToast(msgFinal);

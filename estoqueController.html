@@ -24,6 +24,12 @@
       if (window.DashboardController?.invalidarCacheMeses) {
         window.DashboardController.invalidarCacheMeses();
       }
+      if (window.AppTabRefresh?.requestSync) {
+        window.AppTabRefresh.requestSync('dashboard', {
+          delayMs: 420,
+          prefetch: true
+        });
+      }
     }
 
     function podeAlterarDados(contexto = 'Operacao') {
@@ -369,14 +375,28 @@
               ? window.AppSyncFeedback.iniciar('Salvo com sucesso. Atualizando dados...')
               : null;
             marcarDashboardComoSujo();
-            carregarEstoque(true, () => {
-              if (concluirSync) {
-                concluirSync('Dados atualizados');
-              } else {
-                mostrarToast('Dados atualizados');
-              }
-              setSalvando(false);
-            });
+            setSalvando(false);
+            if (window.AppTabRefresh?.requestSync) {
+              window.AppTabRefresh.requestSync('estoque', {
+                delayMs: 280,
+                prefetch: true,
+                onDone: () => {
+                  if (concluirSync) {
+                    concluirSync('Dados atualizados');
+                  } else {
+                    mostrarToast('Dados atualizados');
+                  }
+                }
+              });
+            } else {
+              carregarEstoque(true, () => {
+                if (concluirSync) {
+                  concluirSync('Dados atualizados');
+                } else {
+                  mostrarToast('Dados atualizados');
+                }
+              });
+            }
             return;
           }
 

@@ -26,6 +26,12 @@
       if (!dash?.invalidarCacheMeses) return;
       const refs = dash.coletarMesesImpactados ? dash.coletarMesesImpactados(...arguments) : [];
       dash.invalidarCacheMeses(refs);
+      if (window.AppTabRefresh?.requestSync) {
+        window.AppTabRefresh.requestSync('dashboard', {
+          delayMs: 420,
+          prefetch: true
+        });
+      }
     }
 
     function podeAlterarDados(contexto = 'Operacao') {
@@ -268,14 +274,28 @@
             const concluirSync = window.AppSyncFeedback?.iniciar
               ? window.AppSyncFeedback.iniciar('Venda salva. Atualizando dados...')
               : null;
-            carregarVendas(true, () => {
-              if (concluirSync) {
-                concluirSync('Dados atualizados');
-              } else {
-                mostrarToast('Dados atualizados');
-              }
-              setSalvando(false);
-            });
+            setSalvando(false);
+            if (window.AppTabRefresh?.requestSync) {
+              window.AppTabRefresh.requestSync('vendas', {
+                delayMs: 280,
+                prefetch: true,
+                onDone: () => {
+                  if (concluirSync) {
+                    concluirSync('Dados atualizados');
+                  } else {
+                    mostrarToast('Dados atualizados');
+                  }
+                }
+              });
+            } else {
+              carregarVendas(true, () => {
+                if (concluirSync) {
+                  concluirSync('Dados atualizados');
+                } else {
+                  mostrarToast('Dados atualizados');
+                }
+              });
+            }
             return;
           }
           VendasStore.add(itemSalvo);
@@ -424,7 +444,15 @@
             VendasStore.update(resp.vendaAtualizada.ID, resp.vendaAtualizada);
             renderListaAtual();
           } else {
-            agendarSync(done => carregarVendas(true, done));
+            if (window.AppTabRefresh?.requestSync) {
+              agendarSync(done => window.AppTabRefresh.requestSync('vendas', {
+                delayMs: 220,
+                prefetch: true,
+                onDone: done
+              }));
+            } else {
+              agendarSync(done => carregarVendas(true, done));
+            }
           }
 
           if (resp?.baixaEstoque?.estoqueAtualizado && window.EstoqueStore) {
@@ -433,7 +461,15 @@
             });
           }
           if (window.EstoqueController?.syncFromBackend) {
-            agendarSync(done => EstoqueController.syncFromBackend(done));
+            if (window.AppTabRefresh?.requestSync) {
+              agendarSync(done => window.AppTabRefresh.requestSync('estoque', {
+                delayMs: 220,
+                prefetch: true,
+                onDone: done
+              }));
+            } else {
+              agendarSync(done => EstoqueController.syncFromBackend(done));
+            }
           }
 
           invalidarCacheDashboardPorImpacto(itemAntes, dados, resp?.vendaAtualizada);

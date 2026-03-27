@@ -1112,7 +1112,14 @@
         if (aba === 'despesas' && window.DespesasController?.editar) {
           const existe = window.DespesasController?.getById ? window.DespesasController.getById(id) : null;
           if (!existe && window.DespesasController?.syncFromBackend) {
-            window.DespesasController.syncFromBackend();
+            if (window.AppTabRefresh?.requestSync) {
+              window.AppTabRefresh.requestSync('despesas', {
+                immediate: true,
+                prefetch: true
+              });
+            } else {
+              window.DespesasController.syncFromBackend();
+            }
             return false;
           }
           window.DespesasController.editar(id);
@@ -1160,7 +1167,14 @@
         if (aba === 'despesas' && window.DespesasController?.excluir) {
           const existe = window.DespesasController?.getById ? window.DespesasController.getById(id) : null;
           if (!existe && window.DespesasController?.syncFromBackend) {
-            window.DespesasController.syncFromBackend();
+            if (window.AppTabRefresh?.requestSync) {
+              window.AppTabRefresh.requestSync('despesas', {
+                immediate: true,
+                prefetch: true
+              });
+            } else {
+              window.DespesasController.syncFromBackend();
+            }
             return false;
           }
           window.DespesasController.excluir(id);
@@ -1210,14 +1224,29 @@
             ? window.AppSyncFeedback.iniciar('Pagamento removido. Atualizando dados...')
             : null;
           invalidarCacheMeses(coletarMesesImpactados(item, getMesReferenciaAtiva()));
-          atualizar(true, () => {
-            if (concluirSync) {
-              concluirSync('Dados atualizados');
-            } else {
-              mostrarToast('Dados atualizados');
-            }
-            if (cardAtual) abrirObservabilidadeCard(cardAtual);
-          });
+          if (window.AppTabRefresh?.requestSync) {
+            window.AppTabRefresh.requestSync('dashboard', {
+              delayMs: 220,
+              prefetch: true,
+              onDone: () => {
+                if (concluirSync) {
+                  concluirSync('Dados atualizados');
+                } else {
+                  mostrarToast('Dados atualizados');
+                }
+                if (cardAtual) abrirObservabilidadeCard(cardAtual);
+              }
+            });
+          } else {
+            atualizar(true, () => {
+              if (concluirSync) {
+                concluirSync('Dados atualizados');
+              } else {
+                mostrarToast('Dados atualizados');
+              }
+              if (cardAtual) abrirObservabilidadeCard(cardAtual);
+            });
+          }
         })
         .removerPagamento(pagamentoId);
     }
@@ -1424,13 +1453,27 @@
             ? window.AppSyncFeedback.iniciar('Despesa salva. Atualizando dados...')
             : null;
           invalidarCacheMeses(coletarMesesImpactados(despesaAnterior, payload));
-          atualizar(true, () => {
-            if (concluirSync) {
-              concluirSync('Dados atualizados');
-            } else {
-              mostrarToast('Dados atualizados');
-            }
-          });
+          if (window.AppTabRefresh?.requestSync) {
+            window.AppTabRefresh.requestSync('dashboard', {
+              delayMs: 220,
+              prefetch: true,
+              onDone: () => {
+                if (concluirSync) {
+                  concluirSync('Dados atualizados');
+                } else {
+                  mostrarToast('Dados atualizados');
+                }
+              }
+            });
+          } else {
+            atualizar(true, () => {
+              if (concluirSync) {
+                concluirSync('Dados atualizados');
+              } else {
+                mostrarToast('Dados atualizados');
+              }
+            });
+          }
         });
 
       if (despesaEditandoId) {
@@ -1677,13 +1720,27 @@
           invalidarCacheMeses(coletarMesesImpactados(despesaAtual, {
             data_pagamento: dataPagamento
           }));
-          atualizar(true, () => {
-            if (concluirSync) {
-              concluirSync('Dados atualizados');
-            } else {
-              mostrarToast('Dados atualizados');
-            }
-          });
+          if (window.AppTabRefresh?.requestSync) {
+            window.AppTabRefresh.requestSync('dashboard', {
+              delayMs: 220,
+              prefetch: true,
+              onDone: () => {
+                if (concluirSync) {
+                  concluirSync('Dados atualizados');
+                } else {
+                  mostrarToast('Dados atualizados');
+                }
+              }
+            });
+          } else {
+            atualizar(true, () => {
+              if (concluirSync) {
+                concluirSync('Dados atualizados');
+              } else {
+                mostrarToast('Dados atualizados');
+              }
+            });
+          }
         })
         .registrarPagamentoDespesaGeral(despesaPagamentoId, {
           data_pagamento: dataPagamento,

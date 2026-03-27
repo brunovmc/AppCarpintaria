@@ -92,6 +92,12 @@
       if (window.DashboardController?.invalidarCacheMeses) {
         window.DashboardController.invalidarCacheMeses();
       }
+      if (window.AppTabRefresh?.requestSync) {
+        window.AppTabRefresh.requestSync('dashboard', {
+          delayMs: 420,
+          prefetch: true
+        });
+      }
     }
 
     function isTipoValidacao(tipo) {
@@ -528,24 +534,54 @@
             id: idEdicaoAtual
           });
         })
-        .withSuccessHandler(() => {
+        .withSuccessHandler(itemSalvo => {
           editandoId = null;
+          if (itemSalvo && itemSalvo.produto_id) {
+            const atual = ProdutosStore.getById(itemSalvo.produto_id);
+            const payloadStore = {
+              ...(atual || {}),
+              ...itemSalvo,
+              receitas: Array.isArray(atual?.receitas) ? atual.receitas : [],
+              receitasCarregadas: !!atual?.receitasCarregadas
+            };
+            if (atual) {
+              ProdutosStore.update(itemSalvo.produto_id, payloadStore);
+            } else {
+              ProdutosStore.add(payloadStore);
+            }
+            renderListaAtual();
+          }
           atualizarOpcoesReceitas();
           marcarDashboardComoSujo();
-          if (window.AppTabRefresh?.markDirty) {
-            window.AppTabRefresh.markDirty('producao');
-          }
           const concluirSync = window.AppSyncFeedback?.iniciar
             ? window.AppSyncFeedback.iniciar('Salvo com sucesso. Atualizando dados...')
             : null;
-          carregarProdutos(true, () => {
-            if (concluirSync) {
-              concluirSync('Dados atualizados');
-            } else {
-              mostrarToast('Dados atualizados');
-            }
-            setSalvando(false);
-          });
+          setSalvando(false);
+          if (window.AppTabRefresh?.requestSync) {
+            window.AppTabRefresh.requestSync('produtos', {
+              delayMs: 280,
+              prefetch: true,
+              onDone: () => {
+                if (concluirSync) {
+                  concluirSync('Dados atualizados');
+                } else {
+                  mostrarToast('Dados atualizados');
+                }
+              }
+            });
+            window.AppTabRefresh.requestSync('producao', {
+              delayMs: 520,
+              prefetch: true
+            });
+          } else {
+            carregarProdutos(true, () => {
+              if (concluirSync) {
+                concluirSync('Dados atualizados');
+              } else {
+                mostrarToast('Dados atualizados');
+              }
+            });
+          }
         })
         .salvarProdutoComModelo(
           produtoId,

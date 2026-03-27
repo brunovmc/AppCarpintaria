@@ -275,7 +275,12 @@
           const refs = dash.coletarMesesImpactados ? dash.coletarMesesImpactados(...arguments) : [];
           dash.invalidarCacheMeses(refs);
         }
-        if (dash?.atualizar) {
+        if (window.AppTabRefresh?.requestSync) {
+          window.AppTabRefresh.requestSync('dashboard', {
+            delayMs: 360,
+            prefetch: true
+          });
+        } else if (dash?.atualizar) {
           dash.atualizar(true);
         }
       } catch (error) {
@@ -485,8 +490,8 @@
       return carregado;
     }
 
-    function syncFromBackend() {
-      carregarDespesas(true);
+    function syncFromBackend(onDone) {
+      carregarDespesas(true, onDone);
     }
 
     function setFiltroTexto(texto) {
@@ -741,13 +746,27 @@
           const concluirSync = window.AppSyncFeedback?.iniciar
             ? window.AppSyncFeedback.iniciar('Despesa salva. Atualizando dados...')
             : null;
-          carregarDespesas(true, () => {
-            if (concluirSync) {
-              concluirSync('Dados atualizados');
-            } else {
-              mostrarToast('Dados atualizados');
-            }
-          });
+          if (window.AppTabRefresh?.requestSync) {
+            window.AppTabRefresh.requestSync('despesas', {
+              delayMs: 300,
+              prefetch: true,
+              onDone: () => {
+                if (concluirSync) {
+                  concluirSync('Dados atualizados');
+                } else {
+                  mostrarToast('Dados atualizados');
+                }
+              }
+            });
+          } else {
+            carregarDespesas(true, () => {
+              if (concluirSync) {
+                concluirSync('Dados atualizados');
+              } else {
+                mostrarToast('Dados atualizados');
+              }
+            });
+          }
           notificarDashboardAlterado(despesaAnterior, payload);
         });
 
@@ -771,7 +790,14 @@
         })
         .withSuccessHandler(() => {
           mostrarToast('Despesa removida');
-          carregarDespesas(true);
+          if (window.AppTabRefresh?.requestSync) {
+            window.AppTabRefresh.requestSync('despesas', {
+              immediate: true,
+              prefetch: true
+            });
+          } else {
+            carregarDespesas(true);
+          }
           notificarDashboardAlterado(despesaAtual);
         })
         .deletarDespesaGeral(despesaId);
@@ -981,13 +1007,27 @@
           const concluirSync = window.AppSyncFeedback?.iniciar
             ? window.AppSyncFeedback.iniciar('Pagamento registrado. Atualizando dados...')
             : null;
-          carregarDespesas(true, () => {
-            if (concluirSync) {
-              concluirSync('Dados atualizados');
-            } else {
-              mostrarToast('Dados atualizados');
-            }
-          });
+          if (window.AppTabRefresh?.requestSync) {
+            window.AppTabRefresh.requestSync('despesas', {
+              delayMs: 300,
+              prefetch: true,
+              onDone: () => {
+                if (concluirSync) {
+                  concluirSync('Dados atualizados');
+                } else {
+                  mostrarToast('Dados atualizados');
+                }
+              }
+            });
+          } else {
+            carregarDespesas(true, () => {
+              if (concluirSync) {
+                concluirSync('Dados atualizados');
+              } else {
+                mostrarToast('Dados atualizados');
+              }
+            });
+          }
           notificarDashboardAlterado(despesaAtual, {
             data_pagamento: dataPagamento
           });
