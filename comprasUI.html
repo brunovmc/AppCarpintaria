@@ -4,6 +4,7 @@
     let delegationInit = false;
     let categoriasBaseValidacao = [];
     let categoriasPorTipoValidacao = {};
+    let coresPorTipoValidacao = {};
     let listaFiltradaAtual = [];
     let listaFiltradaCompletaAtual = [];
     let itensPorId = {};
@@ -84,6 +85,34 @@
         .filter(v => v !== '');
     }
 
+    function normalizarTipoKey(valor) {
+      return String(valor || '').trim().toUpperCase();
+    }
+
+    function normalizarCorCss(valor) {
+      const raw = String(valor || '').trim();
+      if (!raw) return '';
+      const hexMatch = raw.match(/^#?([0-9A-Fa-f]{3}|[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$/);
+      if (hexMatch) return `#${hexMatch[1]}`;
+      return raw;
+    }
+
+    function normalizarMapaCoresPorTipo(rawMap) {
+      const mapa = {};
+      if (!rawMap || typeof rawMap !== 'object') return mapa;
+      Object.keys(rawMap).forEach(k => {
+        const tipo = normalizarTipoKey(k);
+        const cor = normalizarCorCss(rawMap[k]);
+        if (!tipo || !cor) return;
+        mapa[tipo] = cor;
+      });
+      return mapa;
+    }
+
+    function setCoresPorTipo(mapa) {
+      coresPorTipoValidacao = normalizarMapaCoresPorTipo(mapa);
+    }
+
     function parseNumeroInput(valor) {
       const s = String(valor ?? '').trim();
       if (s === '') return 0;
@@ -145,6 +174,33 @@
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;')
         .replace(/'/g, '&#39;');
+    }
+
+    function validarCorCss(valor) {
+      const cor = normalizarCorCss(valor);
+      if (!cor) return false;
+      if (window.CSS && typeof window.CSS.supports === 'function') {
+        return window.CSS.supports('color', cor);
+      }
+      return /^#(?:[0-9A-Fa-f]{3}|[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$/.test(cor) || /^[a-zA-Z]+$/.test(cor);
+    }
+
+    function obterCorTipo(tipo) {
+      const key = normalizarTipoKey(tipo);
+      if (!key) return '';
+      const mapaGlobal = normalizarMapaCoresPorTipo(window.AppValidacoesCache?.coresPorTipo);
+      const cor = normalizarCorCss(coresPorTipoValidacao[key] || mapaGlobal[key] || '');
+      return validarCorCss(cor) ? cor : '';
+    }
+
+    function montarTipoTag(tipo) {
+      const tipoTexto = String(tipo || '').trim();
+      const tipoLabel = escapeHtml(tipoTexto || '-');
+      const cor = obterCorTipo(tipoTexto);
+      if (!cor) {
+        return `<span class="tipo-tag-card">${tipoLabel}</span>`;
+      }
+      return `<span class="tipo-tag-card tipo-tag-card-colorida" style="--tipo-tag-bg:${escapeHtml(cor)}">${tipoLabel}</span>`;
     }
 
     function escapeAttr(valor) {
@@ -761,7 +817,7 @@
 
     function montarCardResumo(i) {
       const div = document.createElement('div');
-      div.className = 'card';
+      div.className = 'card card-ficha';
       const jaAdicionada = compraJaAdicionadaAoEstoque(i);
       if (jaAdicionada) div.classList.add('card-adicionado-estoque');
       div.dataset.id = i.ID;
@@ -769,7 +825,6 @@
       const status = jaAdicionada ? 'Ja adicionada ao estoque' : 'Pendente para estoque';
       const valorTotal = Number(i.total_previsto || (Number(i.quantidade || 0) * Number(i.valor_unit || 0)));
       const itemLabel = escapeHtml(i.item || '-');
-      const tipoLabel = escapeHtml(i.tipo || '-');
       const categoriaLabel = escapeHtml(i.categoria || '-');
       const quantidadeLabel = escapeHtml(i.quantidade || 0);
       const unidadeLabel = escapeHtml(i.unidade || '');
@@ -777,18 +832,20 @@
       const larguraLabel = escapeHtml(i.largura_cm || '-');
       const espessuraLabel = escapeHtml(i.espessura_cm || '-');
       const statusLabel = escapeHtml(status);
+      const tipoTag = montarTipoTag(i.tipo);
 
       div.innerHTML = `
-        <div class="card-resumo">
-          <strong>${itemLabel}</strong><br>
-          ${tipoLabel} > ${categoriaLabel}<br>
-          ${quantidadeLabel} ${unidadeLabel}
-          ${isMadeira ? `<br><span>(${comprimentoLabel} x ${larguraLabel} x ${espessuraLabel}) cm</span>` : ''}
-          <br><span>${statusLabel}</span>
-          <div class="card-resumo-valor">Valor: ${formatarMoeda(valorTotal)}</div>
+        <div class="card-ficha-topo">${itemLabel}</div>
+        <div class="card-ficha-corpo">
+          <div class="card-resumo">
+            ${tipoTag} > ${categoriaLabel}<br>
+            ${quantidadeLabel} ${unidadeLabel}
+            ${isMadeira ? `<br><span>(${comprimentoLabel} x ${larguraLabel} x ${espessuraLabel}) cm</span>` : ''}
+            <br><span>${statusLabel}</span>
+            <div class="card-resumo-valor">Valor: ${formatarMoeda(valorTotal)}</div>
+          </div>
+          <button class="ver-mais">Ver mais</button>
         </div>
-
-        <button class="ver-mais">Ver mais</button>
       `;
 
       return div;
@@ -1302,6 +1359,7 @@
       renderFornecedores,
       renderPagosPor,
       renderFormasPagamento,
+      setCoresPorTipo,
       renderFiltroRapidoTipos,
       marcarTipoRapidoAtivo,
       toggleAdicionadasAoEstoque,

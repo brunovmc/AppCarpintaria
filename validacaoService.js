@@ -4,13 +4,14 @@
  * Aba: VALIDACAO
  * Colunas:
  * A - TIPO
- * B - UNIDADE
- * C - CATEGORIA
- * D - FORNECEDOR
- * E - VALORKWH (uso futuro)
- * F - DESPESAS
- * G - FORMA_PAGAMENTO
- * H - PAGO_POR
+ * B - COR (opcional)
+ * C - UNIDADE
+ * D - CATEGORIA
+ * E - FORNECEDOR
+ * F - VALORKWH (uso futuro)
+ * G - DESPESAS
+ * H - FORMA_PAGAMENTO
+ * I - PAGO_POR
  * =========================
  */
 
@@ -75,6 +76,7 @@ function recarregarCacheValidacoes() {
     tipos: Array.isArray(dados?.tipos) ? dados.tipos.length : 0,
     unidades: Array.isArray(dados?.unidades) ? dados.unidades.length : 0,
     categorias: Array.isArray(dados?.categorias) ? dados.categorias.length : 0,
+    cores_por_tipo: dados?.coresPorTipo ? Object.keys(dados.coresPorTipo).length : 0,
     fornecedores: Array.isArray(dados?.fornecedores) ? dados.fornecedores.length : 0,
     categorias_despesas: Array.isArray(dados?.categoriasDespesas) ? dados.categoriasDespesas.length : 0,
     formas_pagamento: Array.isArray(dados?.formasPagamento) ? dados.formasPagamento.length : 0,
@@ -148,6 +150,18 @@ function indiceColunaValidacao(headers, nomeEsperado, fallback) {
   return idx >= 0 ? idx : fallback;
 }
 
+function normalizarCorValidacao(valor) {
+  const raw = String(valor || '').trim();
+  if (!raw) return '';
+
+  const hexMatch = raw.match(/^#?([0-9A-Fa-f]{3}|[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$/);
+  if (hexMatch) {
+    return `#${hexMatch[1]}`;
+  }
+
+  return raw;
+}
+
 function obterCategoriasPorTipoValidacao() {
   const sheet = getSheet('VALIDACAO_TIPO_CATEGORIA');
   if (!sheet) return {};
@@ -198,6 +212,7 @@ function obterValidacoes(forcarRecarregar) {
   if (!sheet) {
     resultado = {
       tipos: [],
+      coresPorTipo: {},
       unidades: [],
       categorias: [],
       categoriasDespesas: [],
@@ -214,6 +229,7 @@ function obterValidacoes(forcarRecarregar) {
   if (!Array.isArray(data) || data.length < 2) {
     resultado = {
       tipos: [],
+      coresPorTipo: {},
       unidades: [],
       categorias: [],
       categoriasDespesas: [],
@@ -231,6 +247,7 @@ function obterValidacoes(forcarRecarregar) {
   const dados = data.slice(1);
 
   const idxTipo = indiceColunaValidacao(headers, 'TIPO', 0);
+  const idxCor = indiceColunaValidacao(headers, 'COR', -1);
   const idxUnidade = indiceColunaValidacao(headers, 'UNIDADE', 1);
   const idxCategoria = indiceColunaValidacao(headers, 'CATEGORIA', 2);
   const idxFornecedor = indiceColunaValidacao(headers, 'FORNECEDOR', 3);
@@ -247,9 +264,11 @@ function obterValidacoes(forcarRecarregar) {
   const formasPagamento = new Set();
   const pagosPor = new Set();
   const valorKwhPorFornecedor = {};
+  const coresPorTipo = {};
 
   dados.forEach(linha => {
     const tipo = linha[idxTipo];
+    const cor = idxCor >= 0 ? linha[idxCor] : '';
     const unidade = linha[idxUnidade];
     const categoria = linha[idxCategoria];
     const fornecedor = linha[idxFornecedor];
@@ -260,6 +279,11 @@ function obterValidacoes(forcarRecarregar) {
 
     if (tipo && tipo.toString().trim() !== '') {
       tipos.add(tipo);
+      const tipoKey = String(tipo).trim().toUpperCase();
+      const corStr = normalizarCorValidacao(cor);
+      if (tipoKey && corStr) {
+        coresPorTipo[tipoKey] = corStr;
+      }
     }
 
     if (unidade && unidade.toString().trim() !== '') {
@@ -305,6 +329,7 @@ function obterValidacoes(forcarRecarregar) {
 
   resultado = {
     tipos: [...tipos],
+    coresPorTipo,
     unidades: [...unidades],
     categorias: [...categorias],
     categoriasDespesas: [...categoriasDespesas],

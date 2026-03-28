@@ -401,19 +401,21 @@
 
     function montarCardResumo(v) {
       const div = document.createElement('div');
-      div.className = 'card';
+      div.className = 'card card-ficha';
       div.dataset.id = v.ID;
       const item = escapeHtml(v.item || '-');
       const unidade = escapeHtml(v.unidade || '');
       const status = escapeHtml(String(v.status_pagamento || 'PENDENTE').toUpperCase());
       div.innerHTML = `
-        <div class="card-resumo">
-          <strong>${item}</strong><br>
-          ${Number(v.quantidade || 0).toFixed(2)} ${unidade}<br>
-          ${formatarMoeda(v.valor_total_venda || 0)}<br>
-          ${status}
+        <div class="card-ficha-topo">${item}</div>
+        <div class="card-ficha-corpo">
+          <div class="card-resumo">
+            ${Number(v.quantidade || 0).toFixed(2)} ${unidade}<br>
+            ${formatarMoeda(v.valor_total_venda || 0)}<br>
+            ${status}
+          </div>
+          <button class="ver-mais">Ver mais</button>
         </div>
-        <button class="ver-mais">Ver mais</button>
       `;
       return div;
     }

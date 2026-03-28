@@ -454,10 +454,32 @@
       return mapa;
     }
 
+    function normalizarMapaCores(rawMap) {
+      const mapa = {};
+      if (!rawMap || typeof rawMap !== 'object') return mapa;
+
+      function normalizarCor(rawColor) {
+        const raw = String(rawColor || '').trim();
+        if (!raw) return '';
+        const hexMatch = raw.match(/^#?([0-9A-Fa-f]{3}|[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$/);
+        if (hexMatch) return `#${hexMatch[1]}`;
+        return raw;
+      }
+
+      Object.keys(rawMap).forEach(k => {
+        const chave = String(k || '').trim().toUpperCase();
+        const cor = normalizarCor(rawMap[k]);
+        if (!chave || !cor) return;
+        mapa[chave] = cor;
+      });
+      return mapa;
+    }
+
     function normalizar(raw) {
       const data = raw && typeof raw === 'object' ? raw : {};
       return {
         tipos: listaNormalizada(data.tipos),
+        coresPorTipo: normalizarMapaCores(data.coresPorTipo),
         unidades: listaNormalizada(data.unidades),
         categorias: listaNormalizada(data.categorias),
         categoriasPorTipo: normalizarMapaCategorias(data.categoriasPorTipo),
@@ -472,6 +494,7 @@
       window.AppValidacoesCache = {
         ...(window.AppValidacoesCache || {}),
         tipos: data.tipos || [],
+        coresPorTipo: data.coresPorTipo || {},
         unidades: data.unidades || [],
         categorias: data.categorias || [],
         categoriasPorTipo: data.categoriasPorTipo || {},

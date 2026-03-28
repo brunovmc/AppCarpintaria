@@ -141,6 +141,7 @@
           validacoes = data || {};
 
           validacoes.tipos ||= [];
+          validacoes.coresPorTipo ||= {};
           validacoes.unidades ||= [];
           validacoes.categorias ||= [];
           validacoes.categoriasPorTipo ||= {};
@@ -148,6 +149,7 @@
           validacoes.pagosPor ||= [];
           validacoes.formasPagamento ||= [];
 
+          ComprasUI.setCoresPorTipo?.(validacoes.coresPorTipo);
           ComprasUI.renderTipos?.(validacoes.tipos);
           ComprasUI.renderUnidades?.(validacoes.unidades);
           ComprasUI.renderCategorias?.(validacoes.categorias, validacoes.categoriasPorTipo);
@@ -160,6 +162,11 @@
           }
           if (typeof aplicarFiltroTipoRapidoPersistidoCompras === 'function') {
             aplicarFiltroTipoRapidoPersistidoCompras();
+          }
+
+          const listaAtual = ComprasStore.get();
+          if (Array.isArray(listaAtual) && listaAtual.length > 0) {
+            renderListaAtual();
           }
         })
         .catch(() => {

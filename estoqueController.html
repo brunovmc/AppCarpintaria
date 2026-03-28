@@ -103,6 +103,7 @@
           validacoes = data || {};
 
           validacoes.tipos ||= [];
+          validacoes.coresPorTipo ||= {};
           validacoes.unidades ||= [];
           validacoes.categorias ||= [];
           validacoes.categoriasPorTipo ||= {};
@@ -110,6 +111,7 @@
           validacoes.pagosPor ||= [];
           validacoes.formasPagamento ||= [];
 
+          EstoqueUI.setCoresPorTipo?.(validacoes.coresPorTipo);
           EstoqueUI.renderTipos?.(validacoes.tipos);
           EstoqueUI.renderUnidades?.(validacoes.unidades);
           EstoqueUI.renderCategorias?.(validacoes.categorias, validacoes.categoriasPorTipo);
@@ -125,6 +127,15 @@
           }
           if (typeof aplicarFiltroTipoRapidoPersistidoEstoque === 'function') {
             aplicarFiltroTipoRapidoPersistidoEstoque();
+          }
+
+          const listaAtual = EstoqueStore.get();
+          if (Array.isArray(listaAtual) && listaAtual.length > 0) {
+            if (typeof aplicarBuscaEstoque === 'function') {
+              aplicarBuscaEstoque();
+            } else {
+              EstoqueUI.renderLista(listaAtual);
+            }
           }
         })
         .catch(() => {
