@@ -15,8 +15,8 @@
     let mostrarAdicionadasAoEstoque = false;
     let renderJobSeq = 0;
 
-    const PAGE_SIZE = 30;
-    const RENDER_CHUNK_SIZE = 8;
+    const PAGE_SIZE = 24;
+    const RENDER_CHUNK_SIZE = 4;
 
     /* =========================
        HELPERS
@@ -351,8 +351,26 @@
     }
 
     function toggleAdicionadasAoEstoque() {
+      if (window.AppComprasUiGuard?.tryEnter && !window.AppComprasUiGuard.tryEnter('adicionadas_toggle')) {
+        return;
+      }
+      if (carregandoMais) {
+        window.AppDiag?.mark?.('compras.adicionadas.toggle.blocked_loading', {
+          show_added: !!mostrarAdicionadasAoEstoque,
+          rendered: Number(qtdRenderizada || 0),
+          total: Number(listaFiltradaAtual.length || 0)
+        });
+        return;
+      }
+      if (typeof window.fecharPainelFiltroCompras === 'function') {
+        window.fecharPainelFiltroCompras();
+      }
       mostrarAdicionadasAoEstoque = !mostrarAdicionadasAoEstoque;
-      renderLista(listaFiltradaCompletaAtual);
+      window.AppDiag?.mark?.('compras.adicionadas.toggle', {
+        show_added: !!mostrarAdicionadasAoEstoque,
+        total_source: Number(listaFiltradaCompletaAtual.length || 0)
+      });
+      proximoFrame(() => renderLista(listaFiltradaCompletaAtual));
     }
 
     function calcularIndiceSeparadorAdicionadas(quantidadePendentes, quantidadeAdicionadas) {
@@ -923,15 +941,29 @@
       const inicio = qtdRenderizada;
       const fim = Math.min(inicio + PAGE_SIZE, listaFiltradaAtual.length);
       const jobId = ++renderJobSeq;
+      const tsInicio = performance.now();
       const perf = window.AppPerf?.start('ui.compras.renderMais', {
         inicio,
         fim,
         total: listaFiltradaAtual.length
       });
+      window.AppDiag?.mark?.('compras.render_mais.start', {
+        inicio: Number(inicio || 0),
+        fim: Number(fim || 0),
+        total: Number(listaFiltradaAtual.length || 0),
+        chunk: RENDER_CHUNK_SIZE,
+        page_size: PAGE_SIZE
+      });
       let idx = inicio;
 
       const processarChunk = () => {
-        if (jobId !== renderJobSeq) return;
+        if (jobId !== renderJobSeq) {
+          window.AppDiag?.mark?.('compras.render_mais.aborted', {
+            job_id: Number(jobId || 0),
+            render_job_seq: Number(renderJobSeq || 0)
+          });
+          return;
+        }
 
         const limite = Math.min(idx + RENDER_CHUNK_SIZE, fim);
         const fragment = document.createDocumentFragment();
@@ -963,6 +995,11 @@
         window.AppPerf?.end(perf, {
           renderizados: fim - inicio,
           renderizados_total: qtdRenderizada
+        });
+        window.AppDiag?.mark?.('compras.render_mais.end', {
+          renderizados: Number(fim - inicio || 0),
+          renderizados_total: Number(qtdRenderizada || 0),
+          elapsed_ms: Number((performance.now() - tsInicio).toFixed(1))
         });
         if (typeof onDone === 'function') onDone();
       };
@@ -1024,9 +1061,14 @@
     function renderLista(itens) {
       const { lista, listaControles } = el();
       if (!lista) return;
+      const tsInicio = performance.now();
 
       const perf = window.AppPerf?.start('ui.compras.renderLista', {
         total: Array.isArray(itens) ? itens.length : 0
+      });
+      window.AppDiag?.mark?.('compras.render_lista.start', {
+        total_source: Array.isArray(itens) ? itens.length : 0,
+        show_added: !!mostrarAdicionadasAoEstoque
       });
       renderJobSeq += 1;
       lista.innerHTML = '';
@@ -1059,6 +1101,11 @@
           lista.innerHTML = '<p>Nenhum item em compras.</p>';
         }
         window.AppPerf?.end(perf, { vazio: true });
+        window.AppDiag?.mark?.('compras.render_lista.end', {
+          vazio: true,
+          elapsed_ms: Number((performance.now() - tsInicio).toFixed(1)),
+          total_visivel: 0
+        });
         return;
       }
 
@@ -1066,6 +1113,12 @@
         window.AppPerf?.end(perf, {
           renderizados_iniciais: qtdRenderizada,
           total: listaFiltradaAtual.length
+        });
+        window.AppDiag?.mark?.('compras.render_lista.end', {
+          vazio: false,
+          elapsed_ms: Number((performance.now() - tsInicio).toFixed(1)),
+          total_visivel: Number(listaFiltradaAtual.length || 0),
+          renderizados_iniciais: Number(qtdRenderizada || 0)
         });
         atualizarModalDetalhesSeAberto();
       });

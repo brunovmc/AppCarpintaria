@@ -278,14 +278,20 @@
     }
 
     function setReadOnly(ativo, motivo = '') {
-      offlineReadOnly = !!ativo;
-      offlineReason = String(motivo || '').trim();
+      const novoAtivo = !!ativo;
+      const novoMotivo = String(motivo || '').trim();
+      if (offlineReadOnly === novoAtivo && offlineReason === novoMotivo) return;
+      offlineReadOnly = novoAtivo;
+      offlineReason = novoMotivo;
       emitirMudanca();
     }
 
     function setAccessReadOnly(ativo, motivo = '') {
-      accessReadOnly = !!ativo;
-      accessReason = String(motivo || '').trim();
+      const novoAtivo = !!ativo;
+      const novoMotivo = String(motivo || '').trim();
+      if (accessReadOnly === novoAtivo && accessReason === novoMotivo) return;
+      accessReadOnly = novoAtivo;
+      accessReason = novoMotivo;
       emitirMudanca();
     }
 
@@ -664,10 +670,25 @@
       return true;
     }
 
+    function emitirMudanca() {
+      if (typeof window === 'undefined') return;
+      try {
+        window.dispatchEvent(new CustomEvent('app:mutation-lock-changed', {
+          detail: {
+            locked: tokens.size > 0,
+            token_count: tokens.size
+          }
+        }));
+      } catch (error) {
+        // sem acao
+      }
+    }
+
     function lock() {
       const token = `mutation_${++seq}`;
       tokens.add(token);
       aplicarEstadoBloqueio(true);
+      emitirMudanca();
       return token;
     }
 
@@ -679,9 +700,11 @@
       }
       if (tokens.size > 0) {
         aplicarEstadoBloqueio(true);
+        emitirMudanca();
         return;
       }
       aplicarEstadoBloqueio(false);
+      emitirMudanca();
     }
 
     function isLocked() {
@@ -709,6 +732,7 @@
     let contexto = null;
     let inFlight = null;
     let mutationLockToken = null;
+    const ACCESS_TEMP_HIDDEN_ATTR = 'data-access-temp-hidden';
 
     function aplicarTelaAcesso(ctx) {
       const bloqueado = ctx?.can_read === false;
@@ -728,9 +752,24 @@
         painel.classList.toggle('hidden', !bloqueado);
       }
 
-      const ocultar = bloqueado;
-      document.querySelectorAll('.navbar, #appSyncBanner, .top-bar, #painelFiltroEstoque, #painelFiltroCompras, .aba, .bottom-bar')
-        .forEach(el => el.classList.toggle('hidden', ocultar));
+      const alvos = document.querySelectorAll('.navbar, #appSyncBanner, .top-bar, #painelFiltroEstoque, #painelFiltroCompras, .aba, .bottom-bar');
+      if (bloqueado) {
+        alvos.forEach(el => {
+          if (!el.classList.contains('hidden')) {
+            el.setAttribute(ACCESS_TEMP_HIDDEN_ATTR, '1');
+            el.classList.add('hidden');
+            return;
+          }
+          el.removeAttribute(ACCESS_TEMP_HIDDEN_ATTR);
+        });
+        return;
+      }
+
+      alvos.forEach(el => {
+        if (el.getAttribute(ACCESS_TEMP_HIDDEN_ATTR) !== '1') return;
+        el.classList.remove('hidden');
+        el.removeAttribute(ACCESS_TEMP_HIDDEN_ATTR);
+      });
     }
 
     function normalizarContexto(raw) {
@@ -954,6 +993,47 @@
 
   window.AppPerf = window.AppPerf || createPerfHelper();
 
+  function createDiagHelper() {
+    const noop = () => null;
+    const getDiagStateFallback = (extra = {}) => ({
+      ...extra,
+      diag_manual: false,
+      diag_auto: false,
+      diag_enabled: false
+    });
+
+    try {
+      if (window.localStorage) {
+        window.localStorage.removeItem('APP_DEBUG_DIAG');
+        window.localStorage.removeItem('APP_DEBUG_DIAG_AUTO');
+        window.localStorage.removeItem('APP_DEBUG_DIAG_BUFFER_V1');
+      }
+    } catch (error) {
+      // sem acao
+    }
+
+    // Diagnostico desativado: mantem interface minima para compatibilidade.
+    return {
+      mark: noop,
+      snapshot: (label = 'manual_snapshot') => getDiagStateFallback({ label: String(label || 'manual_snapshot') }),
+      getEntries: () => [],
+      dump: () => [],
+      clear: noop,
+      setEnabled: noop,
+      setAutoEnabled: noop,
+      isEnabled: () => false,
+      isAutoEnabled: () => false,
+      getState: getDiagStateFallback,
+      exportPayload: (limit = 240) => ({
+        exported_at: new Date().toISOString(),
+        total_entries: 0,
+        entries: []
+      })
+    };
+  }
+
+  window.AppDiag = window.AppDiag || createDiagHelper();
+
   window.setAppPerfDebug = function setAppPerfDebug(ativo) {
     const on = !!ativo;
     try {
@@ -970,9 +1050,37 @@
     if (window.AppPerf?.setEnabled) {
       window.AppPerf.setEnabled(on);
     }
+    if (typeof syncLongTaskMonitor === 'function') {
+      syncLongTaskMonitor();
+    }
     if (typeof mostrarToast === 'function') {
       mostrarToast(`Perf debug ${on ? 'ativado' : 'desativado'}`);
     }
+  };
+
+  window.setAppDiagDebug = function setAppDiagDebug(ativo) {
+    if (window.AppDiag?.setEnabled) window.AppDiag.setEnabled(false);
+    if (typeof syncLongTaskMonitor === 'function') syncLongTaskMonitor();
+    if (typeof mostrarToast === 'function') mostrarToast('Diagnostico desativado');
+  };
+
+  window.setAppDiagAuto = function setAppDiagAuto(ativo) {
+    if (window.AppDiag?.setAutoEnabled) window.AppDiag.setAutoEnabled(false);
+    if (typeof syncLongTaskMonitor === 'function') syncLongTaskMonitor();
+    if (typeof mostrarToast === 'function') mostrarToast('Diagnostico desativado');
+  };
+
+  window.getAppDiag = function getAppDiag(limit = 80) {
+    return [];
+  };
+
+  window.exportAppDiag = function exportAppDiag(limit = 240) {
+    if (typeof mostrarToast === 'function') mostrarToast('Diagnostico desativado');
+    return {
+      exported_at: new Date().toISOString(),
+      total_entries: 0,
+      entries: []
+    };
   };
 
   const ABA_REFRESH_INTERVAL_MS = {
@@ -1052,18 +1160,31 @@
 
     function iniciar(aba, texto = '') {
       const token = `sync_${++seq}`;
+      const abaNormalizada = normalizarNomeAba(aba);
+      const textoNormalizado = String(texto || '').trim();
       ativos.set(token, {
-        aba: normalizarNomeAba(aba),
-        texto: String(texto || '').trim()
+        aba: abaNormalizada,
+        texto: textoNormalizado
       });
       render();
+      window.AppDiag?.mark?.('sync.banner.start', {
+        token,
+        aba: abaNormalizada,
+        texto: textoNormalizado
+      });
       return token;
     }
 
     function finalizar(token) {
       if (!token) return;
-      ativos.delete(token);
+      const item = ativos.get(token);
+      const removido = ativos.delete(token);
       render();
+      window.AppDiag?.mark?.('sync.banner.end', {
+        token: String(token || ''),
+        removed: !!removido,
+        aba: String(item?.aba || '')
+      });
     }
 
     function limparAba(aba) {
@@ -1468,9 +1589,19 @@
     window.AppPerf?.measure('nav.trocarAba', () => {
       const alvo = normalizarNomeAba(nome) || ABA_INICIAL_PADRAO;
       if (!alvo) return;
-      const abaAlvo = document.getElementById('aba-' + alvo);
-      if (!abaAlvo) return;
       const atual = obterNomeAbaAtiva();
+      window.AppDiag?.mark?.('nav.tab.request', {
+        from_tab: atual,
+        to_tab: alvo
+      });
+      const abaAlvo = document.getElementById('aba-' + alvo);
+      if (!abaAlvo) {
+        window.AppDiag?.mark?.('nav.tab.invalid_target', {
+          from_tab: atual,
+          to_tab: alvo
+        });
+        return;
+      }
       if (atual && atual === alvo) {
         fecharMenuNavbar();
         atualizarEstadoNavbar(alvo);
@@ -1478,6 +1609,9 @@
         executarCicloAba(alvo);
         window.AppSyncStatus?.refresh?.();
         salvarUltimaAba(alvo);
+        window.AppDiag?.mark?.('nav.tab.same', {
+          tab: alvo
+        });
         return;
       }
 
@@ -1491,6 +1625,10 @@
       executarCicloAba(alvo);
       window.AppSyncStatus?.refresh?.();
       salvarUltimaAba(alvo);
+      window.AppDiag?.mark?.('nav.tab.changed', {
+        from_tab: atual,
+        to_tab: alvo
+      });
     }, { aba: String(nome || '') });
   }
 
@@ -1985,12 +2123,39 @@
   }
 
   let listenerFecharForaComprasAtivo = false;
+  const COMPRAS_UI_GUARD_MS = 260;
+  let comprasUiGuardAte = 0;
+
+  function tryEnterComprasUiGuard(action = '') {
+    const agora = Date.now();
+    const restante = Math.max(0, comprasUiGuardAte - agora);
+    if (restante > 0) {
+      window.AppDiag?.mark?.('compras.ui.guard.blocked', {
+        action: String(action || ''),
+        wait_ms: restante
+      });
+      return false;
+    }
+    comprasUiGuardAte = agora + COMPRAS_UI_GUARD_MS;
+    window.AppDiag?.mark?.('compras.ui.guard.enter', {
+      action: String(action || ''),
+      hold_ms: COMPRAS_UI_GUARD_MS
+    });
+    return true;
+  }
+
+  const appComprasUiGuardApi = window.AppComprasUiGuard || {};
+  appComprasUiGuardApi.tryEnter = action => tryEnterComprasUiGuard(action);
+  appComprasUiGuardApi.isLocked = () => Date.now() < comprasUiGuardAte;
+  appComprasUiGuardApi.getRemainingMs = () => Math.max(0, comprasUiGuardAte - Date.now());
+  window.AppComprasUiGuard = appComprasUiGuardApi;
 
   function abrirPainelFiltroCompras() {
     const p = document.getElementById('painelFiltroCompras');
     if (!p) return;
 
     p.classList.remove('hidden');
+    window.AppDiag?.mark?.('compras.filtro.open');
 
     if (!listenerFecharForaComprasAtivo) {
       listenerFecharForaComprasAtivo = true;
@@ -2003,6 +2168,7 @@
     if (!p) return;
 
     p.classList.add('hidden');
+    window.AppDiag?.mark?.('compras.filtro.close');
 
     if (listenerFecharForaComprasAtivo) {
       listenerFecharForaComprasAtivo = false;
@@ -2013,9 +2179,14 @@
   function togglePainelFiltroCompras() {
     const p = document.getElementById('painelFiltroCompras');
     if (!p) return;
+    if (!tryEnterComprasUiGuard('filtro_toggle')) return;
 
-    if (p.classList.contains('hidden')) abrirPainelFiltroCompras();
+    const vaiAbrir = p.classList.contains('hidden');
+    if (vaiAbrir) abrirPainelFiltroCompras();
     else fecharPainelFiltroCompras();
+    window.AppDiag?.mark?.('compras.filtro.toggle', {
+      opened: !!vaiAbrir
+    });
   }
 
   function fecharFiltroComprasAoClicarFora(e) {
@@ -2069,6 +2240,20 @@
     salvarFiltroRapidoNoCache(QUICK_FILTER_PURCHASE_TYPE_KEY, '');
 
     aplicarBuscaCompras();
+  }
+
+  function resetarEstadoInicialFiltros() {
+    const pEstoque = document.getElementById('painelFiltroEstoque');
+    const pCompras = document.getElementById('painelFiltroCompras');
+    if (pEstoque) pEstoque.classList.add('hidden');
+    if (pCompras) pCompras.classList.add('hidden');
+    fecharPainelFiltro();
+    fecharPainelFiltroCompras();
+  }
+
+  function finalizarBootVisual() {
+    if (!document?.body) return;
+    document.body.classList.remove('app-booting');
   }
 
   /* =========================
@@ -2379,24 +2564,57 @@
     }
   }
 
+  let longTaskObserver = null;
+
+  function deveMonitorarLongTask() {
+    return !!window.AppPerf?.isEnabled?.() || !!window.AppDiag?.isEnabled?.();
+  }
+
   function initLongTaskMonitor() {
-    if (!window.AppPerf?.isEnabled?.()) return;
     if (typeof window === 'undefined' || typeof window.PerformanceObserver === 'undefined') return;
+    if (longTaskObserver || !deveMonitorarLongTask()) return;
     try {
-      const observer = new PerformanceObserver(list => {
+      longTaskObserver = new PerformanceObserver(list => {
         const entries = list.getEntries();
         entries.forEach(entry => {
-          const dur = Number(entry.duration || 0).toFixed(1);
-          console.warn(`[longtask] ${dur}ms`);
+          const durMs = Number(entry.duration || 0);
+          const dur = Number(durMs || 0).toFixed(1);
+          if (window.AppPerf?.isEnabled?.()) {
+            console.warn(`[longtask] ${dur}ms`);
+          }
+          window.AppDiag?.mark?.('perf.longtask', {
+            duration_ms: Number(dur),
+            start_ms: Number(Number(entry.startTime || 0).toFixed(1)),
+            name: String(entry.name || '')
+          });
         });
       });
-      observer.observe({ entryTypes: ['longtask'] });
+      longTaskObserver.observe({ entryTypes: ['longtask'] });
     } catch (error) {
-      // sem acao
+      longTaskObserver = null;
     }
   }
 
+  function syncLongTaskMonitor() {
+    if (typeof window === 'undefined' || typeof window.PerformanceObserver === 'undefined') return;
+    if (deveMonitorarLongTask()) {
+      initLongTaskMonitor();
+      return;
+    }
+    if (!longTaskObserver) return;
+    try {
+      longTaskObserver.disconnect();
+    } catch (error) {
+      // sem acao
+    }
+    longTaskObserver = null;
+  }
+
   const modalFocusState = new WeakMap();
+  let estadoModalGlobal = {
+    aberto: false,
+    total: 0
+  };
 
   function listarModaisAbertos() {
     return [...document.querySelectorAll('.modal')].filter(m => !m.classList.contains('hidden'));
@@ -2420,8 +2638,25 @@
 
   function atualizarEstadoBodyModal() {
     if (typeof document === 'undefined' || !document.body) return;
-    const aberto = listarModaisAbertos().length > 0;
+    const total = listarModaisAbertos().length;
+    const aberto = total > 0;
     document.body.classList.toggle('modal-open', aberto);
+    if (estadoModalGlobal.aberto === aberto && estadoModalGlobal.total === total) return;
+    estadoModalGlobal = {
+      aberto,
+      total
+    };
+    if (typeof window === 'undefined') return;
+    try {
+      window.dispatchEvent(new CustomEvent('app:modal-open-changed', {
+        detail: {
+          modal_open: aberto,
+          open_modals: total
+        }
+      }));
+    } catch (error) {
+      // sem acao
+    }
   }
 
   function focarAoAbrirModal(modal) {
@@ -2595,33 +2830,37 @@
   }
 
   document.addEventListener('DOMContentLoaded', async () => {
-    initLongTaskMonitor();
+    try {
+      syncLongTaskMonitor();
+      resetarEstadoInicialFiltros();
 
-    let contextoAcesso = null;
-    if (window.AppUserAccess?.load) {
-      try {
-        contextoAcesso = await window.AppUserAccess.load();
-      } catch (error) {
-        contextoAcesso = null;
+      let contextoAcesso = null;
+      if (window.AppUserAccess?.load) {
+        try {
+          contextoAcesso = await window.AppUserAccess.load();
+        } catch (error) {
+          contextoAcesso = null;
+        }
       }
-    }
 
-    if (contextoAcesso && contextoAcesso.can_read === false) {
-      return;
-    }
+      if (contextoAcesso && contextoAcesso.can_read === false) return;
 
-    initNavbarHamburger();
-    registrarListenersFiltrosStore();
-    initModalA11y();
-    initCampoAjudaA11y();
-    trocarAba(lerUltimaAba() || ABA_INICIAL_PADRAO);
-    initBuscaEFiltroEstoque();
-    initBuscaEFiltroCompras();
-    initBuscaVendas();
-    initBuscaDespesas();
-    initBuscaProdutos();
-    initBuscaProducao();
+      initNavbarHamburger();
+      registrarListenersFiltrosStore();
+      initModalA11y();
+      initCampoAjudaA11y();
+      trocarAba(lerUltimaAba() || ABA_INICIAL_PADRAO);
+      initBuscaEFiltroEstoque();
+      initBuscaEFiltroCompras();
+      initBuscaVendas();
+      initBuscaDespesas();
+      initBuscaProdutos();
+      initBuscaProducao();
+    } finally {
+      finalizarBootVisual();
+    }
   });
 </script>
+
 
 

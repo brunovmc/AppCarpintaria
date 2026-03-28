@@ -5,10 +5,28 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <link rel="icon" type="image/x-icon" href="https://drive.google.com/uc?export=download&id=1jL0tTE2k46LmxFdaLtAFp3MckHz4FQEq&v=0.4.21">
     <base target="_top">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&family=Source+Sans+3:wght@400;500;600;700&display=swap">
+    <style>
+      .hidden { display: none !important; }
+      body.app-booting .navbar,
+      body.app-booting #appSyncBanner,
+      body.app-booting .top-bar,
+      body.app-booting .painel-filtro-inline,
+      body.app-booting .aba,
+      body.app-booting .bottom-bar {
+        visibility: hidden;
+      }
+      body.app-booting #toast,
+      body.app-booting #appAccessDenied {
+        visibility: visible;
+      }
+    </style>
     <?!= include('styles'); ?>
   </head>
 
-  <body>
+  <body class="app-booting">
     <!-- 🔔 TOAST -->
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
 

@@ -913,6 +913,9 @@
     function handleCardClick(cardKey) {
       const key = String(cardKey || '').trim();
       if (!key) return;
+      window.AppDiag?.mark?.('dashboard.card.click', {
+        card_key: key
+      });
       if (key === 'valor_estoque_total') {
         if (typeof window.trocarAba === 'function') {
           window.trocarAba('estoque');
@@ -983,16 +986,27 @@
     }
 
     function abrirObservabilidadeCard(cardKey) {
-      if (carregandoObservabilidade) return;
+      if (carregandoObservabilidade) {
+        window.AppDiag?.mark?.('dashboard.obs.open.skipped_loading', {
+          card_key: String(cardKey || '').trim()
+        });
+        return;
+      }
 
       const key = String(cardKey || '').trim();
       if (!key) return;
+      window.AppDiag?.mark?.('dashboard.obs.open.request', {
+        card_key: key
+      });
       cardObservabilidadeAberto = key;
 
       const f = el();
       if (!f.modalObservabilidadeCard || !f.obsCardLista || !f.obsCardResumo || !f.obsCardTitulo) return;
 
       f.modalObservabilidadeCard.classList.remove('hidden');
+      window.AppDiag?.mark?.('dashboard.obs.modal.opened', {
+        card_key: key
+      });
       const referencia = String(f.mesReferencia?.value || getMesAtualISO()).trim() || getMesAtualISO();
       const cacheSessao = lerComposicaoCacheLocal(referencia, key);
       const cachePersistido = lerComposicaoPersistida(referencia, key);
@@ -1004,9 +1018,16 @@
       if (payloadCache) {
         renderObservabilidadeCard(payloadCache, key);
         setModoSomenteLeitura(false);
+        window.AppDiag?.mark?.('dashboard.obs.cache.rendered', {
+          card_key: key,
+          cache_fresh: !!cacheFresco
+        });
       }
 
       if (haviaCache && cacheFresco) {
+        window.AppDiag?.mark?.('dashboard.obs.open.done_cache_only', {
+          card_key: key
+        });
         return;
       }
 
@@ -1020,6 +1041,9 @@
       }
 
       carregandoObservabilidade = true;
+      window.AppDiag?.mark?.('dashboard.obs.rpc.start', {
+        card_key: key
+      });
       google.script.run
         .withSuccessHandler(payload => {
           carregandoObservabilidade = false;
@@ -1032,9 +1056,17 @@
           limparComposicaoPersistidaForaDaJanela(referencia);
           setModoSomenteLeitura(false);
           renderObservabilidadeCard(data, key);
+          window.AppDiag?.mark?.('dashboard.obs.rpc.success', {
+            card_key: key,
+            itens: Array.isArray(data?.itens) ? data.itens.length : 0
+          });
         })
         .withFailureHandler(err => {
           carregandoObservabilidade = false;
+          window.AppDiag?.mark?.('dashboard.obs.rpc.failure', {
+            card_key: key,
+            message: String(err?.message || '')
+          }, true);
           if (haviaCache) {
             setModoSomenteLeitura(true, 'Sem conexao com backend - exibindo cache local');
             mostrarToast('Exibindo ultimo snapshot em cache', 'erro');
@@ -1050,6 +1082,9 @@
 
     function fecharObservabilidadeCard() {
       const f = el();
+      window.AppDiag?.mark?.('dashboard.obs.modal.close', {
+        card_key: String(cardObservabilidadeAberto || '').trim()
+      });
       cardObservabilidadeAberto = '';
       cardObservabilidadeItens = [];
       carregandoObservabilidade = false;
