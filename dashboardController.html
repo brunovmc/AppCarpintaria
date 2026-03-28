@@ -27,6 +27,24 @@
     const DASHBOARD_STORAGE_PREFIX = `app:dash:${DASHBOARD_STORAGE_VERSION}:resumo:`;
     const DASHBOARD_STORAGE_COMP_PREFIX = `app:dash:${DASHBOARD_STORAGE_VERSION}:comp:`;
     const DASHBOARD_PREFETCH_TTL_MS = 120000;
+    const DASHBOARD_CARD_DEFINICOES = [
+      { key: 'gasto_pago_mes', label: 'Pago no mes', moeda: true },
+      { key: 'compromisso_previsto_mes', label: 'Compromissos previstos (mes)', moeda: true },
+      { key: 'vendas_no_mes', label: 'Vendas no mes', moeda: true },
+      { key: 'recebido_vendas_mes', label: 'Recebido de vendas (mes)', moeda: true },
+      { key: 'pendente_total', label: 'Pendente total', moeda: true },
+      { key: 'vencido_total', label: 'Vencido', moeda: true },
+      { key: 'avencer_7_dias', label: 'A vencer (7 dias)', moeda: true },
+      { key: 'valor_estoque_total', label: 'Valor em estoque', moeda: true },
+      { key: 'valor_produtos_estoque', label: 'Valor de produtos em estoque', moeda: true },
+      { key: 'valor_produtos_producao', label: 'Valor de produtos em producao', moeda: true },
+      { key: 'contador_bruno_mes', label: 'BRUNO (pago no mes)', moeda: true },
+      { key: 'contador_zizu_mes', label: 'ZIZU (pago no mes)', moeda: true }
+    ];
+    const DASHBOARD_CARD_KEYS_OBSERVABILIDADE = DASHBOARD_CARD_DEFINICOES
+      .map(def => String(def.key || '').trim())
+      .filter(key => key && key !== 'valor_estoque_total');
+    const composicaoInFlight = {};
 
     function el() {
       return {
@@ -261,6 +279,92 @@
         ts: Date.now(),
         data: data || {}
       };
+    }
+
+    function obterEstadoCacheComposicao(referencia, cardKey) {
+      const ref = String(referencia || '').trim();
+      const key = String(cardKey || '').trim();
+      if (!referenciaEhValida(ref) || !key) {
+        return {
+          payloadCache: null,
+          cacheFresco: false,
+          haviaCache: false
+        };
+      }
+
+      const cacheSessao = lerComposicaoCacheLocal(ref, key);
+      const cachePersistido = lerComposicaoPersistida(ref, key);
+      const payloadCache = cacheSessao || cachePersistido?.data || null;
+      const cachePersistidoFresco = composicaoPersistidaEhFresca(cachePersistido);
+      const cacheFresco = !!cacheSessao || cachePersistidoFresco;
+
+      return {
+        payloadCache,
+        cacheFresco,
+        haviaCache: !!payloadCache
+      };
+    }
+
+    function getComposicaoInFlightKey(referencia, cardKey) {
+      const ref = String(referencia || '').trim();
+      const key = String(cardKey || '').trim();
+      if (!referenciaEhValida(ref) || !key) return '';
+      return `${ref}::${key}`;
+    }
+
+    function carregarComposicaoCardRemota(referencia, cardKey) {
+      const ref = String(referencia || '').trim();
+      const key = String(cardKey || '').trim();
+      const inflightKey = getComposicaoInFlightKey(ref, key);
+      if (!inflightKey) {
+        return Promise.reject(new Error('Referencia de composicao invalida'));
+      }
+      if (!window.google?.script?.run) {
+        return Promise.reject(new Error('Sem conexao com backend'));
+      }
+
+      const existente = composicaoInFlight[inflightKey];
+      if (existente) return existente;
+
+      const promise = new Promise((resolve, reject) => {
+        google.script.run
+          .withSuccessHandler(payload => {
+            const data = payload || {};
+            const ts = Date.now();
+            const hashNovo = gerarResumoHash(data);
+            salvarComposicaoCacheLocal(ref, key, data);
+            salvarComposicaoPersistida(ref, key, data, ts, hashNovo);
+            limparComposicaoPersistidaForaDaJanela(ref);
+            resolve(data);
+          })
+          .withFailureHandler(err => {
+            reject(err || new Error('Falha ao carregar composicao do card'));
+          })
+          .obterComposicaoCardDashboardFinanceiro(ref, key);
+      });
+
+      composicaoInFlight[inflightKey] = promise;
+      const limparInFlight = () => {
+        if (composicaoInFlight[inflightKey] === promise) {
+          delete composicaoInFlight[inflightKey];
+        }
+      };
+      promise.then(limparInFlight).catch(limparInFlight);
+      return promise;
+    }
+
+    function prefetchComposicoesCardsDashboard(referencia) {
+      const ref = String(referencia || '').trim();
+      if (!referenciaEhValida(ref)) return;
+      if (!window.google?.script?.run) return;
+
+      DASHBOARD_CARD_KEYS_OBSERVABILIDADE.forEach(cardKey => {
+        const estado = obterEstadoCacheComposicao(ref, cardKey);
+        if (estado.cacheFresco) return;
+        carregarComposicaoCardRemota(ref, cardKey).catch(() => {
+          // Prefetch em background: sem toasts.
+        });
+      });
     }
 
     function limparResumoPersistidoForaDaJanela(referenciaBase) {
@@ -766,20 +870,10 @@
       const f = el();
       if (!f.cards) return;
       const c = cards || {};
-      const definicoes = [
-        { key: 'gasto_pago_mes', label: 'Pago no mes', valor: c.gasto_pago_mes || 0, moeda: true },
-        { key: 'compromisso_previsto_mes', label: 'Compromissos previstos (mes)', valor: c.compromisso_previsto_mes || 0, moeda: true },
-        { key: 'vendas_no_mes', label: 'Vendas no mes', valor: c.vendas_no_mes || 0, moeda: true },
-        { key: 'recebido_vendas_mes', label: 'Recebido de vendas (mes)', valor: c.recebido_vendas_mes || 0, moeda: true },
-        { key: 'pendente_total', label: 'Pendente total', valor: c.pendente_total || 0, moeda: true },
-        { key: 'vencido_total', label: 'Vencido', valor: c.vencido_total || 0, moeda: true },
-        { key: 'avencer_7_dias', label: 'A vencer (7 dias)', valor: c.avencer_7_dias || 0, moeda: true },
-        { key: 'valor_estoque_total', label: 'Valor em estoque', valor: c.valor_estoque_total || 0, moeda: true },
-        { key: 'valor_produtos_estoque', label: 'Valor de produtos em estoque', valor: c.valor_produtos_estoque || 0, moeda: true },
-        { key: 'valor_produtos_producao', label: 'Valor de produtos em producao', valor: c.valor_produtos_producao || 0, moeda: true },
-        { key: 'contador_bruno_mes', label: 'BRUNO (pago no mes)', valor: c.contador_bruno_mes || 0, moeda: true },
-        { key: 'contador_zizu_mes', label: 'ZIZU (pago no mes)', valor: c.contador_zizu_mes || 0, moeda: true }
-      ];
+      const definicoes = DASHBOARD_CARD_DEFINICOES.map(def => ({
+        ...def,
+        valor: c?.[def.key] || 0
+      }));
 
       f.cards.innerHTML = definicoes.map(def => `
         <div
@@ -868,6 +962,7 @@
           limparResumoPersistidoForaDaJanela(refValida);
           limparComposicaoPersistidaForaDaJanela(refValida);
           prefetchResumosVizinhos(refValida);
+          prefetchComposicoesCardsDashboard(refValida);
 
           if (mudou) {
             renderResumoCompleto(resumoSeguro);
@@ -1008,12 +1103,10 @@
         card_key: key
       });
       const referencia = String(f.mesReferencia?.value || getMesAtualISO()).trim() || getMesAtualISO();
-      const cacheSessao = lerComposicaoCacheLocal(referencia, key);
-      const cachePersistido = lerComposicaoPersistida(referencia, key);
-      const payloadCache = cacheSessao || cachePersistido?.data || null;
-      const cachePersistidoFresco = composicaoPersistidaEhFresca(cachePersistido);
-      const cacheFresco = !!cacheSessao || cachePersistidoFresco;
-      const haviaCache = !!payloadCache;
+      const estadoCache = obterEstadoCacheComposicao(referencia, key);
+      const payloadCache = estadoCache.payloadCache;
+      const cacheFresco = estadoCache.cacheFresco;
+      const haviaCache = estadoCache.haviaCache;
 
       if (payloadCache) {
         renderObservabilidadeCard(payloadCache, key);
@@ -1044,16 +1137,9 @@
       window.AppDiag?.mark?.('dashboard.obs.rpc.start', {
         card_key: key
       });
-      google.script.run
-        .withSuccessHandler(payload => {
+      carregarComposicaoCardRemota(referencia, key)
+        .then(data => {
           carregandoObservabilidade = false;
-          const data = payload || {};
-          const ts = Date.now();
-          const hashNovo = gerarResumoHash(data);
-
-          salvarComposicaoCacheLocal(referencia, key, data);
-          salvarComposicaoPersistida(referencia, key, data, ts, hashNovo);
-          limparComposicaoPersistidaForaDaJanela(referencia);
           setModoSomenteLeitura(false);
           renderObservabilidadeCard(data, key);
           window.AppDiag?.mark?.('dashboard.obs.rpc.success', {
@@ -1061,7 +1147,7 @@
             itens: Array.isArray(data?.itens) ? data.itens.length : 0
           });
         })
-        .withFailureHandler(err => {
+        .catch(err => {
           carregandoObservabilidade = false;
           window.AppDiag?.mark?.('dashboard.obs.rpc.failure', {
             card_key: key,
@@ -1076,8 +1162,7 @@
           f.obsCardResumo.innerHTML = '<span>Falha ao carregar.</span>';
           f.obsCardLista.innerHTML = '<p class="dash-empty">Nao foi possivel carregar os dados deste card.</p>';
           mostrarToast(err?.message || 'Erro ao carregar composicao do card', 'erro');
-        })
-        .obterComposicaoCardDashboardFinanceiro(referencia, key);
+        });
     }
 
     function fecharObservabilidadeCard() {
