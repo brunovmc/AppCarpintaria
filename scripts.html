@@ -1657,6 +1657,9 @@
       fecharPainelFiltroCompras();
       pararPollFiltrosCompras();
     }
+    if (nome !== 'despesas' && window.DespesasController?.fecharPainelFiltros) {
+      window.DespesasController.fecharPainelFiltros();
+    }
   }
 
   function acaoPrimaria() {
@@ -2541,6 +2544,10 @@
 
     if (btnFiltro) {
       btnFiltro.addEventListener('click', () => {
+        if (window.DespesasController?.togglePainelFiltros) {
+          window.DespesasController.togglePainelFiltros();
+          return;
+        }
         mostrarToast('Filtro avancado em breve');
       });
     }

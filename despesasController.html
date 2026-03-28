@@ -5,6 +5,12 @@
     let validacoes = {};
     let despesas = [];
     let filtroTexto = '';
+    let filtrosLista = {
+      status: '',
+      pagoPor: '',
+      categoria: '',
+      fornecedor: ''
+    };
 
     let despesaEditandoId = null;
     let salvandoDespesa = false;
@@ -17,14 +23,29 @@
     let qtdRenderizada = 0;
     let carregandoMais = false;
     let renderJobSeq = 0;
+    let listenerFecharFiltrosAtivo = false;
 
     const PAGE_SIZE = 30;
     const RENDER_CHUNK_SIZE = 8;
+    const STATUS_LABEL_ORDEM = ['VENCIDO', 'PENDENTE', 'PARCIAL', 'PAGO'];
+    const STATUS_PRIORIDADE = {
+      VENCIDO: 0,
+      PENDENTE: 1,
+      PARCIAL: 2,
+      PAGO: 3
+    };
 
     function el() {
       return {
         listaDespesas: document.getElementById('listaDespesasGerais'),
         listaControles: document.getElementById('listaControlesDespesas'),
+        resumoLista: document.getElementById('despesasResumoLista'),
+        painelFiltros: document.getElementById('painelFiltroDespesasLista'),
+        filtroStatus: document.getElementById('filtroDespesaStatus'),
+        filtroPagoPor: document.getElementById('filtroDespesaPagoPor'),
+        filtroCategoria: document.getElementById('filtroDespesaCategoria'),
+        filtroFornecedor: document.getElementById('filtroDespesaFornecedor'),
+        btnLimparFiltros: document.getElementById('btnLimparFiltrosDespesas'),
         formDespesa: document.getElementById('formularioDespesaGeral'),
         despesaFormTitulo: document.getElementById('despesaFormTitulo'),
         btnSalvarDespesa: document.getElementById('btnSalvarDespesaGeral'),
@@ -125,6 +146,90 @@
         .replace(/'/g, '&#39;');
     }
 
+    function normalizarTexto(valor) {
+      const normalizar = window.AppSearch?.normalizeText
+        ? window.AppSearch.normalizeText
+        : entrada => String(entrada ?? '')
+          .normalize('NFD')
+          .replace(/[\u0300-\u036f]/g, '')
+          .toLowerCase()
+          .trim();
+      return normalizar(valor);
+    }
+
+    function normalizarStatus(valor) {
+      return normalizarTexto(valor).toUpperCase();
+    }
+
+    function parseDataISO(valor) {
+      const raw = String(valor || '').trim();
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return null;
+      const d = new Date(`${raw}T00:00:00`);
+      if (Number.isNaN(d.getTime())) return null;
+      return d;
+    }
+
+    function obterStatusVisual(despesa) {
+      const pendente = Number(despesa?.total_pendente || 0);
+      if (pendente <= 0.009) return 'PAGO';
+
+      const vencimento = parseDataISO(despesa?.data_vencimento);
+      if (vencimento) {
+        const hoje = new Date();
+        hoje.setHours(0, 0, 0, 0);
+        if (vencimento < hoje) return 'VENCIDO';
+      }
+
+      const statusRaw = String(despesa?.status_pagamento || '').trim().toUpperCase();
+      if (statusRaw.includes('PARCIAL')) return 'PARCIAL';
+      if (statusRaw.includes('PAGO')) return 'PAGO';
+      return 'PENDENTE';
+    }
+
+    function obterClasseStatus(statusVisual) {
+      const s = String(statusVisual || '').trim().toUpperCase();
+      if (s === 'PAGO') return 'pago';
+      if (s === 'PARCIAL') return 'parcial';
+      if (s === 'VENCIDO') return 'vencido';
+      return 'pendente';
+    }
+
+    function prioridadeStatusDespesa(despesa) {
+      const status = obterStatusVisual(despesa);
+      return Number(STATUS_PRIORIDADE[status] ?? 5);
+    }
+
+    function ordenarValoresUnicos(lista) {
+      return [...new Set((Array.isArray(lista) ? lista : [])
+        .map(v => String(v || '').trim())
+        .filter(Boolean))]
+        .sort((a, b) => a.localeCompare(b, 'pt-BR', { sensitivity: 'base' }));
+    }
+
+    function compararDespesasPrioridade(a, b) {
+      const prioridadeA = prioridadeStatusDespesa(a);
+      const prioridadeB = prioridadeStatusDespesa(b);
+      if (prioridadeA !== prioridadeB) return prioridadeA - prioridadeB;
+
+      const pendenteA = Number(a?.total_pendente || 0);
+      const pendenteB = Number(b?.total_pendente || 0);
+      if (pendenteA !== pendenteB) return pendenteB - pendenteA;
+
+      const vencA = parseDataISO(a?.data_vencimento);
+      const vencB = parseDataISO(b?.data_vencimento);
+      if (vencA && vencB) {
+        if (vencA.getTime() !== vencB.getTime()) return vencA - vencB;
+      } else if (vencA && !vencB) {
+        return -1;
+      } else if (!vencA && vencB) {
+        return 1;
+      }
+
+      const nomeA = String(a?.descricao || '').trim();
+      const nomeB = String(b?.descricao || '').trim();
+      return nomeA.localeCompare(nomeB, 'pt-BR', { sensitivity: 'base' });
+    }
+
     function renderSelect(selectEl, valores, placeholder = 'Selecione') {
       if (!selectEl || selectEl.tagName !== 'SELECT') return;
 
@@ -150,6 +255,153 @@
       selectEl.value = match ? match.value : '';
     }
 
+    function atualizarRotuloBotaoFiltroTopBar() {
+      const btn = document.getElementById('btnFiltroDespesas');
+      if (!btn) return;
+      const ativos = [
+        filtrosLista.status,
+        filtrosLista.pagoPor,
+        filtrosLista.categoria,
+        filtrosLista.fornecedor
+      ].filter(v => String(v || '').trim() !== '').length;
+      btn.textContent = ativos > 0 ? `Filtrar (${ativos})` : 'Filtrar';
+      btn.classList.toggle('active', ativos > 0);
+    }
+
+    function popularFiltrosListaDespesas() {
+      const f = el();
+      if (!f.filtroStatus || !f.filtroPagoPor || !f.filtroCategoria || !f.filtroFornecedor) return;
+
+      const statusDisponiveis = STATUS_LABEL_ORDEM
+        .filter(label => despesas.some(item => obterStatusVisual(item) === label));
+
+      const categorias = ordenarValoresUnicos([
+        ...despesas.map(item => item?.categoria),
+        ...((Array.isArray(validacoes?.categoriasDespesas) ? validacoes.categoriasDespesas : []))
+      ]);
+
+      const fornecedores = ordenarValoresUnicos([
+        ...despesas.map(item => item?.fornecedor),
+        ...((Array.isArray(validacoes?.fornecedores) ? validacoes.fornecedores : []))
+      ]);
+
+      const pagosPor = ordenarValoresUnicos([
+        ...despesas.map(item => item?.pago_por),
+        ...((Array.isArray(validacoes?.pagosPor) ? validacoes.pagosPor : []))
+      ]);
+
+      const statusAtual = String(filtrosLista.status || '').trim();
+      const pagoPorAtual = String(filtrosLista.pagoPor || '').trim();
+      const categoriaAtual = String(filtrosLista.categoria || '').trim();
+      const fornecedorAtual = String(filtrosLista.fornecedor || '').trim();
+
+      renderSelect(f.filtroStatus, statusDisponiveis, 'Todos');
+      renderSelect(f.filtroPagoPor, pagosPor, 'Todos');
+      renderSelect(f.filtroCategoria, categorias, 'Todas');
+      renderSelect(f.filtroFornecedor, fornecedores, 'Todos');
+
+      if (statusDisponiveis.includes(statusAtual)) f.filtroStatus.value = statusAtual;
+      else f.filtroStatus.value = '';
+
+      if (pagosPor.includes(pagoPorAtual)) f.filtroPagoPor.value = pagoPorAtual;
+      else f.filtroPagoPor.value = '';
+
+      if (categorias.includes(categoriaAtual)) f.filtroCategoria.value = categoriaAtual;
+      else f.filtroCategoria.value = '';
+
+      if (fornecedores.includes(fornecedorAtual)) f.filtroFornecedor.value = fornecedorAtual;
+      else f.filtroFornecedor.value = '';
+
+      filtrosLista.status = String(f.filtroStatus.value || '').trim();
+      filtrosLista.pagoPor = String(f.filtroPagoPor.value || '').trim();
+      filtrosLista.categoria = String(f.filtroCategoria.value || '').trim();
+      filtrosLista.fornecedor = String(f.filtroFornecedor.value || '').trim();
+      atualizarRotuloBotaoFiltroTopBar();
+    }
+
+    function limparFiltrosListaDespesas() {
+      filtrosLista = {
+        status: '',
+        pagoPor: '',
+        categoria: '',
+        fornecedor: ''
+      };
+
+      const f = el();
+      if (f.filtroStatus) f.filtroStatus.value = '';
+      if (f.filtroPagoPor) f.filtroPagoPor.value = '';
+      if (f.filtroCategoria) f.filtroCategoria.value = '';
+      if (f.filtroFornecedor) f.filtroFornecedor.value = '';
+      atualizarRotuloBotaoFiltroTopBar();
+    }
+
+    function abrirPainelFiltros() {
+      const f = el();
+      if (!f.painelFiltros) return;
+      f.painelFiltros.classList.remove('hidden');
+      if (!listenerFecharFiltrosAtivo) {
+        listenerFecharFiltrosAtivo = true;
+        document.addEventListener('pointerdown', fecharPainelFiltrosAoClicarFora, { capture: true });
+      }
+    }
+
+    function fecharPainelFiltros() {
+      const f = el();
+      if (!f.painelFiltros) return;
+      f.painelFiltros.classList.add('hidden');
+      if (listenerFecharFiltrosAtivo) {
+        listenerFecharFiltrosAtivo = false;
+        document.removeEventListener('pointerdown', fecharPainelFiltrosAoClicarFora, { capture: true });
+      }
+    }
+
+    function togglePainelFiltros() {
+      const f = el();
+      if (!f.painelFiltros) return;
+      if (f.painelFiltros.classList.contains('hidden')) {
+        abrirPainelFiltros();
+      } else {
+        fecharPainelFiltros();
+      }
+    }
+
+    function fecharPainelFiltrosAoClicarFora(evento) {
+      const f = el();
+      if (!f.painelFiltros || f.painelFiltros.classList.contains('hidden')) return;
+      const btn = document.getElementById('btnFiltroDespesas');
+      if (f.painelFiltros.contains(evento.target)) return;
+      if (btn && btn.contains(evento.target)) return;
+      fecharPainelFiltros();
+    }
+
+    function bindFiltrosListaDespesas() {
+      const f = el();
+      if (!f.painelFiltros) return;
+      if (f.painelFiltros.dataset.boundDespesasFilters === '1') return;
+      f.painelFiltros.dataset.boundDespesasFilters = '1';
+
+      const onFiltroChange = () => {
+        filtrosLista.status = String(f.filtroStatus?.value || '').trim();
+        filtrosLista.pagoPor = String(f.filtroPagoPor?.value || '').trim();
+        filtrosLista.categoria = String(f.filtroCategoria?.value || '').trim();
+        filtrosLista.fornecedor = String(f.filtroFornecedor?.value || '').trim();
+        atualizarRotuloBotaoFiltroTopBar();
+        renderDespesas();
+      };
+
+      [f.filtroStatus, f.filtroPagoPor, f.filtroCategoria, f.filtroFornecedor].forEach(sel => {
+        if (!sel) return;
+        sel.addEventListener('change', onFiltroChange);
+      });
+
+      if (f.btnLimparFiltros) {
+        f.btnLimparFiltros.addEventListener('click', () => {
+          limparFiltrosListaDespesas();
+          renderDespesas();
+        });
+      }
+    }
+
     function carregarValidacoes(onDone) {
       const loader = window.AppValidacoes?.get
         ? window.AppValidacoes.get({ maxAgeMs: 1000 * 60 * 60 * 12 })
@@ -170,6 +422,7 @@
           renderSelect(f.despesaFormaPagamento, validacoes.formasPagamento);
           renderSelect(f.pagDespesaForma, validacoes.formasPagamento);
           handleDespesaFormaPagamentoChange();
+          popularFiltrosListaDespesas();
 
           if (typeof onDone === 'function') onDone();
         })
@@ -290,49 +543,98 @@
 
     function filtrarDespesas(lista, texto) {
       const arr = Array.isArray(lista) ? lista : [];
-      const normalizarTexto = window.AppSearch?.normalizeText
-        ? window.AppSearch.normalizeText
-        : valor => String(valor ?? '').toLowerCase().trim();
       const termo = normalizarTexto(texto);
-      if (!termo) return arr;
-      return arr.filter(d => {
-        const blob = [
-          d?.descricao,
-          d?.categoria,
-          d?.fornecedor,
-          d?.pago_por,
-          d?.status_pagamento,
-          d?.forma_pagamento,
-          d?.observacao
-        ]
-          .map(v => normalizarTexto(v))
-          .join(' ');
-        return blob.includes(termo);
-      });
+      const filtroStatus = normalizarStatus(filtrosLista.status);
+      const filtroPagoPor = normalizarTexto(filtrosLista.pagoPor);
+      const filtroCategoria = normalizarTexto(filtrosLista.categoria);
+      const filtroFornecedor = normalizarTexto(filtrosLista.fornecedor);
+
+      return arr
+        .filter(d => {
+          if (termo) {
+            const blob = [
+              d?.descricao,
+              d?.categoria,
+              d?.fornecedor,
+              d?.pago_por,
+              d?.status_pagamento,
+              d?.forma_pagamento,
+              d?.observacao
+            ]
+              .map(v => normalizarTexto(v))
+              .join(' ');
+            if (!blob.includes(termo)) return false;
+          }
+
+          if (filtroStatus && normalizarStatus(obterStatusVisual(d)) !== filtroStatus) return false;
+          if (filtroPagoPor && normalizarTexto(d?.pago_por) !== filtroPagoPor) return false;
+          if (filtroCategoria && normalizarTexto(d?.categoria) !== filtroCategoria) return false;
+          if (filtroFornecedor && normalizarTexto(d?.fornecedor) !== filtroFornecedor) return false;
+
+          return true;
+        })
+        .sort(compararDespesasPrioridade);
     }
 
     function montarCardResumoDespesa(d) {
       const pendente = Number(d?.total_pendente || 0);
+      const pago = Number(d?.total_pago || 0);
       const podePagar = pendente > 0.009;
-      const fixo = parseBooleanInput(d?.fixo);
+      const statusVisual = obterStatusVisual(d);
+      const statusClasse = obterClasseStatus(statusVisual);
 
       const card = document.createElement('div');
-      card.className = 'card';
+      card.className = `card despesa-card despesa-card-${statusClasse}`;
       card.innerHTML = `
-        <div class="card-resumo">
-          <strong>${escapeHtml(d?.descricao || '-')}</strong><br>
-          ${escapeHtml(d?.categoria || 'SEM_CATEGORIA')} | ${escapeHtml(d?.fornecedor || 'SEM_FORNECEDOR')} | Pago por: ${escapeHtml(d?.pago_por || '-')}<br>
-          Previsto: ${formatarMoeda(d?.total_previsto || 0)} | Pago: ${formatarMoeda(d?.total_pago || 0)} | Pendente: ${formatarMoeda(d?.total_pendente || 0)}<br>
-          Status: ${escapeHtml(d?.status_pagamento || 'PENDENTE')} | Vencimento: ${escapeHtml(d?.data_vencimento || '-')}<br>
-          Pagamento: ${escapeHtml(d?.data_pagamento || '-')} | Forma: ${escapeHtml(d?.forma_pagamento || '-')} | Parcelas: ${Number(d?.parcelas || 1)} | Fixo: ${fixo ? 'SIM' : 'NAO'}
+        <div class="despesa-card-header">
+          <strong class="despesa-card-nome">${escapeHtml(d?.descricao || '-')}</strong>
+          <span class="despesa-status-badge despesa-status-${statusClasse}">${escapeHtml(statusVisual)}</span>
         </div>
-        <div class="acoes">
-          <button onclick="DespesasController.editarDespesa('${escapeHtml(d?.ID)}')">Editar</button>
-          ${podePagar ? `<button onclick="DespesasController.registrarPagamentoDespesa('${escapeHtml(d?.ID)}')">Registrar pagamento</button>` : ''}
-          <button onclick="DespesasController.excluirDespesa('${escapeHtml(d?.ID)}')">Excluir</button>
+
+        <div class="despesa-card-meta-area">
+          <div class="despesa-card-meta">
+            <span class="despesa-meta-item"><strong>Categoria:</strong> ${escapeHtml(d?.categoria || 'SEM_CATEGORIA')}</span>
+            <span class="despesa-meta-item"><strong>Fornecedor:</strong> ${escapeHtml(d?.fornecedor || 'SEM_FORNECEDOR')}</span>
+            <span class="despesa-meta-item"><strong>Pago por:</strong> ${escapeHtml(d?.pago_por || '-')}</span>
+          </div>
+
+          <div class="despesa-acoes-laterais">
+            <button class="despesa-btn-acao" onclick="DespesasController.editarDespesa('${escapeHtml(d?.ID)}')">Editar</button>
+            <button class="despesa-btn-acao" onclick="DespesasController.excluirDespesa('${escapeHtml(d?.ID)}')">Excluir</button>
+          </div>
+        </div>
+
+        <div class="despesa-card-valores">
+          <div class="despesa-valor-box despesa-valor-pendente">
+            <div class="despesa-valor-topo">
+              <span>Pendente</span>
+              ${podePagar ? `<button class="despesa-btn-inline" onclick="DespesasController.registrarPagamentoDespesa('${escapeHtml(d?.ID)}')">Registrar pagamento</button>` : ''}
+            </div>
+            <strong>${formatarMoeda(pendente)}</strong>
+          </div>
+          <div class="despesa-valor-box despesa-valor-pago">
+            <span>Pago</span>
+            <strong>${formatarMoeda(pago)}</strong>
+          </div>
         </div>
       `;
       return card;
+    }
+
+    function atualizarResumoLista(totalFiltrados, totalGeral) {
+      const f = el();
+      if (!f.resumoLista) return;
+
+      const ativos = [];
+      if (filtrosLista.status) ativos.push(`Status: ${filtrosLista.status}`);
+      if (filtrosLista.pagoPor) ativos.push(`Pago por: ${filtrosLista.pagoPor}`);
+      if (filtrosLista.categoria) ativos.push(`Categoria: ${filtrosLista.categoria}`);
+      if (filtrosLista.fornecedor) ativos.push(`Fornecedor: ${filtrosLista.fornecedor}`);
+
+      const base = `Mostrando ${totalFiltrados} de ${totalGeral} despesas`;
+      const complemento = ativos.length > 0 ? ` | ${ativos.join(' | ')}` : '';
+      f.resumoLista.textContent = `${base}${complemento}`;
+      f.resumoLista.classList.toggle('hidden', totalGeral <= 0);
     }
 
     function renderControlesListaDespesas() {
@@ -413,12 +715,20 @@
       listaFiltradaAtual = Array.isArray(itensFiltrados) ? itensFiltrados : [];
       qtdRenderizada = 0;
       carregandoMais = false;
+      atualizarResumoLista(listaFiltradaAtual.length, Array.isArray(despesas) ? despesas.length : 0);
 
       if (listaFiltradaAtual.length === 0) {
-        const semFiltro = !String(filtroTexto || '').trim();
+        const semFiltroTexto = !String(filtroTexto || '').trim();
+        const semFiltrosEstruturados = [
+          filtrosLista.status,
+          filtrosLista.pagoPor,
+          filtrosLista.categoria,
+          filtrosLista.fornecedor
+        ].every(v => String(v || '').trim() === '');
+        const semFiltro = semFiltroTexto && semFiltrosEstruturados;
         f.listaDespesas.innerHTML = semFiltro
           ? '<p>Nenhuma despesa geral cadastrada.</p>'
-          : '<p>Nenhuma despesa encontrada para a busca.</p>';
+          : '<p>Nenhuma despesa encontrada para os filtros aplicados.</p>';
         return;
       }
 
@@ -439,6 +749,7 @@
       if (!Array.isArray(listaCache)) return false;
       despesas = [...listaCache];
       carregado = true;
+      popularFiltrosListaDespesas();
       renderDespesas();
       return true;
     }
@@ -464,6 +775,7 @@
           }
           despesas = Array.isArray(lista) ? lista : [];
           carregado = true;
+          popularFiltrosListaDespesas();
           renderDespesas();
           salvarCacheDespesas();
           if (typeof onDone === 'function') onDone();
@@ -474,6 +786,8 @@
     function init() {
       if (!iniciado) {
         const f = el();
+        bindFiltrosListaDespesas();
+        atualizarRotuloBotaoFiltroTopBar();
         if (f.despesaDataCompetencia && !f.despesaDataCompetencia.value) {
           f.despesaDataCompetencia.value = getHojeISO();
         }
@@ -1060,6 +1374,8 @@
       syncFromBackend,
       setFiltroTexto,
       getById,
+      togglePainelFiltros,
+      fecharPainelFiltros,
 
       abrirFormularioNovo,
       abrirFormularioDespesa,
