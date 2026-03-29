@@ -20,6 +20,8 @@ function getDataSpreadsheet(opcoes) {
 }
 
 const APP_CACHE_VERSION = 'v1';
+const ROW_LOOKUP_CACHE_VERSION = 'v1';
+const ROW_LOOKUP_CACHE_TTL_SEC = 21600; // 6h
 
 function getAppCacheKey(scope) {
   const id = (typeof DATA_SPREADSHEET_ID === 'string')
@@ -161,6 +163,14 @@ function getHeaderMap(sheet) {
   return map;
 }
 
+function buildHeaderMapFromHeaders(headers) {
+  const map = {};
+  (Array.isArray(headers) ? headers : []).forEach((h, i) => {
+    map[h] = i;
+  });
+  return map;
+}
+
 function ensureSchema(sheet, schema) {
   if (!sheet || !Array.isArray(schema)) return;
 
@@ -191,6 +201,99 @@ function rowsToObjects(sheet) {
 
 function normalizeIdValue(value) {
   return String(value ?? '').trim();
+}
+
+function getRowLookupCacheKey(sheetName, idField, idNorm) {
+  const planilhaId = (typeof DATA_SPREADSHEET_ID === 'string')
+    ? DATA_SPREADSHEET_ID.trim()
+    : '';
+  const aba = String(sheetName || '').trim().toUpperCase();
+  const campo = String(idField || '').trim().toUpperCase();
+  const id = normalizeIdValue(idNorm);
+  return `ROW_LOOKUP:${planilhaId || 'SEM_ID'}:${ROW_LOOKUP_CACHE_VERSION}:${aba}:${campo}:${id}`;
+}
+
+function lerRowLookupCache(sheetName, idField, idNorm) {
+  const key = getRowLookupCacheKey(sheetName, idField, idNorm);
+  try {
+    const raw = CacheService.getScriptCache().get(key);
+    if (!raw) return 0;
+    const row = Number(raw);
+    if (!Number.isFinite(row) || row < 2) return 0;
+    return Math.floor(row);
+  } catch (error) {
+    return 0;
+  }
+}
+
+function salvarRowLookupCache(sheetName, idField, idNorm, rowIndex) {
+  const key = getRowLookupCacheKey(sheetName, idField, idNorm);
+  const row = Number(rowIndex);
+  if (!Number.isFinite(row) || row < 2) return;
+  try {
+    CacheService.getScriptCache().put(
+      key,
+      String(Math.floor(row)),
+      ROW_LOOKUP_CACHE_TTL_SEC
+    );
+  } catch (error) {
+    // sem acao
+  }
+}
+
+function limparRowLookupCache(sheetName, idField, idNorm) {
+  const key = getRowLookupCacheKey(sheetName, idField, idNorm);
+  try {
+    CacheService.getScriptCache().remove(key);
+  } catch (error) {
+    // sem acao
+  }
+}
+
+function encontrarLinhaPorId(sheet, sheetName, idField, idCol, idNorm) {
+  const idAlvo = normalizeIdValue(idNorm);
+  const lastRow = sheet.getLastRow();
+  if (!idAlvo || lastRow < 2 || idCol < 0) return 0;
+
+  const rowCache = lerRowLookupCache(sheetName, idField, idAlvo);
+  if (rowCache >= 2 && rowCache <= lastRow) {
+    const valorLinhaCache = normalizeIdValue(sheet.getRange(rowCache, idCol + 1, 1, 1).getValue());
+    if (valorLinhaCache === idAlvo) {
+      return rowCache;
+    }
+    limparRowLookupCache(sheetName, idField, idAlvo);
+  }
+
+  const totalLinhasDados = lastRow - 1;
+  if (totalLinhasDados <= 0) return 0;
+
+  try {
+    const colunaIds = sheet.getRange(2, idCol + 1, totalLinhasDados, 1);
+    const encontrado = colunaIds
+      .createTextFinder(idAlvo)
+      .matchEntireCell(true)
+      .matchCase(true)
+      .findNext();
+    if (encontrado) {
+      const rowIndex = encontrado.getRow();
+      salvarRowLookupCache(sheetName, idField, idAlvo, rowIndex);
+      return rowIndex;
+    }
+  } catch (error) {
+    // fallback para varredura manual abaixo
+  }
+
+  const valoresColunaId = sheet.getRange(2, idCol + 1, totalLinhasDados, 1).getValues();
+  for (let i = 0; i < valoresColunaId.length; i++) {
+    const valorLinha = normalizeIdValue(valoresColunaId[i][0]);
+    if (valorLinha === idAlvo) {
+      const rowIndex = i + 2;
+      salvarRowLookupCache(sheetName, idField, idAlvo, rowIndex);
+      return rowIndex;
+    }
+  }
+
+  return 0;
 }
 
 function insert(sheetName, payload, schema) {
@@ -230,34 +333,42 @@ function updateById(sheetName, idField, id, payload, schema) {
     sheet = ss.insertSheet(sheetName);
   }
   ensureSchema(sheet, schema);
-  const data = sheet.getDataRange().getValues();
-  const headers = data[0];
+  const lastCol = sheet.getLastColumn();
+  if (lastCol <= 0) return false;
+
+  const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+  const headerMap = buildHeaderMapFromHeaders(headers);
   const idCol = headers.indexOf(idField);
   const idAlvo = normalizeIdValue(id);
 
   if (idCol === -1 || !idAlvo) return false;
 
-  for (let i = 1; i < data.length; i++) {
-    const idLinha = normalizeIdValue(data[i][idCol]);
-    if (idLinha === idAlvo) {
-      const headerMap = getHeaderMap(sheet);
-      const row = [...data[i]];
-      let alterou = false;
+  const rowIndex = encontrarLinhaPorId(sheet, sheetName, idField, idCol, idAlvo);
+  if (rowIndex < 2) return false;
 
-      Object.keys(payload || {}).forEach(key => {
-        if (key in headerMap) {
-          row[headerMap[key]] = payload[key];
-          alterou = true;
-        }
-      });
+  const row = sheet.getRange(rowIndex, 1, 1, lastCol).getValues()[0];
+  const idAnterior = normalizeIdValue(row[idCol]);
+  let alterou = false;
 
-      if (alterou) {
-        sheet.getRange(i + 1, 1, 1, row.length).setValues([row]);
-      }
-
-      invalidarCachesRelacionadosAba(sheetName);
-      return true;
+  Object.keys(payload || {}).forEach(key => {
+    if (key in headerMap) {
+      row[headerMap[key]] = payload[key];
+      alterou = true;
     }
+  });
+
+  if (alterou) {
+    sheet.getRange(rowIndex, 1, 1, row.length).setValues([row]);
   }
-  return false;
+
+  const idNovo = normalizeIdValue(row[idCol]);
+  if (idAnterior && idAnterior !== idNovo) {
+    limparRowLookupCache(sheetName, idField, idAnterior);
+  }
+  if (idNovo) {
+    salvarRowLookupCache(sheetName, idField, idNovo, rowIndex);
+  }
+
+  invalidarCachesRelacionadosAba(sheetName);
+  return true;
 }
