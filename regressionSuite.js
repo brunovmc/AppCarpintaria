@@ -198,8 +198,14 @@ function regressionProducaoCalculos() {
   const agrupadas = agruparSaidasReceitaParaEstoque(saidas);
   assertRegressao(Array.isArray(agrupadas) && agrupadas.length >= 2, 'Agrupamento de saidas deveria gerar pelo menos 2 grupos');
 
-  const porta = agrupadas.find(item => normalizarTextoProducao(item?.nome_saida) === 'PORTA');
-  assertRegressao(!!porta, 'Grupo Porta nao encontrado');
+  const chavePorta = normalizarTextoProducao('Porta');
+  const porta = agrupadas.find(item => normalizarTextoProducao(item?.nome_saida) === chavePorta);
+  assertRegressao(
+    !!porta,
+    `Grupo Porta nao encontrado. Grupos encontrados: ${JSON.stringify(
+      (agrupadas || []).map(g => g?.nome_saida || '')
+    )}`
+  );
   assertAproxRegressao(porta.quantidade, 5, 0.000001, 'Quantidade agregada da Porta deveria ser 5');
 
   const custoUnit = calcularCustoUnitarioSaidas(50, [{ quantidade: 2 }, { quantidade: 3 }]);
