@@ -1274,6 +1274,10 @@
     const delayMs = Number.isFinite(delayBase) && delayBase >= 0
       ? delayBase
       : TAB_SYNC_COALESCE_MS;
+    const timeoutBase = Number(options.timeoutMs);
+    const timeoutMs = Number.isFinite(timeoutBase) && timeoutBase > 0
+      ? timeoutBase
+      : 35000;
     const immediate = !!options.immediate;
     const prefetch = !!options.prefetch;
     const abaAtiva = obterNomeAbaAtiva();
@@ -1315,13 +1319,34 @@
       const tokenSync = window.AppSyncStatus?.iniciar
         ? window.AppSyncStatus.iniciar(aba, '')
         : null;
+      let finalizado = false;
+      let watchdog = null;
 
-      executarSincronizacaoForcadaAba(aba, () => {
+      const finalizarExecucao = (origem) => {
+        if (finalizado) return;
+        finalizado = true;
+
+        if (watchdog) {
+          clearTimeout(watchdog);
+          watchdog = null;
+        }
+
         state.running = false;
         limparAbaSuja(aba);
         if (tokenSync) {
           window.AppSyncStatus.finalizar(tokenSync);
         }
+
+        if (origem === 'timeout') {
+          window.AppDiag?.mark?.('sync.timeout', {
+            aba,
+            timeout_ms: timeoutMs
+          });
+          if (typeof console !== 'undefined' && console.warn) {
+            console.warn(`[sync] timeout ${aba} (${timeoutMs}ms)`);
+          }
+        }
+
         const callbacks = state.pendingCallbacks.splice(0);
         callbacks.forEach(fn => {
           try {
@@ -1339,7 +1364,26 @@
           immediate: true,
           prefetch: queuedPrefetch
         });
-      });
+      };
+
+      watchdog = setTimeout(() => {
+        finalizarExecucao('timeout');
+      }, timeoutMs);
+
+      try {
+        executarSincronizacaoForcadaAba(aba, () => {
+          finalizarExecucao('done');
+        });
+      } catch (error) {
+        window.AppDiag?.mark?.('sync.error', {
+          aba,
+          message: String(error?.message || error || '')
+        });
+        if (typeof console !== 'undefined' && console.error) {
+          console.error(`[sync] erro ao sincronizar ${aba}`, error);
+        }
+        finalizarExecucao('error');
+      }
     };
 
     if (immediate || delayMs <= 0) {
