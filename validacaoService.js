@@ -162,40 +162,95 @@ function normalizarCorValidacao(valor) {
   return raw;
 }
 
-function obterCategoriasPorTipoValidacao() {
+function normalizarBooleanValidacao(valor) {
+  if (typeof valor === 'boolean') return valor;
+  if (typeof valor === 'number') {
+    if (valor === 1) return true;
+    if (valor === 0) return false;
+  }
+  const s = normalizarHeaderValidacao(valor);
+  if (!s) return null;
+  if (['TRUE', '1', 'SIM', 'YES', 'Y', 'V', 'ATIVO'].includes(s)) return true;
+  if (['FALSE', '0', 'NAO', 'N', 'NO', 'INATIVO'].includes(s)) return false;
+  return null;
+}
+
+function obterConfigTipoCategoriaValidacao() {
   const sheet = getSheet('VALIDACAO_TIPO_CATEGORIA');
-  if (!sheet) return {};
+  if (!sheet) {
+    return {
+      categoriasPorTipo: {},
+      vendavelPorTipoCategoria: {},
+      vendavelConfigurado: false
+    };
+  }
 
   const data = sheet.getDataRange().getValues();
-  if (!Array.isArray(data) || data.length < 2) return {};
+  if (!Array.isArray(data) || data.length < 2) {
+    return {
+      categoriasPorTipo: {},
+      vendavelPorTipoCategoria: {},
+      vendavelConfigurado: false
+    };
+  }
 
   const headers = Array.isArray(data[0]) ? data[0] : [];
   const rows = data.slice(1);
   const idxTipo = indiceColunaValidacao(headers, 'TIPO', 0);
   const idxCategoria = indiceColunaValidacao(headers, 'CATEGORIA', 1);
+  const idxVendavel = indiceColunaValidacao(headers, 'VENDAVEL', -1);
 
-  const mapa = {};
+  const mapaCategorias = {};
+  const mapaVendavel = {};
+  let vendavelTemValor = false;
+
+  function chaveCategoria(valor) {
+    return String(valor || '').trim().toUpperCase();
+  }
+
+  function salvarVendavel(tipoKey, categoriaLabel, vendavel) {
+    if (!tipoKey || !categoriaLabel || vendavel === null) return;
+    if (!mapaVendavel[tipoKey]) {
+      mapaVendavel[tipoKey] = {};
+    }
+    mapaVendavel[tipoKey][chaveCategoria(categoriaLabel)] = !!vendavel;
+    vendavelTemValor = true;
+  }
+
   rows.forEach(row => {
     const tipo = String(row[idxTipo] || '').trim().toUpperCase();
     const categoria = String(row[idxCategoria] || '').trim();
     if (!tipo || !categoria) return;
 
-    if (!mapa[tipo]) {
-      mapa[tipo] = [];
+    if (!mapaCategorias[tipo]) {
+      mapaCategorias[tipo] = [];
     }
-    const existe = mapa[tipo].some(c => String(c || '').trim().toUpperCase() === categoria.toUpperCase());
+    const existe = mapaCategorias[tipo].some(c => String(c || '').trim().toUpperCase() === categoria.toUpperCase());
     if (!existe) {
-      mapa[tipo].push(categoria);
+      mapaCategorias[tipo].push(categoria);
+    }
+
+    if (idxVendavel >= 0) {
+      const vendavel = normalizarBooleanValidacao(row[idxVendavel]);
+      salvarVendavel(tipo, categoria, vendavel);
     }
   });
 
-  if (!Array.isArray(mapa.OUTROS) || mapa.OUTROS.length === 0) {
-    mapa.OUTROS = ['OUTROS'];
-  } else if (!mapa.OUTROS.some(c => String(c || '').trim().toUpperCase() === 'OUTROS')) {
-    mapa.OUTROS.push('OUTROS');
+  if (!Array.isArray(mapaCategorias.OUTROS) || mapaCategorias.OUTROS.length === 0) {
+    mapaCategorias.OUTROS = ['OUTROS'];
+  } else if (!mapaCategorias.OUTROS.some(c => String(c || '').trim().toUpperCase() === 'OUTROS')) {
+    mapaCategorias.OUTROS.push('OUTROS');
   }
 
-  return mapa;
+  return {
+    categoriasPorTipo: mapaCategorias,
+    vendavelPorTipoCategoria: mapaVendavel,
+    vendavelConfigurado: idxVendavel >= 0 && vendavelTemValor
+  };
+}
+
+function obterCategoriasPorTipoValidacao() {
+  return obterConfigTipoCategoriaValidacao().categoriasPorTipo || {};
 }
 
 function obterValidacoes(forcarRecarregar) {
@@ -207,7 +262,10 @@ function obterValidacoes(forcarRecarregar) {
   }
 
   const sheet = getSheet('VALIDACAO');
-  const categoriasPorTipo = obterCategoriasPorTipoValidacao();
+  const tipoCategoriaConfig = obterConfigTipoCategoriaValidacao();
+  const categoriasPorTipo = tipoCategoriaConfig.categoriasPorTipo || {};
+  const vendavelPorTipoCategoria = tipoCategoriaConfig.vendavelPorTipoCategoria || {};
+  const vendavelConfigurado = tipoCategoriaConfig.vendavelConfigurado === true;
   let resultado;
   if (!sheet) {
     resultado = {
@@ -220,7 +278,9 @@ function obterValidacoes(forcarRecarregar) {
       formasPagamento: [],
       pagosPor: [],
       valorKwhPorFornecedor: {},
-      categoriasPorTipo
+      categoriasPorTipo,
+      vendavelPorTipoCategoria,
+      vendavelConfigurado
     };
     salvarValidacoesNoCache(resultado);
     return resultado;
@@ -237,7 +297,9 @@ function obterValidacoes(forcarRecarregar) {
       formasPagamento: [],
       pagosPor: [],
       valorKwhPorFornecedor: {},
-      categoriasPorTipo
+      categoriasPorTipo,
+      vendavelPorTipoCategoria,
+      vendavelConfigurado
     };
     salvarValidacoesNoCache(resultado);
     return resultado;
@@ -337,7 +399,9 @@ function obterValidacoes(forcarRecarregar) {
     formasPagamento: [...formasPagamento],
     pagosPor: [...pagosPor],
     valorKwhPorFornecedor,
-    categoriasPorTipo
+    categoriasPorTipo,
+    vendavelPorTipoCategoria,
+    vendavelConfigurado
   };
   salvarValidacoesNoCache(resultado);
   return resultado;

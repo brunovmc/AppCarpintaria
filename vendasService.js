@@ -25,11 +25,78 @@ const VENDAS_SCHEMA = [
 ];
 
 function ehItemVendavelEstoque(item) {
+  const regraLegada = (() => {
+    const tipo = String(item?.tipo || '').trim().toUpperCase();
+    const categoria = String(item?.categoria || '').trim().toUpperCase();
+    return tipo === 'PRODUTO' && categoria === 'FINALIZADO';
+  })();
+
+  const ativo = String(item?.ativo).toLowerCase() === 'true';
+  if (!ativo) return false;
+
+  const regras = obterConfigVendabilidadeVendas();
+  if (!regras?.vendavelConfigurado) {
+    return regraLegada;
+  }
+
   const tipo = String(item?.tipo || '').trim().toUpperCase();
   const categoria = String(item?.categoria || '').trim().toUpperCase();
-  return String(item?.ativo).toLowerCase() === 'true' &&
-    tipo === 'PRODUTO' &&
-    categoria === 'FINALIZADO';
+  if (!tipo || !categoria) return false;
+  const mapaTipo = regras.vendavelPorTipoCategoria?.[tipo];
+  if (!mapaTipo || typeof mapaTipo !== 'object') return false;
+  if (!(categoria in mapaTipo)) return false;
+  return mapaTipo[categoria] === true;
+}
+
+function obterConfigVendabilidadeVendas() {
+  const fallback = {
+    vendavelPorTipoCategoria: {},
+    vendavelConfigurado: false
+  };
+  try {
+    if (typeof obterValidacoes !== 'function') return fallback;
+    const validacoes = obterValidacoes();
+    const mapa = (validacoes && typeof validacoes === 'object')
+      ? (validacoes.vendavelPorTipoCategoria || {})
+      : {};
+    return {
+      vendavelPorTipoCategoria: mapa && typeof mapa === 'object' ? mapa : {},
+      vendavelConfigurado: !!validacoes?.vendavelConfigurado
+    };
+  } catch (error) {
+    return fallback;
+  }
+}
+
+function getMensagemItemNaoVendavel() {
+  const regras = obterConfigVendabilidadeVendas();
+  if (regras?.vendavelConfigurado) {
+    return 'Item de estoque nao esta marcado como vendavel para o par tipo/categoria configurado.';
+  }
+  return 'Item de estoque nao e vendavel. Apenas PRODUTO FINALIZADO pode ser vendido.';
+}
+
+function ehItemVendavelEstoqueComRegras(item, regras) {
+  const regraLegada = (() => {
+    const tipo = String(item?.tipo || '').trim().toUpperCase();
+    const categoria = String(item?.categoria || '').trim().toUpperCase();
+    return tipo === 'PRODUTO' && categoria === 'FINALIZADO';
+  })();
+
+  const ativo = String(item?.ativo).toLowerCase() === 'true';
+  if (!ativo) return false;
+
+  if (!regras?.vendavelConfigurado) {
+    return regraLegada;
+  }
+
+  const tipo = String(item?.tipo || '').trim().toUpperCase();
+  const categoria = String(item?.categoria || '').trim().toUpperCase();
+  if (!tipo || !categoria) return false;
+  const mapaTipo = regras.vendavelPorTipoCategoria?.[tipo];
+  if (!mapaTipo || typeof mapaTipo !== 'object') return false;
+  if (!(categoria in mapaTipo)) return false;
+  return mapaTipo[categoria] === true;
 }
 
 function validarRecebidoPorVenda(recebidoPor) {
@@ -40,9 +107,10 @@ function obterItemEstoqueVendavelPorId(estoqueId) {
   const sheet = getSheet(ABA_ESTOQUE);
   if (!sheet) throw new Error('Aba ESTOQUE nao encontrada.');
   const id = String(estoqueId || '').trim();
+  const regras = obterConfigVendabilidadeVendas();
   const item = rowsToObjects(sheet).find(i => String(i.ID || '').trim() === id);
-  if (!item || !ehItemVendavelEstoque(item)) {
-    throw new Error('Item de estoque nao e vendavel. Apenas PRODUTO FINALIZADO pode ser vendido.');
+  if (!item || !ehItemVendavelEstoqueComRegras(item, regras)) {
+    throw new Error(getMensagemItemNaoVendavel());
   }
   return item;
 }
@@ -96,8 +164,8 @@ function normalizarPayloadVenda(payload, vendaExistente) {
 
   return {
     estoque_id: estoqueId,
-    tipo: 'PRODUTO',
-    categoria: 'FINALIZADO',
+    tipo: String(estoqueItem.tipo || '').trim(),
+    categoria: String(estoqueItem.categoria || '').trim(),
     item: String(estoqueItem.item || '').trim(),
     unidade: String(estoqueItem.unidade || 'UN').trim() || 'UN',
     quantidade,
@@ -191,10 +259,12 @@ function listarVendas(forcarRecarregar) {
 function listarItensEstoqueVendaveis() {
   const sheet = getSheet(ABA_ESTOQUE);
   if (!sheet) return [];
+  const regras = obterConfigVendabilidadeVendas();
   return rowsToObjects(sheet)
-    .filter(i => ehItemVendavelEstoque(i))
+    .filter(i => ehItemVendavelEstoqueComRegras(i, regras))
     .map(i => ({
       ID: i.ID,
+      tipo: i.tipo || '',
       item: i.item || '',
       unidade: i.unidade || 'UN',
       categoria: i.categoria || '',
@@ -320,7 +390,7 @@ function aplicarBaixaEstoqueVendaNoPrimeiroRecebimento(vendaId) {
       throw new Error('Item de estoque da venda nao encontrado ou inativo.');
     }
     if (!ehItemVendavelEstoque(item)) {
-      throw new Error('Item de estoque da venda deixou de ser vendavel.');
+      throw new Error(getMensagemItemNaoVendavel());
     }
 
     const quantidadeVenda = round2Financeiro(parseNumeroBR(venda.quantidade));
