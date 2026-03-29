@@ -33,23 +33,19 @@
     }
 
     function podeAlterarDados(contexto = 'Operacao') {
-      if (window.AppRuntime?.ensureWritable) {
-        return window.AppRuntime.ensureWritable(contexto);
+      if (window.AppDomainUtils?.ensureWritable) {
+        return window.AppDomainUtils.ensureWritable(contexto);
       }
-      return true;
-    }
-
-    function normalizarTextoSemAcento(valor) {
-      return String(valor || '')
-        .normalize('NFD')
-        .replace(/[\u0300-\u036f]/g, '')
-        .trim()
-        .toUpperCase();
+      return !!window.AppRuntime?.ensureWritable
+        ? window.AppRuntime.ensureWritable(contexto)
+        : true;
     }
 
     function formaExigeParcelas(formaPagamento) {
-      const forma = normalizarTextoSemAcento(formaPagamento);
-      return forma === 'CREDITO' || forma === 'PIX PARCELADO' || forma === 'DINHEIRO';
+      if (window.AppDomainUtils?.formaExigeParcelas) {
+        return window.AppDomainUtils.formaExigeParcelas(formaPagamento);
+      }
+      return false;
     }
 
     function setSalvando(ativo) {
@@ -219,40 +215,11 @@
       if (salvando) return;
 
       const get = id => document.getElementById(id)?.value || '';
-      const parseNumeroInput = valor => {
-        const s = String(valor ?? '').trim();
-        if (s === '') return '';
-
-        const limpo = s.replace(/\s+/g, '').replace(/[^\d,.\-]/g, '');
-        if (!limpo || limpo === '-') return '';
-
-        const negativo = limpo.startsWith('-');
-        const semSinal = limpo.replace(/-/g, '');
-        const temVirgula = semSinal.includes(',');
-        const temPonto = semSinal.includes('.');
-        let normalizado = semSinal;
-
-        if (temVirgula && temPonto) {
-          if (semSinal.lastIndexOf(',') > semSinal.lastIndexOf('.')) {
-            normalizado = semSinal.replace(/\./g, '').replace(',', '.');
-          } else {
-            normalizado = semSinal.replace(/,/g, '');
-          }
-        } else if (temVirgula) {
-          const partes = semSinal.split(',');
-          normalizado = partes.length > 2
-            ? partes.join('')
-            : `${partes[0] || '0'}.${partes[1] || '0'}`;
-        } else if (temPonto) {
-          const partes = semSinal.split('.');
-          normalizado = partes.length > 2
-            ? partes.join('')
-            : semSinal;
-        }
-
-        const n = Number(`${negativo ? '-' : ''}${normalizado}`);
-        return isNaN(n) ? '' : n;
-      };
+      const parseNumeroInput = valor => (
+        window.AppDomainUtils?.parseNumeroOptional
+          ? window.AppDomainUtils.parseNumeroOptional(valor)
+          : ''
+      );
 
       const tipo = get('tipo');
       const categoria = get('categoria');

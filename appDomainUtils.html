@@ -1,0 +1,80 @@
+<script>
+  window.AppDomainUtils = window.AppDomainUtils || (() => {
+    function getHojeISO() {
+      const d = new Date();
+      const yyyy = d.getFullYear();
+      const mm = String(d.getMonth() + 1).padStart(2, '0');
+      const dd = String(d.getDate()).padStart(2, '0');
+      return `${yyyy}-${mm}-${dd}`;
+    }
+
+    function ensureWritable(contexto = 'Operacao') {
+      if (window.AppRuntime?.ensureWritable) {
+        return window.AppRuntime.ensureWritable(contexto);
+      }
+      return true;
+    }
+
+    function normalizeTextNoAccent(valor) {
+      return String(valor || '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .trim()
+        .toUpperCase();
+    }
+
+    function formaExigeParcelas(valor) {
+      const forma = normalizeTextNoAccent(valor);
+      return forma === 'CREDITO' || forma === 'PIX PARCELADO' || forma === 'DINHEIRO';
+    }
+
+    function parseNumeroOptional(valor) {
+      const s = String(valor ?? '').trim();
+      if (s === '') return '';
+
+      const limpo = s.replace(/\s+/g, '').replace(/[^\d,.\-]/g, '');
+      if (!limpo || limpo === '-') return '';
+
+      const negativo = limpo.startsWith('-');
+      const semSinal = limpo.replace(/-/g, '');
+      const temVirgula = semSinal.includes(',');
+      const temPonto = semSinal.includes('.');
+      let normalizado = semSinal;
+
+      if (temVirgula && temPonto) {
+        if (semSinal.lastIndexOf(',') > semSinal.lastIndexOf('.')) {
+          normalizado = semSinal.replace(/\./g, '').replace(',', '.');
+        } else {
+          normalizado = semSinal.replace(/,/g, '');
+        }
+      } else if (temVirgula) {
+        const partes = semSinal.split(',');
+        normalizado = partes.length > 2
+          ? partes.join('')
+          : `${partes[0] || '0'}.${partes[1] || '0'}`;
+      } else if (temPonto) {
+        const partes = semSinal.split('.');
+        normalizado = partes.length > 2
+          ? partes.join('')
+          : semSinal;
+      }
+
+      const n = Number(`${negativo ? '-' : ''}${normalizado}`);
+      return isNaN(n) ? '' : n;
+    }
+
+    function parseNumeroZero(valor) {
+      const n = parseNumeroOptional(valor);
+      return n === '' ? 0 : Number(n || 0);
+    }
+
+    return {
+      getHojeISO,
+      ensureWritable,
+      normalizeTextNoAccent,
+      formaExigeParcelas,
+      parseNumeroOptional,
+      parseNumeroZero
+    };
+  })();
+</script>

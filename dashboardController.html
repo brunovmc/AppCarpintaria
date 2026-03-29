@@ -99,6 +99,9 @@
     }
 
     function getHojeISO() {
+      if (window.AppDomainUtils?.getHojeISO) {
+        return window.AppDomainUtils.getHojeISO();
+      }
       const d = new Date();
       const yyyy = d.getFullYear();
       const mm = String(d.getMonth() + 1).padStart(2, '0');
@@ -465,10 +468,12 @@
     }
 
     function podeAlterarDados(contexto = 'Operacao') {
-      if (window.AppRuntime?.ensureWritable) {
-        return window.AppRuntime.ensureWritable(contexto);
+      if (window.AppDomainUtils?.ensureWritable) {
+        return window.AppDomainUtils.ensureWritable(contexto);
       }
-      return true;
+      return !!window.AppRuntime?.ensureWritable
+        ? window.AppRuntime.ensureWritable(contexto)
+        : true;
     }
 
     function getMesReferenciaAtiva() {
@@ -616,6 +621,9 @@
     }
 
     function parseNumeroInput(valor) {
+      if (window.AppDomainUtils?.parseNumeroZero) {
+        return window.AppDomainUtils.parseNumeroZero(valor);
+      }
       const s = String(valor ?? '').trim();
       if (!s) return 0;
       const n = Number(s.replace(',', '.'));
@@ -639,17 +647,11 @@
       return `${Math.round(seguro)}`;
     }
 
-    function normalizarFormaPagamento(valor) {
-      return String(valor || '')
-        .normalize('NFD')
-        .replace(/[\u0300-\u036f]/g, '')
-        .trim()
-        .toUpperCase();
-    }
-
     function formaExigeParcelas(valor) {
-      const forma = normalizarFormaPagamento(valor);
-      return forma === 'CREDITO' || forma === 'PIX PARCELADO' || forma === 'DINHEIRO';
+      if (window.AppDomainUtils?.formaExigeParcelas) {
+        return window.AppDomainUtils.formaExigeParcelas(valor);
+      }
+      return false;
     }
 
     function getDataBaseParcelasDespesa() {

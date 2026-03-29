@@ -72,6 +72,9 @@
     }
 
     function parseNumeroInput(valor) {
+      if (window.AppDomainUtils?.parseNumeroZero) {
+        return window.AppDomainUtils.parseNumeroZero(valor);
+      }
       const s = String(valor ?? '').trim();
       if (s === '') return 0;
       const n = Number(s.replace(',', '.'));
@@ -112,10 +115,12 @@
     }
 
     function podeAlterarDados(contexto = 'Operacao') {
-      if (window.AppRuntime?.ensureWritable) {
-        return window.AppRuntime.ensureWritable(contexto);
+      if (window.AppDomainUtils?.ensureWritable) {
+        return window.AppDomainUtils.ensureWritable(contexto);
       }
-      return true;
+      return !!window.AppRuntime?.ensureWritable
+        ? window.AppRuntime.ensureWritable(contexto)
+        : true;
     }
 
     function marcarDashboardComoSujo() {

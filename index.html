@@ -180,7 +180,9 @@
     </div>
 
     <!-- SCRIPTS -->
+    <?!= include('appCore'); ?>
     <?!= include('scripts'); ?>
+    <?!= include('appDomainUtils'); ?>
 
     <!-- ✅ ordem correta: Store → UI → Controller -->
     <?!= include('estoqueStore'); ?>
