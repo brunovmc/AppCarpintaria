@@ -630,26 +630,6 @@
         .obterModeloProduto(id);
     }
 
-    function enviarParaProducao(produtoId) {
-      const prodId = String(produtoId || '').trim();
-      if (!prodId) {
-        mostrarToast('Produto invalido', 'erro');
-        return;
-      }
-
-      if (typeof trocarAba === 'function') {
-        trocarAba('producao');
-      }
-
-      setTimeout(() => {
-        if (window.ProducaoController?.abrirFormularioComModelo) {
-          ProducaoController.abrirFormularioComModelo(prodId);
-          return;
-        }
-        mostrarToast('Modulo de producao indisponivel', 'erro');
-      }, 80);
-    }
-
     function excluir(id) {
       if (!podeAlterarDados('Exclusao bloqueada em modo somente leitura')) return;
       if (!confirm('Deseja remover este produto?')) return;
@@ -682,7 +662,6 @@
       syncFromBackend,
       salvar,
       editar,
-      enviarParaProducao,
       excluir,
       carregarReceitas,
       criarReceita,

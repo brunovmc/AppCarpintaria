@@ -365,6 +365,12 @@
           ? '-'
           : `R$ ${precoVendaFormatado.toFixed(2)}`;
         const nomeSaida = String(l.nome_saida || '').trim();
+        const produtoRefId = String(l.produto_id_vinculado || l.produto_ref_id || '').trim();
+        const vinculoPorId = l.vinculo_produto_por_id === true || !!String(l.produto_id_vinculado || '').trim();
+        const podeEditarPreco = !!permiteEdicao && !!l.permite_editar_preco_venda && vinculoPorId && !!produtoRefId;
+        const avisoVinculo = vinculoPorId
+          ? ''
+          : 'Saida sem vinculo de produto no modelo. Edite na aba Produtos.';
 
         return `
           <div class="receita-card">
@@ -374,6 +380,7 @@
               Qtd: ${quantidade} ${escapeHtml(l.unidade || '')} | Custo total lote: R$ ${custoTotal}
             </div>
             <div class="comp-meta">Preco de venda do produto: ${escapeHtml(precoVendaTexto)}</div>
+            ${avisoVinculo ? `<div class="comp-meta">${escapeHtml(avisoVinculo)}</div>` : ''}
             <div class="comp-meta">Criado em: ${escapeHtml(l.criado_em || '-')}</div>
             ${permiteEdicao ? `
               <div class="linha-add-destino">
@@ -390,12 +397,15 @@
                   min="0"
                   placeholder="Preco venda"
                   value="${escapeAttr(precoVendaFormatado)}"
+                  ${podeEditarPreco ? '' : 'disabled'}
                 >
                 <button
                   class="btn-salvar-preco-venda-saida"
                   data-producao-id="${escapeAttr(producaoId)}"
                   data-nome-saida="${escapeAttr(nomeSaida)}"
                   data-preco-input-id="${escapeAttr(precoInputId)}"
+                  data-produto-id="${escapeAttr(produtoRefId)}"
+                  ${podeEditarPreco ? '' : 'disabled'}
                 >
                   Salvar preco venda
                 </button>
@@ -531,6 +541,12 @@
           ? '-'
           : `R$ ${precoVendaFormatado.toFixed(2)}`;
         const precoInputId = `precoVendaPrevisto_${String(producaoId || '').replace(/[^a-zA-Z0-9_-]/g, '')}_${idx}`;
+        const produtoRefId = String(s.produto_id_vinculado || s.produto_ref_id || '').trim();
+        const vinculoPorId = s.vinculo_produto_por_id === true || !!String(s.produto_id_vinculado || '').trim();
+        const podeEditarPreco = !!permiteEdicao && !!s.permite_editar_preco_venda && vinculoPorId && !!produtoRefId;
+        const avisoVinculo = vinculoPorId
+          ? ''
+          : 'Saida sem vinculo de produto no modelo. Edite na aba Produtos.';
         const meta = [
           `Qtd prevista: ${qtd} ${unidade}`,
           tipo ? `Tipo: ${tipo}` : '',
@@ -542,6 +558,7 @@
             <div><strong>${escapeHtml(nome)}</strong></div>
             <div class="comp-meta">${escapeHtml(meta)}</div>
             <div class="comp-meta">Preco de venda do produto: ${escapeHtml(precoVendaTexto)}</div>
+            ${avisoVinculo ? `<div class="comp-meta">${escapeHtml(avisoVinculo)}</div>` : ''}
             ${permiteEdicao ? `
               <div class="linha-add-destino">
                 <input
@@ -551,12 +568,15 @@
                   min="0"
                   placeholder="Preco venda"
                   value="${escapeAttr(precoVendaFormatado)}"
+                  ${podeEditarPreco ? '' : 'disabled'}
                 >
                 <button
                   class="btn-salvar-preco-venda-saida"
                   data-producao-id="${escapeAttr(producaoId)}"
                   data-nome-saida="${escapeAttr(nome)}"
                   data-preco-input-id="${escapeAttr(precoInputId)}"
+                  data-produto-id="${escapeAttr(produtoRefId)}"
+                  ${podeEditarPreco ? '' : 'disabled'}
                 >
                   Salvar preco venda
                 </button>
@@ -1078,10 +1098,11 @@
           const producaoId = e.target.dataset.producaoId;
           const nomeSaida = e.target.dataset.nomeSaida || '';
           const precoInputId = e.target.dataset.precoInputId || '';
+          const produtoId = e.target.dataset.produtoId || '';
           const input = precoInputId ? document.getElementById(precoInputId) : null;
           const preco = input ? input.value : '';
           if (window.ProducaoController) {
-            ProducaoController.atualizarPrecoVendaProdutoSaida(producaoId, nomeSaida, preco);
+            ProducaoController.atualizarPrecoVendaProdutoSaida(producaoId, nomeSaida, preco, produtoId);
           }
           return;
         }

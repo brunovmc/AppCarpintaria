@@ -68,6 +68,7 @@ const PRODUTOS_RECEITAS_SAIDAS_SCHEMA = [
   'id',
   'receita_id',
   'nome_saida',
+  'produto_ref_id',
   'tipo_item',
   'categoria',
   'unidade',
@@ -122,6 +123,134 @@ function normalizarCategoriaSaidaReceitaProduto(tipo, categoria) {
   }
 
   return tipoNorm === 'PRODUTO' ? 'PECA' : '';
+}
+
+function normalizarChaveProdutoNomeSaida(valor) {
+  const bruto = String(valor || '').trim();
+  if (!bruto) return '';
+  const semAcento = (typeof bruto.normalize === 'function')
+    ? bruto.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    : bruto;
+  return semAcento
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function listarProdutosAtivosIndicesSaidaReceita() {
+  const sheet = getDataSpreadsheet().getSheetByName(ABA_PRODUTOS);
+  const rows = sheet ? rowsToObjects(sheet) : [];
+  const porId = {};
+  const porNome = {};
+
+  rows
+    .filter(i => String(i.ativo).toLowerCase() === 'true')
+    .forEach(p => {
+      const produtoId = String(p.produto_id || '').trim();
+      if (!produtoId) return;
+
+      const registro = {
+        produto_id: produtoId,
+        nome_produto: String(p.nome_produto || '').trim(),
+        preco_venda: p.preco_venda
+      };
+
+      porId[produtoId] = registro;
+
+      const chaveNome = normalizarChaveProdutoNomeSaida(registro.nome_produto);
+      if (!chaveNome) return;
+      if (!Array.isArray(porNome[chaveNome])) {
+        porNome[chaveNome] = [];
+      }
+      porNome[chaveNome].push(registro);
+    });
+
+  return { porId, porNome };
+}
+
+function resolverProdutoRefIdSaidaReceita(tipoItem, nomeSaida, produtoRefIdInput, indicesProdutos, opcoes) {
+  const cfg = opcoes || {};
+  const strict = cfg.strict === true;
+  const produtoPadraoId = String(cfg.produtoPadraoId || '').trim();
+  const nomeProdutoPadrao = String(cfg.nomeProdutoPadrao || '').trim();
+  const totalSaidasProduto = Number(cfg.totalSaidasProduto || 0);
+  const tipoNorm = normalizarTipoSaidaReceitaProduto(tipoItem);
+  if (tipoNorm !== 'PRODUTO') return '';
+
+  const produtoRefId = String(produtoRefIdInput || '').trim();
+  const indices = indicesProdutos && typeof indicesProdutos === 'object'
+    ? indicesProdutos
+    : { porId: {}, porNome: {} };
+
+  if (produtoRefId) {
+    if (indices.porId && indices.porId[produtoRefId]) {
+      return produtoRefId;
+    }
+    if (strict) {
+      throw new Error('Produto vinculado na saida nao encontrado ou inativo.');
+    }
+    return '';
+  }
+
+  const chaveNome = normalizarChaveProdutoNomeSaida(nomeSaida);
+  if (!chaveNome) return '';
+
+  const candidatos = Array.isArray(indices.porNome?.[chaveNome])
+    ? indices.porNome[chaveNome]
+    : [];
+  if (candidatos.length === 1) {
+    return String(candidatos[0].produto_id || '').trim();
+  }
+
+  if (produtoPadraoId) {
+    const chaveProdutoPadrao = normalizarChaveProdutoNomeSaida(nomeProdutoPadrao);
+    if ((totalSaidasProduto === 1) || (chaveProdutoPadrao && chaveProdutoPadrao === chaveNome)) {
+      if (indices.porId && indices.porId[produtoPadraoId]) {
+        return produtoPadraoId;
+      }
+    }
+  }
+
+  return '';
+}
+
+function obterContextoProdutoPorReceitaId(receitaId) {
+  const recId = String(receitaId || '').trim();
+  if (!recId) {
+    return {
+      produto_id: '',
+      nome_produto: ''
+    };
+  }
+
+  const sheetReceitas = getDataSpreadsheet().getSheetByName(ABA_PRODUTOS_RECEITAS);
+  const receita = sheetReceitas
+    ? rowsToObjects(sheetReceitas).find(r =>
+      String(r.receita_id || '').trim() === recId &&
+      String(r.ativo).toLowerCase() === 'true'
+    )
+    : null;
+  const produtoId = String(receita?.produto_id || '').trim();
+  if (!produtoId) {
+    return {
+      produto_id: '',
+      nome_produto: ''
+    };
+  }
+
+  const sheetProdutos = getDataSpreadsheet().getSheetByName(ABA_PRODUTOS);
+  const produto = sheetProdutos
+    ? rowsToObjects(sheetProdutos).find(p =>
+      String(p.produto_id || '').trim() === produtoId &&
+      String(p.ativo).toLowerCase() === 'true'
+    )
+    : null;
+
+  return {
+    produto_id: produtoId,
+    nome_produto: String(produto?.nome_produto || '').trim()
+  };
 }
 
 function obterValorUnitarioEstoqueParaCustoProduto(itemEstoque) {
@@ -762,6 +891,7 @@ function listarReceitasProduto(produtoId) {
       const categoria = normalizarCategoriaSaidaReceitaProduto(tipoItem, i.categoria);
       return {
         ...i,
+        produto_ref_id: String(i.produto_ref_id || '').trim(),
         tipo_item: tipoItem,
         categoria
       };
@@ -940,12 +1070,30 @@ function salvarSaidasReceita(receitaId, linhas) {
   limparLinhasReceita(ABA_PRODUTOS_RECEITAS_SAIDAS, receitaId);
 
   const linhasValidas = Array.isArray(linhas) ? linhas : [];
+  const indicesProdutos = listarProdutosAtivosIndicesSaidaReceita();
+  const contextoProduto = obterContextoProdutoPorReceitaId(receitaId);
+  const totalSaidasProduto = linhasValidas
+    .map(l => normalizarTipoSaidaReceitaProduto(l?.tipo_item))
+    .filter(tipo => tipo === 'PRODUTO')
+    .length;
   linhasValidas.forEach(l => {
     const nomeSaida = String(l.nome_saida || '').trim();
     const unidade = String(l.unidade || '').trim();
     const quantidade = parseNumeroBR(l.quantidade);
     const tipoItem = normalizarTipoSaidaReceitaProduto(l.tipo_item);
     const categoria = normalizarCategoriaSaidaReceitaProduto(tipoItem, l.categoria);
+    const produtoRefId = resolverProdutoRefIdSaidaReceita(
+      tipoItem,
+      nomeSaida,
+      l.produto_ref_id,
+      indicesProdutos,
+      {
+        strict: true,
+        produtoPadraoId: contextoProduto.produto_id,
+        nomeProdutoPadrao: contextoProduto.nome_produto,
+        totalSaidasProduto
+      }
+    );
 
     if (!nomeSaida || !unidade || quantidade <= 0) {
       return;
@@ -955,6 +1103,7 @@ function salvarSaidasReceita(receitaId, linhas) {
       id: gerarId('RSA'),
       receita_id: receitaId,
       nome_saida: nomeSaida,
+      produto_ref_id: produtoRefId,
       tipo_item: tipoItem,
       categoria,
       unidade,
@@ -965,6 +1114,113 @@ function salvarSaidasReceita(receitaId, linhas) {
   });
 
   return true;
+}
+
+function migrarProdutoRefIdSaidasReceitaPorNome() {
+  assertCanWriteProdutos('Migracao de produto_ref_id das saidas de receita');
+  const sheet = getDataSpreadsheet().getSheetByName(ABA_PRODUTOS_RECEITAS_SAIDAS);
+  if (!sheet) {
+    return {
+      ok: true,
+      total_linhas: 0,
+      candidatos: 0,
+      atualizados: 0
+    };
+  }
+
+  ensureSchema(sheet, PRODUTOS_RECEITAS_SAIDAS_SCHEMA);
+  const data = sheet.getDataRange().getValues();
+  if (!Array.isArray(data) || data.length < 2) {
+    return {
+      ok: true,
+      total_linhas: 0,
+      candidatos: 0,
+      atualizados: 0
+    };
+  }
+
+  const headers = data[0] || [];
+  const idxNome = headers.indexOf('nome_saida');
+  const idxTipo = headers.indexOf('tipo_item');
+  const idxRef = headers.indexOf('produto_ref_id');
+  const idxAtivo = headers.indexOf('ativo');
+
+  if (idxNome < 0 || idxTipo < 0 || idxRef < 0) {
+    throw new Error('Colunas obrigatorias nao encontradas em PRODUTOS_RECEITAS_SAIDAS.');
+  }
+
+  const indicesProdutos = listarProdutosAtivosIndicesSaidaReceita();
+  const sheetReceitas = getDataSpreadsheet().getSheetByName(ABA_PRODUTOS_RECEITAS);
+  const receitasAtivas = sheetReceitas
+    ? rowsToObjects(sheetReceitas).filter(r => String(r.ativo).toLowerCase() === 'true')
+    : [];
+  const produtoPorReceita = {};
+  receitasAtivas.forEach(r => {
+    const receitaId = String(r.receita_id || '').trim();
+    const produtoId = String(r.produto_id || '').trim();
+    if (!receitaId || !produtoId) return;
+    produtoPorReceita[receitaId] = produtoId;
+  });
+
+  const totalSaidasProdutoPorReceita = {};
+  for (let i = 1; i < data.length; i++) {
+    const row = data[i] || [];
+    const ativo = idxAtivo >= 0 ? String(row[idxAtivo]).toLowerCase() === 'true' : true;
+    if (!ativo) continue;
+    const tipo = normalizarTipoSaidaReceitaProduto(row[idxTipo]);
+    if (tipo !== 'PRODUTO') continue;
+    const receitaId = String(row[headers.indexOf('receita_id')] || '').trim();
+    if (!receitaId) continue;
+    totalSaidasProdutoPorReceita[receitaId] = Number(totalSaidasProdutoPorReceita[receitaId] || 0) + 1;
+  }
+  let candidatos = 0;
+  let atualizados = 0;
+  const idxReceita = headers.indexOf('receita_id');
+
+  for (let i = 1; i < data.length; i++) {
+    const row = data[i] || [];
+    const ativo = idxAtivo >= 0 ? String(row[idxAtivo]).toLowerCase() === 'true' : true;
+    if (!ativo) continue;
+
+    const tipo = normalizarTipoSaidaReceitaProduto(row[idxTipo]);
+    if (tipo !== 'PRODUTO') continue;
+
+    const refAtual = String(row[idxRef] || '').trim();
+    if (refAtual) continue;
+
+    candidatos += 1;
+    const nomeSaida = String(row[idxNome] || '').trim();
+    const receitaId = idxReceita >= 0 ? String(row[idxReceita] || '').trim() : '';
+    const produtoPadraoId = String(produtoPorReceita[receitaId] || '').trim();
+    const nomeProdutoPadrao = String(indicesProdutos.porId?.[produtoPadraoId]?.nome_produto || '').trim();
+    const refCalculado = resolverProdutoRefIdSaidaReceita(
+      tipo,
+      nomeSaida,
+      '',
+      indicesProdutos,
+      {
+        strict: false,
+        produtoPadraoId,
+        nomeProdutoPadrao,
+        totalSaidasProduto: Number(totalSaidasProdutoPorReceita[receitaId] || 0)
+      }
+    );
+    if (!refCalculado) continue;
+
+    sheet.getRange(i + 1, idxRef + 1).setValue(refCalculado);
+    atualizados += 1;
+  }
+
+  if (atualizados > 0) {
+    invalidarCachesRelacionadosAba(ABA_PRODUTOS);
+  }
+
+  return {
+    ok: true,
+    total_linhas: data.length - 1,
+    candidatos,
+    atualizados
+  };
 }
 
 function duplicarReceitaProduto(receitaId) {
@@ -1318,6 +1574,7 @@ function explodirSaidasReceitaDetalhada(produtoId, receitaId, qtdPlanejada) {
     ? rowsToObjects(produtosSheet).find(i => i.produto_id === produtoId && String(i.ativo).toLowerCase() === 'true')
     : null;
   const nomeProduto = produto ? (produto.nome_produto || '') : '';
+  const indicesProdutos = listarProdutosAtivosIndicesSaidaReceita();
 
   const qtdPlanejadaNum = parseNumeroBR(qtdPlanejada);
   if (!qtdPlanejadaNum || qtdPlanejadaNum <= 0) {
@@ -1326,6 +1583,10 @@ function explodirSaidasReceitaDetalhada(produtoId, receitaId, qtdPlanejada) {
 
   // A OP representa quantidade de modelos, entao cada saida multiplica por qtdPlanejada.
   const fator = qtdPlanejadaNum;
+  const totalSaidasProduto = saidasAtivas
+    .map(s => normalizarTipoSaidaReceitaProduto(s?.tipo_item))
+    .filter(tipo => tipo === 'PRODUTO')
+    .length;
 
   const itens = [];
   saidasAtivas.forEach(s => {
@@ -1335,6 +1596,21 @@ function explodirSaidasReceitaDetalhada(produtoId, receitaId, qtdPlanejada) {
     const nomeSaida = String(s.nome_saida || '').trim() || nomeProduto || 'Saida';
     const tipoItem = normalizarTipoSaidaReceitaProduto(s.tipo_item);
     const categoria = normalizarCategoriaSaidaReceitaProduto(tipoItem, s.categoria);
+    const produtoRefId = resolverProdutoRefIdSaidaReceita(
+      tipoItem,
+      nomeSaida,
+      s.produto_ref_id,
+      indicesProdutos,
+      {
+        strict: false,
+        produtoPadraoId: String(produtoId || '').trim(),
+        nomeProdutoPadrao: String(nomeProduto || '').trim(),
+        totalSaidasProduto
+      }
+    );
+    const produtoVinculado = produtoRefId
+      ? (indicesProdutos.porId?.[produtoRefId] || null)
+      : null;
     const quantidade = parseNumeroBR(qtdBase * fator);
     if (!quantidade || quantidade <= 0) return;
 
@@ -1342,10 +1618,12 @@ function explodirSaidasReceitaDetalhada(produtoId, receitaId, qtdPlanejada) {
       receita_saida_id: s.id || '',
       receita_id: receitaId,
       nome_saida: nomeSaida,
+      produto_ref_id: produtoRefId,
       tipo_item: tipoItem,
       categoria,
       unidade: s.unidade || '',
-      quantidade
+      quantidade,
+      preco_venda_produto: parseNumeroBR(produtoVinculado?.preco_venda)
     });
   });
 

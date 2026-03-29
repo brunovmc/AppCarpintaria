@@ -666,10 +666,11 @@
         .atualizarCustoLoteSaidaProducao(prodId, lotId, custo);
     }
 
-    function atualizarPrecoVendaProdutoSaida(producaoId, nomeSaida, precoVendaInput) {
+    function atualizarPrecoVendaProdutoSaida(producaoId, nomeSaida, precoVendaInput, produtoRefIdInput) {
       if (!podeAlterarDados('Atualizacao bloqueada em modo somente leitura')) return;
       const prodId = String(producaoId || '').trim();
       const nome = String(nomeSaida || '').trim();
+      const produtoRefId = String(produtoRefIdInput || '').trim();
       const preco = Number(String(precoVendaInput || '').replace(',', '.'));
 
       if (!prodId) {
@@ -684,6 +685,10 @@
         mostrarToast('Preco de venda deve ser maior que zero', 'erro');
         return;
       }
+      if (!produtoRefId) {
+        mostrarToast('Saida sem produto vinculado. Ajuste o modelo na aba Produtos.', 'erro');
+        return;
+      }
 
       mostrarToast('Atualizando preco de venda...');
       window.AppRequest.runner()
@@ -692,9 +697,7 @@
           mostrarToast(msg, 'erro');
         })
         .withSuccessHandler(resp => {
-          const msgBase = resp?.produtoCriado
-            ? 'Preco salvo e produto criado automaticamente'
-            : 'Preco de venda atualizado';
+          const msgBase = 'Preco de venda atualizado';
           const concluirSync = window.AppSyncFeedback?.iniciar
             ? window.AppSyncFeedback.iniciar(`${msgBase}. Atualizando dados...`)
             : null;
@@ -722,7 +725,7 @@
                 onDone: done
               }));
             } else {
-              agendarSync(done => ProdutosController.syncFromBackend(done));
+              agendarSync(done => window.ProdutosController.syncFromBackend(done));
             }
           }
           marcarDashboardComoSujo();
@@ -743,7 +746,7 @@
             }
           }
         })
-        .atualizarPrecoVendaProdutoSaidaProducao(prodId, nome, preco);
+        .atualizarPrecoVendaProdutoSaidaProducao(prodId, nome, preco, produtoRefId);
     }
 
     function vincularItemEstoque(producaoId, vinculoId, estoqueId) {

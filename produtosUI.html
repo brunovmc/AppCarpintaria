@@ -526,9 +526,11 @@
       const tipo = String(saida.tipo_item || 'PRODUTO').toUpperCase();
       const categoriaPadrao = getCategoriasParaTipo(tipo)[0] || '';
       const categoria = String(saida.categoria || categoriaPadrao).trim();
+      const produtoRefId = String(saida.produto_ref_id || '').trim();
       return `
         <div class="linha-receita-saida">
           <input class="saida-nome" placeholder="Nome" value="${escapeAttr(saida.nome_saida || '')}">
+          <input class="saida-produto-ref-id hidden" type="hidden" value="${escapeAttr(produtoRefId)}">
           <select class="saida-tipo">
             ${renderOpcoesTipoSaida(tipo)}
           </select>
@@ -908,6 +910,7 @@
 
       const saidas = [...card.querySelectorAll('.linha-receita-saida')].map(row => ({
         nome_saida: row.querySelector('.saida-nome')?.value || '',
+        produto_ref_id: row.querySelector('.saida-produto-ref-id')?.value || '',
         tipo_item: String(row.querySelector('.saida-tipo')?.value || '').toUpperCase(),
         categoria: row.querySelector('.saida-categoria')?.value || '',
         unidade: row.querySelector('.saida-unidade')?.value || '',
@@ -986,7 +989,6 @@
         </div>
 
         <div class="acoes">
-          <button onclick='ProdutosController.enviarParaProducao(${idJs})'>Criar OP</button>
           <button onclick='ProdutosController.editar(${idJs})'>Editar</button>
           <button onclick='ProdutosController.excluir(${idJs})'>Excluir</button>
         </div>
@@ -1226,10 +1228,14 @@
           if (!row) return;
           const tipo = String(e.target.value || '').toUpperCase();
           const categoriaInput = row.querySelector('.saida-categoria');
+          const produtoRefInput = row.querySelector('.saida-produto-ref-id');
           if (categoriaInput) {
             categoriaInput.innerHTML = renderOpcoesCategoria('', tipo);
             const categoriaPadrao = getCategoriasParaTipo(tipo)[0] || '';
             setSelectByValidation(categoriaInput, categoriaPadrao);
+          }
+          if (tipo !== 'PRODUTO' && produtoRefInput) {
+            produtoRefInput.value = '';
           }
           return;
         }
@@ -1243,6 +1249,15 @@
         ) {
           const row = e.target.closest('.linha-receita-entrada');
           sincronizarLinhaEntradaMadeira(row);
+        }
+
+        if (e.target.classList.contains('saida-nome')) {
+          const row = e.target.closest('.linha-receita-saida');
+          if (!row) return;
+          const produtoRefInput = row.querySelector('.saida-produto-ref-id');
+          if (produtoRefInput) {
+            produtoRefInput.value = '';
+          }
         }
       });
 
