@@ -756,7 +756,7 @@
 
     function carregarDespesas(forcarRecarregar = false, onDone) {
       const exibindoCache = !forcarRecarregar && hidratarDespesasDoCache();
-      google.script.run
+      window.AppRequest.runner()
         .withFailureHandler(() => {
           if (exibindoCache) {
             if (window.AppRuntime?.setReadOnly) {
@@ -1046,7 +1046,7 @@
 
       setSalvandoDespesa(true);
       cancelarFormularioDespesa();
-      const runner = google.script.run
+      const runner = window.AppRequest.runner()
         .withFailureHandler(err => {
           setSalvandoDespesa(false);
           mostrarToast(err?.message || 'Erro ao salvar despesa', 'erro');
@@ -1098,7 +1098,7 @@
       if (!confirm('Deseja remover esta despesa geral?')) return;
       const despesaAtual = getById(despesaId);
 
-      google.script.run
+      window.AppRequest.runner()
         .withFailureHandler(() => {
           mostrarToast('Erro ao remover despesa', 'erro');
         })
@@ -1310,7 +1310,7 @@
       despesaPagamentoId = null;
       despesaPagamentoParcelado = false;
 
-      google.script.run
+      window.AppRequest.runner()
         .withFailureHandler(err => {
           setSalvandoPagamentoDespesa(false);
           mostrarToast(err?.message || 'Erro ao registrar pagamento', 'erro');

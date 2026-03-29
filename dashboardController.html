@@ -327,7 +327,7 @@
       if (existente) return existente;
 
       const promise = new Promise((resolve, reject) => {
-        google.script.run
+        window.AppRequest.runner()
           .withSuccessHandler(payload => {
             const data = payload || {};
             const ts = Date.now();
@@ -916,7 +916,7 @@
         if (ref === referenciaBase) return;
         if (!devePrefetchResumoVizinho(ref)) return;
 
-        google.script.run
+        window.AppRequest.runner()
           .withSuccessHandler(resumo => {
             const resumoSeguro = resumo || {};
             const hash = gerarResumoHash(resumoSeguro);
@@ -948,7 +948,7 @@
         atualizarTextoUltimaAtualizacao(0);
       }
 
-      google.script.run
+      window.AppRequest.runner()
         .withSuccessHandler(resumo => {
           if (requestSeq !== resumoRequestSeq) return;
 
@@ -1331,7 +1331,7 @@
       if (!confirm('Deseja remover este pagamento?')) return;
 
       const cardAtual = String(cardObservabilidadeAberto || '').trim();
-      google.script.run
+      window.AppRequest.runner()
         .withFailureHandler(err => {
           mostrarToast(err?.message || 'Erro ao remover pagamento', 'erro');
         })
@@ -1561,7 +1561,7 @@
       const despesaAnterior = despesaEditandoId ? getById(despesaEditandoId) : null;
 
       setSalvandoDespesa(true);
-      const runner = google.script.run
+      const runner = window.AppRequest.runner()
         .withFailureHandler(err => {
           setSalvandoDespesa(false);
           mostrarToast(err?.message || 'Erro ao salvar despesa', 'erro');
@@ -1612,7 +1612,7 @@
         return;
       }
 
-      google.script.run
+      window.AppRequest.runner()
         .withFailureHandler(() => {
           mostrarToast('Erro ao carregar despesas gerais', 'erro');
           if (typeof onDone === 'function') onDone();
@@ -1664,7 +1664,7 @@
       if (!confirm('Deseja remover esta despesa geral?')) return;
       const despesaAtual = getById(despesaId);
 
-      google.script.run
+      window.AppRequest.runner()
         .withFailureHandler(() => {
           mostrarToast('Erro ao remover despesa', 'erro');
         })
@@ -1826,7 +1826,7 @@
       const despesaAtual = getById(despesaPagamentoId);
 
       setSalvandoPagamentoDespesa(true);
-      google.script.run
+      window.AppRequest.runner()
         .withFailureHandler(err => {
           setSalvandoPagamentoDespesa(false);
           mostrarToast(err?.message || 'Erro ao registrar pagamento', 'erro');

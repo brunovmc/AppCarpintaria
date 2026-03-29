@@ -176,7 +176,7 @@
     }
 
     function carregarProdutos(forcarRecarregar = false, onDone) {
-      google.script.run
+      window.AppRequest.runner()
         .withSuccessHandler(lista => {
           produtos = Array.isArray(lista) ? lista : [];
           ProducaoUI.renderProdutos(produtos);
@@ -189,7 +189,7 @@
     }
 
     function carregarEstoqueOpcoes(forcarRecarregar = false, onDone) {
-      google.script.run
+      window.AppRequest.runner()
         .withSuccessHandler(lista => {
           estoqueOpcoes = Array.isArray(lista) ? lista : [];
           ProducaoUI.setEstoqueOpcoes?.(estoqueOpcoes);
@@ -244,7 +244,7 @@
         return;
       }
 
-      google.script.run
+      window.AppRequest.runner()
         .withSuccessHandler(lista => {
           const receitasBrutas = (Array.isArray(lista) ? lista : [])
             .filter(r => r && r.receita_id);
@@ -270,7 +270,7 @@
 
     function carregarProducao(forcarRecarregar = false, onDone) {
       const exibindoCache = !forcarRecarregar && hidratarProducaoDoCache();
-      google.script.run
+      window.AppRequest.runner()
         .withSuccessHandler(lista => {
           if (window.AppRuntime?.setReadOnly) {
             window.AppRuntime.setReadOnly(false);
@@ -368,7 +368,7 @@
         renderListaAtual();
         finalizarUX();
 
-        google.script.run
+        window.AppRequest.runner()
         .withFailureHandler(err => {
           ProducaoStore.update(idAtual, snapshot);
           renderListaAtual();
@@ -411,7 +411,7 @@
       finalizarUX();
       mostrarToast('Salvando...');
 
-      google.script.run
+      window.AppRequest.runner()
         .withFailureHandler(err => {
           ProducaoStore.remove(tempId);
           renderListaAtual();
@@ -521,7 +521,7 @@
       renderListaAtual();
       mostrarToast('Producao removida');
 
-      google.script.run
+      window.AppRequest.runner()
         .withFailureHandler(() => {
           ProducaoStore.add(snapshot);
           renderListaAtual();
@@ -540,7 +540,7 @@
         return;
       }
 
-      google.script.run
+      window.AppRequest.runner()
         .withSuccessHandler(resp => {
           ProducaoStore.update(id, {
             materiaisPrevistos: resp.itens || [],
@@ -564,7 +564,7 @@
         return;
       }
 
-      google.script.run
+      window.AppRequest.runner()
         .withSuccessHandler(lista => {
           ProducaoStore.update(id, {
             vinculosMateriais: Array.isArray(lista) ? lista : []
@@ -587,7 +587,7 @@
         return;
       }
 
-      google.script.run
+      window.AppRequest.runner()
         .withSuccessHandler(lista => {
           ProducaoStore.update(id, {
             saidasLotes: Array.isArray(lista) ? lista : []
@@ -619,7 +619,7 @@
       }
 
       mostrarToast('Atualizando custo da saida...');
-      google.script.run
+      window.AppRequest.runner()
         .withFailureHandler(err => {
           const msg = err?.message || 'Erro ao atualizar custo da saida';
           mostrarToast(msg, 'erro');
@@ -681,7 +681,7 @@
       }
 
       mostrarToast('Atualizando preco de venda...');
-      google.script.run
+      window.AppRequest.runner()
         .withFailureHandler(err => {
           const msg = err?.message || 'Erro ao atualizar preco de venda';
           mostrarToast(msg, 'erro');
@@ -757,7 +757,7 @@
       }
 
       mostrarToast('Vinculando item...');
-      google.script.run
+      window.AppRequest.runner()
         .withFailureHandler(err => {
           const msg = err?.message || 'Erro ao vincular item';
           mostrarToast(msg, 'erro');
@@ -787,7 +787,7 @@
       }
 
       mostrarToast('Adicionando item...');
-      google.script.run
+      window.AppRequest.runner()
         .withFailureHandler(err => {
           const msg = err?.message || 'Erro ao adicionar item';
           mostrarToast(msg, 'erro');
@@ -831,7 +831,7 @@
 
       if (!item.materiaisPrevistos) {
         mostrarToast('Carregando materiais...');
-        google.script.run
+        window.AppRequest.runner()
           .withSuccessHandler(resp => {
             ProducaoStore.update(id, {
               materiaisPrevistos: resp.itens || [],
@@ -861,7 +861,7 @@
 
       mostrarToast('Atualizando estoque...');
 
-      google.script.run
+      window.AppRequest.runner()
         .withFailureHandler(err => {
           const msg = err?.message || 'Erro ao atualizar estoque';
           mostrarToast(msg, 'erro');
@@ -962,7 +962,7 @@
       }
 
       mostrarToast('Salvando vinculos...');
-      google.script.run
+      window.AppRequest.runner()
         .withFailureHandler(err => {
           const msg = err?.message || 'Erro ao salvar vinculos';
           mostrarToast(msg, 'erro');
@@ -1009,7 +1009,7 @@
 
       ProducaoStore.update(producaoId, { etapas });
 
-      google.script.run
+      window.AppRequest.runner()
         .withFailureHandler(() => {
           ProducaoStore.update(producaoId, snapshot);
           renderListaAtual();
@@ -1060,7 +1060,7 @@
       console.log('payload etapas:', JSON.stringify({ producaoId, etapas: [payloadEtapa] }));
       console.log('data_feito type:', typeof payloadEtapa.data_feito, payloadEtapa.data_feito);
 
-      google.script.run
+      window.AppRequest.runner()
         .withFailureHandler(() => {
           ProducaoStore.update(producaoId, snapshot);
           renderListaAtual();
@@ -1124,7 +1124,7 @@
       ProducaoStore.update(producaoId, { etapas });
       renderListaAtual();
 
-      google.script.run
+      window.AppRequest.runner()
         .withFailureHandler(() => {
           ProducaoStore.update(producaoId, snapshot);
           renderListaAtual();
@@ -1175,7 +1175,7 @@
       ProducaoStore.update(producaoId, { etapas: etapasAtualizadas });
       renderListaAtual();
 
-      google.script.run
+      window.AppRequest.runner()
         .withFailureHandler(() => {
           ProducaoStore.update(producaoId, { etapas: snapshot.etapas || [] });
           renderListaAtual();
@@ -1205,7 +1205,7 @@
       ProducaoStore.update(producaoId, { etapas: novasEtapas });
       renderListaAtual();
 
-      google.script.run
+      window.AppRequest.runner()
         .withFailureHandler(() => {
           ProducaoStore.update(producaoId, snapshot);
           renderListaAtual();
@@ -1218,7 +1218,7 @@
     }
 
     function refreshEtapas(producaoId) {
-      google.script.run
+      window.AppRequest.runner()
         .withSuccessHandler(etapas => {
           ProducaoStore.update(producaoId, { etapas: etapas || [] });
           renderListaAtual();

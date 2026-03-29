@@ -212,7 +212,7 @@
     function carregarCompras(forcarRecarregar = false, onDone) {
       const exibindoCache = !forcarRecarregar && hidratarComprasDoCache();
       const perf = perfStart('rpc.compras.listarCompras');
-      google.script.run
+      window.AppRequest.runner()
         .withSuccessHandler(lista => {
           if (window.AppRuntime?.setReadOnly) {
             window.AppRuntime.setReadOnly(false);
@@ -416,7 +416,7 @@
         renderListaAtual();
         finalizarUX();
 
-        google.script.run
+        window.AppRequest.runner()
           .withFailureHandler(() => {
             ComprasStore.update(idAtual, snapshot);
             renderListaAtual();
@@ -447,7 +447,7 @@
       finalizarUX();
       mostrarToast('Salvando...');
 
-      google.script.run
+      window.AppRequest.runner()
         .withFailureHandler(() => {
           ComprasStore.remove(tempId);
           renderListaAtual();
@@ -554,7 +554,7 @@
       mostrarToast('Compra removida');
       invalidarCacheDashboardPorImpacto(snapshot);
 
-      google.script.run
+      window.AppRequest.runner()
         .withFailureHandler(() => {
           ComprasStore.add(snapshot);
           renderListaAtual();
@@ -583,7 +583,7 @@
       adicionandoAoEstoque.add(id);
       mostrarToast('Adicionando ao estoque...');
 
-      google.script.run
+      window.AppRequest.runner()
         .withFailureHandler(() => {
           adicionandoAoEstoque.delete(id);
           mostrarToast('Erro ao adicionar ao estoque', 'erro');
@@ -705,7 +705,7 @@
       ComprasUI.fecharModalPagamentoCompra();
       pagamentoCompraId = null;
 
-      google.script.run
+      window.AppRequest.runner()
         .withFailureHandler(err => {
           salvandoPagamento = false;
           setBloqueioMutacaoPagamento(false);

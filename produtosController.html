@@ -198,7 +198,7 @@
 
     function carregarProdutos(forcarRecarregar = false, onDone) {
       const exibindoCache = !forcarRecarregar && hidratarProdutosDoCache();
-      google.script.run
+      window.AppRequest.runner()
         .withSuccessHandler(lista => {
           if (window.AppRuntime?.setReadOnly) {
             window.AppRuntime.setReadOnly(false);
@@ -250,11 +250,11 @@
 
       if (item.receitasCarregadas && !forcar) return;
 
-      google.script.run
+      window.AppRequest.runner()
         .withSuccessHandler(receitas => {
           const lista = Array.isArray(receitas) ? receitas : [];
           if (lista.length === 0) {
-            google.script.run
+            window.AppRequest.runner()
               .withSuccessHandler(receita => {
                 const receitaBase = receita && receita.receita_id
                   ? [{
@@ -306,7 +306,7 @@
 
       mostrarToast('Carregando modelo...');
 
-      google.script.run
+      window.AppRequest.runner()
         .withSuccessHandler(receita => {
           const receitaUnica = receita && receita.receita_id
             ? [{
@@ -451,7 +451,7 @@
       renderListaAtual();
       mostrarToast('Salvando receita...');
 
-      google.script.run
+      window.AppRequest.runner()
         .withFailureHandler(() => {
           ProdutosStore.update(produtoId, snapshot);
           renderListaAtual();
@@ -525,7 +525,7 @@
       finalizarUX();
       mostrarToast('Salvando produto e modelo...');
 
-      google.script.run
+      window.AppRequest.runner()
         .withFailureHandler(() => {
           setSalvando(false);
           mostrarToast('Erro ao salvar produto/modelo', 'erro');
@@ -613,7 +613,7 @@
       }
       ProdutosUI.mostrarFormulario();
 
-      google.script.run
+      window.AppRequest.runner()
         .withSuccessHandler(modelo => {
           if (window.ProdutosUI?.preencherModeloFormulario) {
             ProdutosUI.preencherModeloFormulario(modelo || {});
@@ -655,7 +655,7 @@
       renderListaAtual();
       mostrarToast('Produto removido');
 
-      google.script.run
+      window.AppRequest.runner()
         .withFailureHandler(() => {
           ProdutosStore.add(snapshot);
           renderListaAtual();

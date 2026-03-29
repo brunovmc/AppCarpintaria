@@ -324,6 +324,122 @@
 
   window.AppRuntime = window.AppRuntime || createRuntimeState();
 
+  function createRequestHelper() {
+    function normalizeError(raw, fallback = '') {
+      if (raw instanceof Error) return raw;
+      const mensagem = String(raw?.message || raw || '').trim()
+        || String(fallback || '').trim()
+        || 'Falha na comunicacao com o servidor';
+      const erro = new Error(mensagem);
+      if (raw && typeof raw === 'object') {
+        erro.raw = raw;
+      }
+      return erro;
+    }
+
+    function disponivel() {
+      return !!window.google?.script?.run;
+    }
+
+    function call(method, args = [], options = {}) {
+      const metodo = String(method || '').trim();
+      if (!metodo) {
+        return Promise.reject(new Error('Metodo RPC invalido'));
+      }
+      if (!disponivel()) {
+        return Promise.reject(new Error('google.script.run indisponivel'));
+      }
+
+      const argumentos = Array.isArray(args) ? args : [args];
+      const contexto = String(options.context || metodo).trim() || metodo;
+      const perf = window.AppPerf?.start?.(`rpc.${contexto}`, {
+        method: metodo
+      });
+      window.AppDiag?.mark?.('rpc.call', {
+        context: contexto,
+        method: metodo
+      });
+
+      return new Promise((resolve, reject) => {
+        let runner = window.google.script.run
+          .withSuccessHandler(payload => {
+            window.AppPerf?.end?.(perf, { ok: true });
+            resolve(payload);
+          })
+          .withFailureHandler(err => {
+            window.AppPerf?.end?.(perf, { ok: false });
+            const erro = normalizeError(err, options.errorMessage);
+            window.AppDiag?.mark?.('rpc.fail', {
+              context: contexto,
+              method: metodo,
+              message: String(erro?.message || '').trim()
+            });
+            reject(erro);
+          });
+
+        try {
+          runner[metodo](...argumentos);
+        } catch (error) {
+          window.AppPerf?.end?.(perf, { ok: false, exception: true });
+          reject(normalizeError(error, options.errorMessage));
+        }
+      });
+    }
+
+    function runner(options = {}) {
+      let successHandler = null;
+      let failureHandler = null;
+
+      const base = {
+        withSuccessHandler(fn) {
+          successHandler = typeof fn === 'function' ? fn : null;
+          return proxy;
+        },
+        withFailureHandler(fn) {
+          failureHandler = typeof fn === 'function' ? fn : null;
+          return proxy;
+        }
+      };
+
+      const proxy = new Proxy(base, {
+        get(target, prop) {
+          if (prop in target) return target[prop];
+          if (typeof prop !== 'string') return undefined;
+          if (!prop || prop === 'then' || prop === 'catch' || prop === 'finally') return undefined;
+
+          return (...args) => {
+            call(prop, args, options)
+              .then(payload => {
+                if (typeof successHandler === 'function') {
+                  successHandler(payload);
+                }
+              })
+              .catch(err => {
+                if (typeof failureHandler === 'function') {
+                  failureHandler(err);
+                  return;
+                }
+                if (typeof console !== 'undefined' && console.error) {
+                  console.error(`[rpc] ${prop}`, err);
+                }
+              });
+          };
+        }
+      });
+
+      return proxy;
+    }
+
+    return {
+      call,
+      runner,
+      normalizeError,
+      isAvailable: disponivel
+    };
+  }
+
+  window.AppRequest = window.AppRequest || createRequestHelper();
+
   function createTabCacheHelper() {
     const STORAGE_PREFIX = 'app:tabcache:v1:';
     const TABS_PERMITIDAS = {
@@ -589,21 +705,18 @@
         return Promise.reject(new Error('google.script.run indisponivel'));
       }
 
-      inFlightPromise = new Promise((resolve, reject) => {
-        google.script.run
-          .withSuccessHandler(raw => {
-            const data = prime(raw);
-            backendSincronizadoNaSessao = true;
-            resolve({ data, source: 'backend' });
-          })
-          .withFailureHandler(err => {
-            if (staleOnError && stale) {
-              resolve({ data: stale, source: 'stale' });
-              return;
-            }
-            reject(err || new Error('Falha ao carregar validacoes'));
-          })
-          .obterValidacoes();
+      inFlightPromise = window.AppRequest.call('obterValidacoes', [], {
+        context: 'validacoes.load',
+        errorMessage: 'Falha ao carregar validacoes'
+      }).then(raw => {
+        const data = prime(raw);
+        backendSincronizadoNaSessao = true;
+        return { data, source: 'backend' };
+      }).catch(err => {
+        if (staleOnError && stale) {
+          return { data: stale, source: 'stale' };
+        }
+        throw err || new Error('Falha ao carregar validacoes');
       }).finally(() => {
         inFlightPromise = null;
       });
@@ -878,11 +991,14 @@
       }
 
       inFlight = new Promise(resolve => {
-        google.script.run
-          .withSuccessHandler(raw => {
+        window.AppRequest.call('obterContextoUsuario', [force], {
+          context: 'user.access.load',
+          errorMessage: 'Falha ao validar perfil de acesso.'
+        })
+          .then(raw => {
             resolve(aplicar(raw || {}));
           })
-          .withFailureHandler(err => {
+          .catch(err => {
             const mensagem = String(err?.message || err || '').trim();
             resolve(aplicar({
               can_read: false,
@@ -890,8 +1006,7 @@
               role: 'viewer',
               motivo: mensagem || 'Falha ao validar perfil de acesso.'
             }));
-          })
-          .obterContextoUsuario(force);
+          });
       }).finally(() => {
         inFlight = null;
       });
@@ -2277,6 +2392,98 @@
     fecharPainelFiltroCompras();
   }
 
+  function createBootGateHelper() {
+    const DEFAULT_TIMEOUT_MS = 2400;
+    const DEFAULT_POLL_MS = 60;
+
+    function dashboardPronto() {
+      const cards = document.querySelectorAll('#dashboardCards .dash-card');
+      if (cards.length > 0) return true;
+      const refs = [
+        document.getElementById('dashGastoPorTipo'),
+        document.getElementById('dashGastoPorCategoria'),
+        document.getElementById('dashGastoPorFornecedor'),
+        document.getElementById('dashEstoquePorTipo'),
+        document.getElementById('dashEvolucaoMensal')
+      ];
+      return refs.some(el => String(el?.textContent || '').trim() !== '');
+    }
+
+    function abaPronta(tab) {
+      const aba = normalizarNomeAba(tab);
+      if (!aba) return true;
+
+      if (aba === 'dashboard') return dashboardPronto();
+      if (aba === 'despesas') return !!window.DespesasController?.isLoaded?.();
+      if (aba === 'estoque') return !!window.EstoqueStore?.isLoaded?.();
+      if (aba === 'compras') return !!window.ComprasStore?.isLoaded?.();
+      if (aba === 'vendas') return !!window.VendasStore?.isLoaded?.();
+      if (aba === 'produtos') return !!window.ProdutosStore?.isLoaded?.();
+      if (aba === 'producao') return !!window.ProducaoStore?.isLoaded?.();
+
+      return true;
+    }
+
+    function waitForTabReady(tab, options = {}) {
+      const aba = normalizarNomeAba(tab);
+      if (!aba) return Promise.resolve(true);
+      if (abaPronta(aba)) return Promise.resolve(true);
+
+      const timeoutMs = Number(options.timeoutMs) > 0
+        ? Number(options.timeoutMs)
+        : DEFAULT_TIMEOUT_MS;
+      const pollMs = Number(options.pollMs) > 0
+        ? Number(options.pollMs)
+        : DEFAULT_POLL_MS;
+      const startedAt = Date.now();
+
+      return new Promise(resolve => {
+        let resolved = false;
+        let timer = null;
+
+        const finalizar = ok => {
+          if (resolved) return;
+          resolved = true;
+          if (timer) {
+            clearTimeout(timer);
+            timer = null;
+          }
+          window.removeEventListener('app:store:loaded', onStoreLoaded);
+          resolve(!!ok);
+        };
+
+        const onStoreLoaded = evento => {
+          const tabEvento = String(evento?.detail?.tab || '').trim().toLowerCase();
+          if (tabEvento !== aba) return;
+          if (abaPronta(aba)) {
+            finalizar(true);
+          }
+        };
+
+        const tick = () => {
+          if (abaPronta(aba)) {
+            finalizar(true);
+            return;
+          }
+          if ((Date.now() - startedAt) >= timeoutMs) {
+            finalizar(false);
+            return;
+          }
+          timer = setTimeout(tick, pollMs);
+        };
+
+        window.addEventListener('app:store:loaded', onStoreLoaded);
+        tick();
+      });
+    }
+
+    return {
+      waitForTabReady
+    };
+  }
+
+  window.AppBootGate = window.AppBootGate || createBootGateHelper();
+
   function finalizarBootVisual() {
     if (!document?.body) return;
     document.body.classList.remove('app-booting');
@@ -2879,13 +3086,18 @@
       registrarListenersFiltrosStore();
       initModalA11y();
       initCampoAjudaA11y();
-      trocarAba(lerUltimaAba() || ABA_INICIAL_PADRAO);
+      const abaInicial = lerUltimaAba() || ABA_INICIAL_PADRAO;
+      trocarAba(abaInicial);
       initBuscaEFiltroEstoque();
       initBuscaEFiltroCompras();
       initBuscaVendas();
       initBuscaDespesas();
       initBuscaProdutos();
       initBuscaProducao();
+
+      if (window.AppBootGate?.waitForTabReady) {
+        await window.AppBootGate.waitForTabReady(abaInicial, { timeoutMs: 2600 });
+      }
     } finally {
       finalizarBootVisual();
     }

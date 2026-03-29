@@ -189,6 +189,10 @@ function rowsToObjects(sheet) {
   });
 }
 
+function normalizeIdValue(value) {
+  return String(value ?? '').trim();
+}
+
 function insert(sheetName, payload, schema) {
   if (typeof assertCanWrite === 'function') {
     assertCanWrite(`Criacao na aba ${String(sheetName || '').trim().toUpperCase() || 'SEM_NOME'}`);
@@ -229,11 +233,13 @@ function updateById(sheetName, idField, id, payload, schema) {
   const data = sheet.getDataRange().getValues();
   const headers = data[0];
   const idCol = headers.indexOf(idField);
+  const idAlvo = normalizeIdValue(id);
 
-  if (idCol === -1) return false;
+  if (idCol === -1 || !idAlvo) return false;
 
   for (let i = 1; i < data.length; i++) {
-    if (data[i][idCol] === id) {
+    const idLinha = normalizeIdValue(data[i][idCol]);
+    if (idLinha === idAlvo) {
       const headerMap = getHeaderMap(sheet);
       const row = [...data[i]];
       let alterou = false;

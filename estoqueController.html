@@ -177,7 +177,7 @@
     function carregarEstoque(forcarRecarregar = false, onDone) {
       const exibindoCache = !forcarRecarregar && hidratarEstoqueDoCache();
       const perf = perfStart('rpc.estoque.listarEstoque');
-      google.script.run
+      window.AppRequest.runner()
         .withSuccessHandler(lista => {
           if (window.AppRuntime?.setReadOnly) {
             window.AppRuntime.setReadOnly(false);
@@ -340,7 +340,7 @@
         EstoqueUI.renderLista(EstoqueStore.get());
         finalizarUX();
 
-        google.script.run
+        window.AppRequest.runner()
           .withFailureHandler(() => {
             EstoqueStore.update(idAtual, snapshot);
             EstoqueUI.renderLista(EstoqueStore.get());
@@ -370,7 +370,7 @@
       finalizarUX();
       mostrarToast('Salvando...');
 
-      google.script.run
+      window.AppRequest.runner()
         .withFailureHandler(() => {
           EstoqueStore.remove(tempId);
           EstoqueUI.renderLista(EstoqueStore.get());
@@ -448,7 +448,7 @@
       EstoqueUI.renderLista(EstoqueStore.get());
       mostrarToast('Item removido');
 
-      google.script.run
+      window.AppRequest.runner()
         .withFailureHandler(() => {
           EstoqueStore.add(snapshot);
           EstoqueUI.renderLista(EstoqueStore.get());

@@ -112,7 +112,7 @@
     }
 
     function carregarEstoqueVendavel(onDone) {
-      google.script.run
+      window.AppRequest.runner()
         .withSuccessHandler(lista => {
           VendasUI.renderEstoqueVendavel?.(Array.isArray(lista) ? lista : []);
           if (typeof onDone === 'function') onDone();
@@ -142,7 +142,7 @@
 
     function carregarVendas(forcarRecarregar = false, onDone) {
       const exibindoCache = !forcarRecarregar && hidratarVendasDoCache();
-      google.script.run
+      window.AppRequest.runner()
         .withSuccessHandler(lista => {
           if (window.AppRuntime?.setReadOnly) {
             window.AppRuntime.setReadOnly(false);
@@ -235,7 +235,7 @@
         renderListaAtual();
         finalizarUX();
 
-        google.script.run
+        window.AppRequest.runner()
           .withFailureHandler(err => {
             VendasStore.update(idAtual, snapshot);
             renderListaAtual();
@@ -260,7 +260,7 @@
       finalizarUX();
       mostrarToast('Salvando...');
 
-      google.script.run
+      window.AppRequest.runner()
         .withFailureHandler(err => {
           VendasStore.remove(tempId);
           renderListaAtual();
@@ -332,7 +332,7 @@
       mostrarToast('Venda removida');
       invalidarCacheDashboardPorImpacto(snapshot);
 
-      google.script.run
+      window.AppRequest.runner()
         .withFailureHandler(err => {
           if (snapshot) VendasStore.add(snapshot);
           renderListaAtual();
@@ -411,7 +411,7 @@
       VendasUI.fecharModalRecebimento();
       recebimentoVendaId = null;
 
-      google.script.run
+      window.AppRequest.runner()
         .withFailureHandler(err => {
           salvandoRecebimento = false;
           setBloqueioMutacaoRecebimento(false);
