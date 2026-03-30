@@ -929,6 +929,8 @@
     overflow: hidden;
     margin: -6px 0 12px 0;
     padding-bottom: 2px;
+    align-content: flex-start;
+    min-height: 84px;
   }
 
   .tipo-filtro-linha button {
@@ -947,6 +949,69 @@
     border-color: #111;
     color: #fff;
   }
+
+  .tipo-filtro-linha.tipo-filtro-linha-loading {
+    pointer-events: none;
+  }
+
+  .tipo-filtro-placeholder {
+    display: inline-block;
+    height: 32px;
+    border-radius: 999px;
+    border: 1px solid #d8dde6;
+    background: linear-gradient(
+      90deg,
+      rgba(232, 236, 244, 0.95) 0%,
+      rgba(246, 248, 252, 0.98) 48%,
+      rgba(232, 236, 244, 0.95) 100%
+    );
+    background-size: 180% 100%;
+    animation: tipo-filtro-shimmer 1.2s linear infinite;
+  }
+
+  .tipo-filtro-placeholder.p1 { width: 72px; }
+  .tipo-filtro-placeholder.p2 { width: 108px; }
+  .tipo-filtro-placeholder.p3 { width: 96px; }
+  .tipo-filtro-placeholder.p4 { width: 84px; }
+  .tipo-filtro-placeholder.p5 { width: 92px; }
+
+  @keyframes tipo-filtro-shimmer {
+    from { background-position: 100% 0; }
+    to { background-position: -100% 0; }
+  }
+
+  .lista-estavel-topo {
+    min-height: 200px;
+  }
+
+  .lista-estavel-topo.lista-loading {
+    pointer-events: none;
+  }
+
+  .card.card-skeleton {
+    cursor: default;
+  }
+
+  .card-skeleton-line {
+    height: 11px;
+    border-radius: 999px;
+    background: linear-gradient(
+      90deg,
+      rgba(232, 236, 244, 0.95) 0%,
+      rgba(246, 248, 252, 0.98) 48%,
+      rgba(232, 236, 244, 0.95) 100%
+    );
+    background-size: 180% 100%;
+    animation: tipo-filtro-shimmer 1.2s linear infinite;
+  }
+
+  .card-skeleton-line + .card-skeleton-line {
+    margin-top: 8px;
+  }
+
+  .card-skeleton-line.w72 { width: 72%; }
+  .card-skeleton-line.w56 { width: 56%; }
+  .card-skeleton-line.w84 { width: 84%; }
 
   .lista-controles {
     display: flex;
@@ -971,6 +1036,10 @@
 
     .despesas-filtros-grid {
       grid-template-columns: 1fr;
+    }
+
+    .tipo-filtro-linha {
+      min-height: 72px;
     }
 
     .despesa-card-meta {

@@ -1084,6 +1084,41 @@
       });
     }
 
+    function renderFiltroRapidoPlaceholder() {
+      const { filtroTipoRapido } = el();
+      if (!filtroTipoRapido) return;
+      if (filtroTipoRapido.querySelector('button[data-tipo]')) return;
+      filtroTipoRapido.classList.add('tipo-filtro-linha-loading');
+      filtroTipoRapido.setAttribute('aria-busy', 'true');
+      filtroTipoRapido.innerHTML = `
+        <span class="tipo-filtro-placeholder p1" aria-hidden="true"></span>
+        <span class="tipo-filtro-placeholder p2" aria-hidden="true"></span>
+        <span class="tipo-filtro-placeholder p3" aria-hidden="true"></span>
+        <span class="tipo-filtro-placeholder p4" aria-hidden="true"></span>
+        <span class="tipo-filtro-placeholder p5" aria-hidden="true"></span>
+      `;
+    }
+
+    function renderListaPlaceholder() {
+      const { lista } = el();
+      if (!lista) return;
+      if (lista.children.length > 0) return;
+      lista.classList.add('lista-loading');
+      lista.setAttribute('aria-busy', 'true');
+      lista.innerHTML = `
+        <div class="card card-skeleton" aria-hidden="true">
+          <div class="card-skeleton-line w72"></div>
+          <div class="card-skeleton-line w56"></div>
+          <div class="card-skeleton-line w84"></div>
+        </div>
+        <div class="card card-skeleton" aria-hidden="true">
+          <div class="card-skeleton-line w72"></div>
+          <div class="card-skeleton-line w56"></div>
+          <div class="card-skeleton-line w84"></div>
+        </div>
+      `;
+    }
+
     function renderFiltroRapidoTipos(lista) {
       const { filtroTipoRapido, filtroTipo } = el();
       if (!filtroTipoRapido) return;
@@ -1109,6 +1144,8 @@
 
       filtroTipoRapido.appendChild(criarBotao('Todos', ''));
       tipos.forEach(tipo => filtroTipoRapido.appendChild(criarBotao(tipo, tipo)));
+      filtroTipoRapido.classList.remove('tipo-filtro-linha-loading');
+      filtroTipoRapido.setAttribute('aria-busy', 'false');
       marcarTipoRapidoAtivo(filtroTipo ? filtroTipo.value : '');
     }
 
@@ -1118,6 +1155,8 @@
     function renderLista(itens) {
       const { lista, listaControles } = el();
       if (!lista) return;
+      lista.classList.remove('lista-loading');
+      lista.setAttribute('aria-busy', 'false');
       const tsInicio = performance.now();
 
       const perf = window.AppPerf?.start('ui.compras.renderLista', {
@@ -1339,6 +1378,9 @@
     /* =========================
        API PUBLICA
     ========================== */
+    renderFiltroRapidoPlaceholder();
+    renderListaPlaceholder();
+
     return {
       abrirFormularioNovo,
       mostrarFormulario,
