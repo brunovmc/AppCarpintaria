@@ -136,6 +136,7 @@
         })
         .catch(() => {
           perfEnd(perf, { ok: false });
+          EstoqueUI.renderFiltroRapidoTipos?.([]);
           mostrarToast('Falha ao carregar validacoes', 'erro');
         });
     }
