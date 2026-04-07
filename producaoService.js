@@ -15,6 +15,8 @@ const PRODUCAO_SCHEMA = [
   'receita_id',
   'nome_ordem',
   'qtd_planejada',
+  'qtd_produzida_acumulada',
+  'qtd_restante',
   'status',
   'data_inicio',
   'data_prevista_termino',
@@ -22,6 +24,7 @@ const PRODUCAO_SCHEMA = [
   'observacao',
   'estoque_atualizado',
   'data_estoque_atualizado',
+  'data_ultima_movimentacao_estoque',
   'ativo',
   'criado_em'
 ];
@@ -350,6 +353,25 @@ function listarProducao(forcarRecarregar) {
       const prod = produtosMap[i.produto_id] || {};
       const receita = receitasMap[i.receita_id] || {};
       const qtdPlanejada = parseNumeroBR(i.qtd_planejada);
+      const estoqueAtualizado = String(i.estoque_atualizado).toLowerCase() === 'true';
+      let qtdProduzidaAcumulada = parseNumeroBR(i.qtd_produzida_acumulada);
+      if (qtdProduzidaAcumulada <= 0 && estoqueAtualizado && qtdPlanejada > 0) {
+        qtdProduzidaAcumulada = qtdPlanejada;
+      }
+      if (qtdProduzidaAcumulada < 0) {
+        qtdProduzidaAcumulada = 0;
+      }
+
+      const qtdRestanteRaw = String(i.qtd_restante || '').trim();
+      const qtdRestanteInformada = parseNumeroBR(qtdRestanteRaw);
+      let qtdRestante = qtdRestanteRaw !== ''
+        ? Math.max(0, qtdRestanteInformada)
+        : Math.max(qtdPlanejada - qtdProduzidaAcumulada, 0);
+      if (qtdRestante < 0) qtdRestante = 0;
+      if (qtdRestante <= 0.009) {
+        qtdRestante = 0;
+      }
+
       const saidasBaseReceita = Array.isArray(saidasReceitaMap[i.receita_id])
         ? saidasReceitaMap[i.receita_id]
         : [];
@@ -418,11 +440,13 @@ function listarProducao(forcarRecarregar) {
         unidade_produto: prod.unidade_produto || '',
         receita_nome: receita.nome_receita || '',
         qtd_planejada: qtdPlanejada,
+        qtd_produzida_acumulada: Number(qtdProduzidaAcumulada.toFixed(6)),
+        qtd_restante: Number(qtdRestante.toFixed(6)),
         saidas_previstas: saidasPrevistas,
         saidas_previstas_tipos: saidasPrevistas.length,
         saidas_previstas_total: parseNumeroBR(totalSaidasPrevistas),
         valor_previsto_venda_pecas: Number(valorPrevistoVendaPecas.toFixed(2)),
-        estoque_atualizado: String(i.estoque_atualizado).toLowerCase() === 'true',
+        estoque_atualizado: estoqueAtualizado,
         criado_em: i.criado_em
           ? formatDateSafe(i.criado_em, 'yyyy-MM-dd HH:mm')
           : '',
@@ -438,6 +462,9 @@ function listarProducao(forcarRecarregar) {
         data_estoque_atualizado: i.data_estoque_atualizado
           ? formatDateSafe(i.data_estoque_atualizado, 'yyyy-MM-dd')
           : '',
+        data_ultima_movimentacao_estoque: i.data_ultima_movimentacao_estoque
+          ? formatDateSafe(i.data_ultima_movimentacao_estoque, 'yyyy-MM-dd')
+          : '',
         etapas: etapasMap[i.producao_id] || []
       };
     });
@@ -448,13 +475,17 @@ function listarProducao(forcarRecarregar) {
 
 function criarProducao(payload) {
   assertCanWriteProducao('Criacao de producao');
+  const qtdPlanejada = parseNumeroBR(payload.qtd_planejada);
   const novo = {
     ...payload,
     producao_id: gerarId('OP'),
     status: payload.status || 'Em planejamento',
-    qtd_planejada: parseNumeroBR(payload.qtd_planejada),
+    qtd_planejada: qtdPlanejada,
+    qtd_produzida_acumulada: 0,
+    qtd_restante: qtdPlanejada > 0 ? qtdPlanejada : 0,
     estoque_atualizado: false,
     data_estoque_atualizado: '',
+    data_ultima_movimentacao_estoque: '',
     ativo: true,
     criado_em: new Date()
   };
@@ -529,17 +560,35 @@ function atualizarProducao(id, payload) {
   const atual = rows.find(i => i.producao_id === id);
   if (!atual) return false;
 
+  const payloadPersistencia = { ...(payload || {}) };
+  if (Object.prototype.hasOwnProperty.call(payloadPersistencia, 'qtd_planejada')) {
+    payloadPersistencia.qtd_planejada = parseNumeroBR(payloadPersistencia.qtd_planejada);
+  }
+
   const dadosAtualizados = {
     ...atual,
-    ...payload
+    ...payloadPersistencia
   };
 
-  const mudouReceita = Object.prototype.hasOwnProperty.call(payload, 'receita_id') &&
-    payload.receita_id !== atual.receita_id;
-  const mudouProduto = Object.prototype.hasOwnProperty.call(payload, 'produto_id') &&
-    payload.produto_id !== atual.produto_id;
-  const mudouQtd = Object.prototype.hasOwnProperty.call(payload, 'qtd_planejada') &&
-    parseNumeroBR(payload.qtd_planejada) !== parseNumeroBR(atual.qtd_planejada);
+  const mudouReceita = Object.prototype.hasOwnProperty.call(payloadPersistencia, 'receita_id') &&
+    payloadPersistencia.receita_id !== atual.receita_id;
+  const mudouProduto = Object.prototype.hasOwnProperty.call(payloadPersistencia, 'produto_id') &&
+    payloadPersistencia.produto_id !== atual.produto_id;
+  const mudouQtd = Object.prototype.hasOwnProperty.call(payloadPersistencia, 'qtd_planejada') &&
+    parseNumeroBR(payloadPersistencia.qtd_planejada) !== parseNumeroBR(atual.qtd_planejada);
+
+  if (Object.prototype.hasOwnProperty.call(payloadPersistencia, 'qtd_planejada')) {
+    const qtdPlanejadaAtualizada = parseNumeroBR(payloadPersistencia.qtd_planejada);
+    let qtdProduzidaAcumuladaAtual = parseNumeroBR(atual.qtd_produzida_acumulada);
+    if (qtdProduzidaAcumuladaAtual <= 0 && String(atual.estoque_atualizado).toLowerCase() === 'true') {
+      qtdProduzidaAcumuladaAtual = parseNumeroBR(atual.qtd_planejada);
+    }
+    if (qtdProduzidaAcumuladaAtual < 0) qtdProduzidaAcumuladaAtual = 0;
+
+    const qtdRestanteAtualizada = Math.max(0, qtdPlanejadaAtualizada - qtdProduzidaAcumuladaAtual);
+    payloadPersistencia.qtd_restante = Number(qtdRestanteAtualizada.toFixed(6));
+    payloadPersistencia.estoque_atualizado = qtdRestanteAtualizada <= 0.009;
+  }
 
   let materiaisRegerados = null;
   if (mudouReceita || mudouProduto || mudouQtd) {
@@ -557,7 +606,7 @@ function atualizarProducao(id, payload) {
     ABA_PRODUCAO,
     'producao_id',
     id,
-    payload,
+    payloadPersistencia,
     PRODUCAO_SCHEMA
   );
 
@@ -2123,7 +2172,7 @@ function lancarSaidasProducaoNoEstoque(producaoId, saidasAgrupadas, estoqueRows,
   return { atualizados, lotesCriados };
 }
 
-function consumirEstoque(producaoId, itensParaBaixar) {
+function consumirEstoque(producaoId, itensParaBaixar, opcoes) {
   assertCanWriteProducao('Consumo de estoque da producao');
   const lock = LockService.getScriptLock();
   lock.waitLock(10000);
@@ -2132,6 +2181,9 @@ function consumirEstoque(producaoId, itensParaBaixar) {
     if (!producaoId) {
       throw new Error('Producao invalida');
     }
+
+    const cfg = opcoes || {};
+    const bypassEntradas = !!cfg.bypass_entradas;
 
     const sheetProducao = getDataSpreadsheet().getSheetByName(ABA_PRODUCAO);
     if (!sheetProducao) {
@@ -2148,14 +2200,32 @@ function consumirEstoque(producaoId, itensParaBaixar) {
       throw new Error('Receita nao informada');
     }
 
-    const status = String(ordem.status || '');
-    if (status !== 'Concluido' && status !== 'Concluida') {
-      throw new Error('Atualizacao de estoque liberada apenas quando status for Concluido');
+    const qtdPlanejada = parseNumeroBR(ordem.qtd_planejada);
+    if (qtdPlanejada <= 0) {
+      throw new Error('Quantidade planejada invalida');
     }
 
-    if (String(ordem.estoque_atualizado).toLowerCase() === 'true') {
-      throw new Error('Estoque ja atualizado para esta producao');
+    let qtdProduzidaAcumuladaAtual = parseNumeroBR(ordem.qtd_produzida_acumulada);
+    if (qtdProduzidaAcumuladaAtual <= 0 && String(ordem.estoque_atualizado).toLowerCase() === 'true') {
+      qtdProduzidaAcumuladaAtual = qtdPlanejada;
     }
+    if (qtdProduzidaAcumuladaAtual < 0) {
+      qtdProduzidaAcumuladaAtual = 0;
+    }
+
+    const qtdRestanteAtual = Math.max(0, qtdPlanejada - qtdProduzidaAcumuladaAtual);
+    if (qtdRestanteAtual <= 0.009) {
+      throw new Error('Quantidade planejada ja foi totalmente produzida');
+    }
+
+    let qtdProduzidaLote = parseNumeroBR(cfg.qtd_produzida);
+    if (!qtdProduzidaLote || qtdProduzidaLote <= 0) {
+      qtdProduzidaLote = qtdRestanteAtual;
+    }
+    if (qtdProduzidaLote > qtdRestanteAtual + 0.000001) {
+      throw new Error(`Quantidade do lote maior que o restante da OP (${Number(qtdRestanteAtual.toFixed(2))}).`);
+    }
+    qtdProduzidaLote = Number(qtdProduzidaLote.toFixed(6));
 
     const sheetEstoque = getDataSpreadsheet().getSheetByName(ABA_ESTOQUE);
     if (!sheetEstoque) {
@@ -2170,19 +2240,21 @@ function consumirEstoque(producaoId, itensParaBaixar) {
         estoqueMapAtivo[i.ID] = i;
       });
 
-    const pendenciasVinculo = listarPendenciasVinculoEntradaProducao(producaoId, estoqueMapAtivo);
-    if (pendenciasVinculo.length > 0) {
-      const materiais = recalcularMateriaisPrevistosFromVinculos(producaoId);
-      return {
-        requer_vinculos: true,
-        pendencias_vinculo: pendenciasVinculo,
-        vinculos: listarVinculosMateriaisProducao(producaoId),
-        materiaisPrevistos: materiais.itens || [],
-        custoPrevisto: parseNumeroBR(materiais.custoPrevisto)
-      };
+    if (!bypassEntradas) {
+      const pendenciasVinculo = listarPendenciasVinculoEntradaProducao(producaoId, estoqueMapAtivo);
+      if (pendenciasVinculo.length > 0) {
+        const materiais = recalcularMateriaisPrevistosFromVinculos(producaoId);
+        return {
+          requer_vinculos: true,
+          pendencias_vinculo: pendenciasVinculo,
+          vinculos: listarVinculosMateriaisProducao(producaoId),
+          materiaisPrevistos: materiais.itens || [],
+          custoPrevisto: parseNumeroBR(materiais.custoPrevisto)
+        };
+      }
     }
 
-    const itens = Array.isArray(itensParaBaixar) ? itensParaBaixar : [];
+    const itens = bypassEntradas ? [] : (Array.isArray(itensParaBaixar) ? itensParaBaixar : []);
     const itensMap = {};
     itens.forEach(i => {
       const estoqueId = i && i.estoque_id ? String(i.estoque_id) : '';
@@ -2193,14 +2265,9 @@ function consumirEstoque(producaoId, itensParaBaixar) {
 
     const itensValidos = Object.keys(itensMap).map(estoqueId => ({
       estoque_id: estoqueId,
-      quantidade: itensMap[estoqueId]
+      quantidade: Number(itensMap[estoqueId].toFixed(6))
     }));
 
-    if (itensValidos.length === 0) {
-      throw new Error('Nenhum item para baixar');
-    }
-
-    // Obriga informar consumo para todos os materiais previstos da ordem.
     const previstosResp = obterMateriaisPrevistosProducao(producaoId);
     const previstos = Array.isArray(previstosResp && previstosResp.itens)
       ? previstosResp.itens
@@ -2213,22 +2280,19 @@ function consumirEstoque(producaoId, itensParaBaixar) {
       previstosMap[estoqueId] = (previstosMap[estoqueId] || 0) + qtd;
     });
 
-    const faltantes = Object.keys(previstosMap).filter(estoqueId => !itensMap[estoqueId]);
-    if (faltantes.length > 0) {
-      const nomes = faltantes.map(id => {
-        const it = estoqueMapAtivo[id];
-        return it ? (it.item || id) : id;
-      });
-      throw new Error(`Consumo incompleto. Informe todos os materiais previstos: ${nomes.join(', ')}`);
+    if (!bypassEntradas && Object.keys(previstosMap).length > 0 && itensValidos.length === 0) {
+      throw new Error('Nenhum item de entrada informado para baixa.');
     }
 
-    const naoPrevistos = Object.keys(itensMap).filter(estoqueId => !previstosMap[estoqueId]);
-    if (naoPrevistos.length > 0) {
-      const nomes = naoPrevistos.map(id => {
-        const it = estoqueMapAtivo[id];
-        return it ? (it.item || id) : id;
-      });
-      throw new Error(`Itens nao previstos informados para baixa: ${nomes.join(', ')}`);
+    if (!bypassEntradas) {
+      const naoPrevistos = Object.keys(itensMap).filter(estoqueId => !previstosMap[estoqueId]);
+      if (naoPrevistos.length > 0) {
+        const nomes = naoPrevistos.map(id => {
+          const it = estoqueMapAtivo[id];
+          return it ? (it.item || id) : id;
+        });
+        throw new Error(`Itens nao previstos informados para baixa: ${nomes.join(', ')}`);
+      }
     }
 
     itensValidos.forEach(i => {
@@ -2245,51 +2309,53 @@ function consumirEstoque(producaoId, itensParaBaixar) {
     const consumoRegistrado = [];
     const estoqueAtualizados = [];
 
-    itensValidos.forEach(i => {
-      const estoqueItem = estoqueMapAtivo[i.estoque_id];
-      const saldo = parseNumeroBR(estoqueItem.quantidade);
-      const novoSaldo = saldo - i.quantidade;
+    if (!bypassEntradas) {
+      itensValidos.forEach(i => {
+        const estoqueItem = estoqueMapAtivo[i.estoque_id];
+        const saldo = parseNumeroBR(estoqueItem.quantidade);
+        const novoSaldo = Number((saldo - i.quantidade).toFixed(6));
 
-      updateById(
-        ABA_ESTOQUE,
-        'ID',
-        i.estoque_id,
-        { quantidade: novoSaldo },
-        ESTOQUE_SCHEMA
-      );
+        updateById(
+          ABA_ESTOQUE,
+          'ID',
+          i.estoque_id,
+          { quantidade: novoSaldo },
+          ESTOQUE_SCHEMA
+        );
 
-      estoqueMapAtivo[i.estoque_id].quantidade = novoSaldo;
+        estoqueMapAtivo[i.estoque_id].quantidade = novoSaldo;
 
-      estoqueAtualizados.push({
-        ID: i.estoque_id,
-        quantidade: novoSaldo
+        estoqueAtualizados.push({
+          ID: i.estoque_id,
+          quantidade: novoSaldo
+        });
+
+        const valorUnit = parseNumeroBR(estoqueItem.custo_unitario || estoqueItem.valor_unit);
+        const total = Number((i.quantidade * valorUnit).toFixed(6));
+
+        const consumo = {
+          id: gerarId('PC'),
+          producao_id: producaoId,
+          estoque_id: i.estoque_id,
+          quantidade_consumida: i.quantidade,
+          valor_unit_snapshot: valorUnit,
+          total_snapshot: total,
+          criado_em: new Date(),
+          ativo: true
+        };
+
+        insert(ABA_PRODUCAO_CONSUMO, consumo, PRODUCAO_CONSUMO_SCHEMA);
+        consumoRegistrado.push(consumo);
       });
 
-      const valorUnit = parseNumeroBR(estoqueItem.custo_unitario || estoqueItem.valor_unit);
-      const total = i.quantidade * valorUnit;
-
-      const consumo = {
-        id: gerarId('PC'),
-        producao_id: producaoId,
-        estoque_id: i.estoque_id,
-        quantidade_consumida: i.quantidade,
-        valor_unit_snapshot: valorUnit,
-        total_snapshot: total,
-        criado_em: new Date(),
-        ativo: true
-      };
-
-      insert(ABA_PRODUCAO_CONSUMO, consumo, PRODUCAO_CONSUMO_SCHEMA);
-      consumoRegistrado.push(consumo);
-    });
-
-    aplicarBaixaMateriaisExtras(producaoId, itensValidos);
-    atualizarConsumoVinculosProducao(producaoId, itensValidos);
+      aplicarBaixaMateriaisExtras(producaoId, itensValidos);
+      atualizarConsumoVinculosProducao(producaoId, itensValidos);
+    }
 
     const saidasExplodidas = explodirSaidasReceitaDetalhada(
       ordem.produto_id,
       ordem.receita_id,
-      parseNumeroBR(ordem.qtd_planejada)
+      qtdProduzidaLote
     );
     const saidasAgrupadas = agruparSaidasReceitaParaEstoque(saidasExplodidas.itens || []);
     if (saidasAgrupadas.length === 0) {
@@ -2308,15 +2374,40 @@ function consumirEstoque(producaoId, itensParaBaixar) {
     );
     estoqueAtualizados.push(...(resultadoSaidas.atualizados || []));
 
+    const qtdProduzidaAcumuladaNova = Number((qtdProduzidaAcumuladaAtual + qtdProduzidaLote).toFixed(6));
+    const qtdRestanteNova = Math.max(0, Number((qtdPlanejada - qtdProduzidaAcumuladaNova).toFixed(6)));
+    const concluiuOP = qtdRestanteNova <= 0.009;
     const dataAtualizacao = new Date();
+    const statusAtual = String(ordem.status || '').trim();
+    const statusAtualNorm = normalizarTextoSemAcentoProducao(statusAtual);
+    const statusNovo = concluiuOP
+      ? 'Concluido'
+      : (
+        statusAtualNorm === 'EM PLANEJAMENTO' ||
+        statusAtualNorm === 'CONCLUIDO' ||
+        statusAtualNorm === 'CONCLUIDA' ||
+        !statusAtual
+          ? 'Em producao'
+          : statusAtual
+      );
+
+    const payloadAtualizacaoOP = {
+      qtd_produzida_acumulada: qtdProduzidaAcumuladaNova,
+      qtd_restante: Number(qtdRestanteNova.toFixed(6)),
+      estoque_atualizado: concluiuOP,
+      data_estoque_atualizado: concluiuOP ? dataAtualizacao : '',
+      data_ultima_movimentacao_estoque: dataAtualizacao,
+      status: statusNovo
+    };
+    if (concluiuOP) {
+      payloadAtualizacaoOP.data_conclusao = ordem.data_conclusao || dataAtualizacao;
+    }
+
     updateById(
       ABA_PRODUCAO,
       'producao_id',
       producaoId,
-      {
-        estoque_atualizado: true,
-        data_estoque_atualizado: dataAtualizacao
-      },
+      payloadAtualizacaoOP,
       PRODUCAO_SCHEMA
     );
 
@@ -2333,10 +2424,23 @@ function consumirEstoque(producaoId, itensParaBaixar) {
     return {
       estoqueAtualizados: estoqueAtualizadosUnicos,
       consumoRegistrado,
+      lote: {
+        qtd_produzida: qtdProduzidaLote,
+        bypass_entradas: bypassEntradas
+      },
       producaoAtualizada: {
         producao_id: producaoId,
-        estoque_atualizado: true,
-        data_estoque_atualizado: formatDateSafe(dataAtualizacao, 'yyyy-MM-dd')
+        status: statusNovo,
+        estoque_atualizado: concluiuOP,
+        qtd_produzida_acumulada: qtdProduzidaAcumuladaNova,
+        qtd_restante: Number(qtdRestanteNova.toFixed(6)),
+        data_conclusao: concluiuOP
+          ? formatDateSafe(payloadAtualizacaoOP.data_conclusao, 'yyyy-MM-dd')
+          : formatDateSafe(ordem.data_conclusao, 'yyyy-MM-dd'),
+        data_estoque_atualizado: concluiuOP
+          ? formatDateSafe(dataAtualizacao, 'yyyy-MM-dd')
+          : '',
+        data_ultima_movimentacao_estoque: formatDateSafe(dataAtualizacao, 'yyyy-MM-dd')
       },
       saidasLancadas: saidasAgrupadas,
       saidasLotes: resultadoSaidas.lotesCriados || []

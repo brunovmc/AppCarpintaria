@@ -39,6 +39,8 @@ const DESPESAS_GERAIS_SCHEMA = [
   'parcelas_detalhe_json',
   'fixo',
   'origem_fixo_id',
+  'fixo_encerrado_em',
+  'fixo_bloqueios_json',
   'observacao'
 ];
 
@@ -1109,6 +1111,197 @@ function normalizarPayloadDespesaGeral(payload) {
   };
 }
 
+function getSerieRootIdDespesaFixaFinanceiro(item) {
+  return String(item?.origem_fixo_id || item?.ID || '').trim();
+}
+
+function obterDataCompetenciaDespesaFinanceiro(item) {
+  return parseDataFinanceiro(item?.data_competencia)
+    || parseDataFinanceiro(item?.data_vencimento)
+    || parseDataFinanceiro(item?.criado_em)
+    || null;
+}
+
+function normalizarYmFinanceiro(valor) {
+  const raw = String(valor || '').trim();
+  if (!raw) return '';
+  if (/^\d{4}-\d{2}$/.test(raw)) return raw;
+  const d = parseDataFinanceiro(raw);
+  return d ? gerarChaveMesFinanceiro(d) : '';
+}
+
+function desserializarBloqueiosFixosYmFinanceiro(bruto) {
+  if (Array.isArray(bruto)) {
+    const unicos = {};
+    bruto.forEach(item => {
+      const ym = normalizarYmFinanceiro(item);
+      if (ym) unicos[ym] = true;
+    });
+    return Object.keys(unicos).sort();
+  }
+
+  const raw = String(bruto || '').trim();
+  if (!raw) return [];
+
+  let lista = [];
+  try {
+    const parsed = JSON.parse(raw);
+    lista = Array.isArray(parsed) ? parsed : [];
+  } catch (error) {
+    lista = raw.split(',').map(v => String(v || '').trim()).filter(Boolean);
+  }
+
+  const unicos = {};
+  lista.forEach(item => {
+    const ym = normalizarYmFinanceiro(item);
+    if (ym) unicos[ym] = true;
+  });
+  return Object.keys(unicos).sort();
+}
+
+function serializarBloqueiosFixosYmFinanceiro(listaYm) {
+  const lista = desserializarBloqueiosFixosYmFinanceiro(listaYm);
+  if (lista.length === 0) return '';
+  return JSON.stringify(lista);
+}
+
+function extrairMetaSerieDespesaFixaFinanceiro(rows, rootId) {
+  const alvo = String(rootId || '').trim();
+  const meta = {
+    encerrado_ym: '',
+    bloqueios_map: {}
+  };
+  if (!alvo) {
+    return {
+      encerrado_ym: '',
+      bloqueios_ym: [],
+      bloqueios_map: {}
+    };
+  }
+
+  (Array.isArray(rows) ? rows : []).forEach(item => {
+    if (getSerieRootIdDespesaFixaFinanceiro(item) !== alvo) return;
+
+    const encerradoYm = normalizarYmFinanceiro(item?.fixo_encerrado_em);
+    if (encerradoYm && (!meta.encerrado_ym || encerradoYm < meta.encerrado_ym)) {
+      meta.encerrado_ym = encerradoYm;
+    }
+
+    const bloqueios = desserializarBloqueiosFixosYmFinanceiro(item?.fixo_bloqueios_json);
+    bloqueios.forEach(ym => {
+      meta.bloqueios_map[ym] = true;
+    });
+  });
+
+  return {
+    encerrado_ym: meta.encerrado_ym,
+    bloqueios_ym: Object.keys(meta.bloqueios_map).sort(),
+    bloqueios_map: meta.bloqueios_map
+  };
+}
+
+function encerrarSerieDespesaFixaFinanceiro(sheet, rootId, competenciaCorte) {
+  const alvo = String(rootId || '').trim();
+  const corteYm = normalizarYmFinanceiro(competenciaCorte);
+  if (!sheet || !alvo || !corteYm) {
+    return { ok: false, atualizadas: 0, encerrado_ym: '' };
+  }
+
+  const rows = rowsToObjects(sheet);
+  const metaAtual = extrairMetaSerieDespesaFixaFinanceiro(rows, alvo);
+  const encerradoYm = metaAtual.encerrado_ym
+    ? (metaAtual.encerrado_ym < corteYm ? metaAtual.encerrado_ym : corteYm)
+    : corteYm;
+  const bloqueiosJson = serializarBloqueiosFixosYmFinanceiro(metaAtual.bloqueios_ym);
+
+  let atualizadas = 0;
+  rows.forEach(item => {
+    if (getSerieRootIdDespesaFixaFinanceiro(item) !== alvo) return;
+    const id = String(item.ID || '').trim();
+    if (!id) return;
+
+    const payload = {};
+    if (normalizarYmFinanceiro(item.fixo_encerrado_em) !== encerradoYm) {
+      payload.fixo_encerrado_em = encerradoYm;
+    }
+    if (String(item.fixo_bloqueios_json || '').trim() !== bloqueiosJson) {
+      payload.fixo_bloqueios_json = bloqueiosJson;
+    }
+
+    const dataComp = obterDataCompetenciaDespesaFinanceiro(item);
+    const ymComp = gerarChaveMesFinanceiro(dataComp);
+    const origemAtual = String(item.origem_fixo_id || '').trim();
+    if (ymComp && ymComp >= encerradoYm && (parseBooleanFinanceiro(item.fixo) || !!origemAtual)) {
+      payload.fixo = false;
+      payload.origem_fixo_id = '';
+    }
+
+    if (Object.keys(payload).length === 0) return;
+    const ok = updateById(
+      ABA_DESPESAS_GERAIS,
+      'ID',
+      id,
+      payload,
+      DESPESAS_GERAIS_SCHEMA
+    );
+    if (ok) atualizadas += 1;
+  });
+
+  return {
+    ok: true,
+    atualizadas,
+    encerrado_ym: encerradoYm,
+    bloqueios_ym: metaAtual.bloqueios_ym
+  };
+}
+
+function bloquearCompetenciaSerieDespesaFixaFinanceiro(sheet, rootId, competenciaBloqueada) {
+  const alvo = String(rootId || '').trim();
+  const bloqueioYm = normalizarYmFinanceiro(competenciaBloqueada);
+  if (!sheet || !alvo || !bloqueioYm) {
+    return { ok: false, atualizadas: 0, bloqueios_ym: [] };
+  }
+
+  const rows = rowsToObjects(sheet);
+  const metaAtual = extrairMetaSerieDespesaFixaFinanceiro(rows, alvo);
+  const bloqueiosMap = { ...metaAtual.bloqueios_map };
+  bloqueiosMap[bloqueioYm] = true;
+  const bloqueiosYm = Object.keys(bloqueiosMap).sort();
+  const bloqueiosJson = serializarBloqueiosFixosYmFinanceiro(bloqueiosYm);
+
+  let atualizadas = 0;
+  rows.forEach(item => {
+    if (getSerieRootIdDespesaFixaFinanceiro(item) !== alvo) return;
+    const id = String(item.ID || '').trim();
+    if (!id) return;
+
+    const payload = {};
+    if (String(item.fixo_bloqueios_json || '').trim() !== bloqueiosJson) {
+      payload.fixo_bloqueios_json = bloqueiosJson;
+    }
+    if (metaAtual.encerrado_ym && normalizarYmFinanceiro(item.fixo_encerrado_em) !== metaAtual.encerrado_ym) {
+      payload.fixo_encerrado_em = metaAtual.encerrado_ym;
+    }
+
+    if (Object.keys(payload).length === 0) return;
+    const ok = updateById(
+      ABA_DESPESAS_GERAIS,
+      'ID',
+      id,
+      payload,
+      DESPESAS_GERAIS_SCHEMA
+    );
+    if (ok) atualizadas += 1;
+  });
+
+  return {
+    ok: true,
+    atualizadas,
+    bloqueios_ym: bloqueiosYm,
+    encerrado_ym: metaAtual.encerrado_ym
+  };
+}
+
 function gerarRecorrenciaDespesasFixasFinanceiro() {
   const sheet = getSheet(ABA_DESPESAS_GERAIS);
   if (!sheet) {
@@ -1125,7 +1318,8 @@ function gerarRecorrenciaDespesasFixasFinanceiro() {
   }
 
   try {
-    const ativasFixas = rowsToObjects(sheet).filter(i => {
+    const todasDespesas = rowsToObjects(sheet);
+    const ativasFixas = todasDespesas.filter(i => {
       return String(i.ativo).toLowerCase() === 'true' && parseBooleanFinanceiro(i.fixo);
     });
     if (ativasFixas.length === 0) {
@@ -1142,12 +1336,10 @@ function gerarRecorrenciaDespesasFixasFinanceiro() {
 
     const grupos = {};
     ativasFixas.forEach(item => {
-      const rootId = String(item.origem_fixo_id || item.ID || '').trim();
+      const rootId = getSerieRootIdDespesaFixaFinanceiro(item);
       if (!rootId) return;
 
-      const dataCompetencia = parseDataFinanceiro(item.data_competencia)
-        || parseDataFinanceiro(item.data_vencimento)
-        || parseDataFinanceiro(item.criado_em);
+      const dataCompetencia = obterDataCompetenciaDespesaFinanceiro(item);
       if (!dataCompetencia) return;
 
       const ym = gerarChaveMesFinanceiro(dataCompetencia);
@@ -1170,42 +1362,67 @@ function gerarRecorrenciaDespesasFixasFinanceiro() {
         porYm[g.ym] = g;
       });
 
+      const metaSerie = extrairMetaSerieDespesaFixaFinanceiro(todasDespesas, rootId);
+      const encerradoYm = normalizarYmFinanceiro(metaSerie.encerrado_ym);
+      const bloqueiosYmMap = { ...(metaSerie.bloqueios_map || {}) };
+      const bloqueiosYmJson = serializarBloqueiosFixosYmFinanceiro(Object.keys(bloqueiosYmMap));
+
       let atual = grupo[grupo.length - 1];
+      let cursorCompetencia = atual.dataCompetencia;
+      let cursorYm = atual.ym;
+      let cursorVencimento = parseDataFinanceiro(atual.item.data_vencimento);
+      let templateItem = atual.item;
       let guard = 0;
-      while (atual && atual.ym < mesAlvoYm && guard < 60) {
+      while (cursorCompetencia && cursorYm < mesAlvoYm && guard < 60) {
         guard += 1;
-        const proximaCompetencia = adicionarMesesComAjusteFinanceiro(atual.dataCompetencia, 1);
+        const proximaCompetencia = adicionarMesesComAjusteFinanceiro(cursorCompetencia, 1);
         const proximoYm = gerarChaveMesFinanceiro(proximaCompetencia);
         if (!proximaCompetencia || !proximoYm) break;
 
+        const proximoVencimento = cursorVencimento
+          ? adicionarMesesComAjusteFinanceiro(cursorVencimento, 1)
+          : null;
+
         if (porYm[proximoYm]) {
           atual = porYm[proximoYm];
+          cursorCompetencia = atual.dataCompetencia;
+          cursorYm = atual.ym;
+          templateItem = atual.item;
+          cursorVencimento = parseDataFinanceiro(atual.item.data_vencimento) || proximoVencimento;
           continue;
         }
 
-        const vencimentoBase = parseDataFinanceiro(atual.item.data_vencimento);
-        const proximoVencimento = vencimentoBase
-          ? adicionarMesesComAjusteFinanceiro(vencimentoBase, 1)
-          : null;
+        if (encerradoYm && proximoYm >= encerradoYm) {
+          break;
+        }
+
+        if (bloqueiosYmMap[proximoYm]) {
+          cursorCompetencia = proximaCompetencia;
+          cursorYm = proximoYm;
+          cursorVencimento = proximoVencimento;
+          continue;
+        }
 
         const novo = {
           ID: gerarId('DES'),
-          descricao: String(atual.item.descricao || '').trim(),
-          categoria: String(atual.item.categoria || '').trim(),
-          fornecedor: String(atual.item.fornecedor || '').trim(),
-          pago_por: String(atual.item.pago_por || '').trim(),
-          valor_total: round2Financeiro(parseNumeroBR(atual.item.valor_total)),
+          descricao: String(templateItem.descricao || '').trim(),
+          categoria: String(templateItem.categoria || '').trim(),
+          fornecedor: String(templateItem.fornecedor || '').trim(),
+          pago_por: String(templateItem.pago_por || '').trim(),
+          valor_total: round2Financeiro(parseNumeroBR(templateItem.valor_total)),
           ativo: true,
           criado_em: new Date(),
           data_competencia: formatarDataYmdFinanceiro(proximaCompetencia),
           data_vencimento: proximoVencimento ? formatarDataYmdFinanceiro(proximoVencimento) : '',
           data_pagamento: '',
-          forma_pagamento: String(atual.item.forma_pagamento || '').trim(),
-          parcelas: normalizarParcelasFinanceiro(atual.item.parcelas, atual.item.forma_pagamento),
+          forma_pagamento: String(templateItem.forma_pagamento || '').trim(),
+          parcelas: normalizarParcelasFinanceiro(templateItem.parcelas, templateItem.forma_pagamento),
           parcelas_detalhe_json: '',
           fixo: true,
           origem_fixo_id: rootId,
-          observacao: String(atual.item.observacao || '').trim()
+          fixo_encerrado_em: encerradoYm || '',
+          fixo_bloqueios_json: bloqueiosYmJson,
+          observacao: String(templateItem.observacao || '').trim()
         };
 
         const ok = insert(ABA_DESPESAS_GERAIS, novo, DESPESAS_GERAIS_SCHEMA);
@@ -1218,12 +1435,16 @@ function gerarRecorrenciaDespesasFixasFinanceiro() {
 
         criados += 1;
         const novoRef = {
-          item: { ...atual.item, ...novo },
+          item: { ...templateItem, ...novo },
           dataCompetencia: proximaCompetencia,
           ym: proximoYm
         };
         porYm[proximoYm] = novoRef;
         atual = novoRef;
+        templateItem = novoRef.item;
+        cursorCompetencia = proximaCompetencia;
+        cursorYm = proximoYm;
+        cursorVencimento = proximoVencimento;
       }
     });
 
@@ -1306,7 +1527,9 @@ function criarDespesaGeral(payload) {
     ID: novoId,
     ativo: true,
     criado_em: new Date(),
-    origem_fixo_id: dados.fixo ? novoId : ''
+    origem_fixo_id: dados.fixo ? novoId : '',
+    fixo_encerrado_em: '',
+    fixo_bloqueios_json: ''
   };
 
   const ok = insert(ABA_DESPESAS_GERAIS, novo, DESPESAS_GERAIS_SCHEMA);
@@ -1335,6 +1558,12 @@ function atualizarDespesaGeral(id, payload) {
 
   const origemAtual = String(atual.origem_fixo_id || despesaId).trim();
   const origemFixoId = dados.fixo ? (origemAtual || despesaId) : '';
+  const eraFixo = parseBooleanFinanceiro(atual.fixo);
+  const encerrandoSerie = eraFixo && !dados.fixo && !!origemAtual;
+  const competenciaEncerramento = dados.data_competencia
+    || atual.data_competencia
+    || atual.data_vencimento
+    || atual.criado_em;
 
   const ok = updateById(
     ABA_DESPESAS_GERAIS,
@@ -1347,6 +1576,13 @@ function atualizarDespesaGeral(id, payload) {
     DESPESAS_GERAIS_SCHEMA
   );
   if (ok) {
+    if (encerrandoSerie) {
+      try {
+        encerrarSerieDespesaFixaFinanceiro(sheet, origemAtual, competenciaEncerramento);
+      } catch (error) {
+        // sem acao: atualizacao principal deve prevalecer
+      }
+    }
     regerarParcelasFinanceirasOrigemComPagamentos(ORIGEM_TIPO_DESPESA, despesaId);
   }
   return ok;
@@ -1354,15 +1590,35 @@ function atualizarDespesaGeral(id, payload) {
 
 function deletarDespesaGeral(id) {
   assertCanWrite('Exclusao de despesa geral');
+  const despesaId = String(id || '').trim();
+  if (!despesaId) return false;
+
+  const sheet = getSheet(ABA_DESPESAS_GERAIS);
+  if (sheet) {
+    ensureSchema(sheet, DESPESAS_GERAIS_SCHEMA);
+    const atual = rowsToObjects(sheet).find(i => String(i.ID || '').trim() === despesaId);
+    if (atual && String(atual.ativo).toLowerCase() === 'true' && parseBooleanFinanceiro(atual.fixo)) {
+      const rootId = getSerieRootIdDespesaFixaFinanceiro(atual);
+      const competenciaYm = gerarChaveMesFinanceiro(obterDataCompetenciaDespesaFinanceiro(atual));
+      if (rootId && competenciaYm) {
+        try {
+          bloquearCompetenciaSerieDespesaFixaFinanceiro(sheet, rootId, competenciaYm);
+        } catch (error) {
+          // sem acao: exclusao principal deve prevalecer
+        }
+      }
+    }
+  }
+
   const ok = updateById(
     ABA_DESPESAS_GERAIS,
     'ID',
-    id,
+    despesaId,
     { ativo: false },
     DESPESAS_GERAIS_SCHEMA
   );
   if (ok) {
-    limparParcelasFinanceirasOrigem(ORIGEM_TIPO_DESPESA, id);
+    limparParcelasFinanceirasOrigem(ORIGEM_TIPO_DESPESA, despesaId);
   }
   return ok;
 }
@@ -1826,6 +2082,15 @@ function obterResumoDashboardFinanceiro(referenciaYm, forcarRecarregar) {
     const s = normalizarTextoSemAcentoFinanceiro(status);
     return s === 'EM PRODUCAO' || s === 'FINALIZACAO';
   };
+  const obterQtdRestanteProducao = op => {
+    const restanteRaw = String(op?.qtd_restante ?? '').trim();
+    if (restanteRaw !== '') {
+      return round2Financeiro(Math.max(0, parseNumeroBR(restanteRaw)));
+    }
+    const planejada = round2Financeiro(parseNumeroBR(op?.qtd_planejada));
+    const produzida = round2Financeiro(parseNumeroBR(op?.qtd_produzida_acumulada));
+    return round2Financeiro(Math.max(0, planejada - produzida));
+  };
 
   const valorProdutosProducao = round2Financeiro(
     (Array.isArray(producoes) ? producoes : [])
@@ -1834,7 +2099,7 @@ function obterResumoDashboardFinanceiro(referenciaYm, forcarRecarregar) {
         const produtoId = String(op?.produto_id || '').trim();
         const precoVenda = round2Financeiro(precoVendaProdutoPorId[produtoId] || 0);
         if (precoVenda <= 0) return acc;
-        const quantidade = round2Financeiro(parseNumeroBR(op?.qtd_planejada));
+        const quantidade = obterQtdRestanteProducao(op);
         if (quantidade <= 0) return acc;
         return acc + round2Financeiro(quantidade * precoVenda);
       }, 0)
@@ -2189,6 +2454,15 @@ function obterComposicaoCardDashboardFinanceiro(referenciaYm, cardKey, forcarRec
     const s = normalizarTextoSemAcentoFinanceiro(status);
     return s === 'EM PRODUCAO' || s === 'FINALIZACAO';
   };
+  const obterQtdRestanteProducao = op => {
+    const restanteRaw = String(op?.qtd_restante ?? '').trim();
+    if (restanteRaw !== '') {
+      return round2Financeiro(Math.max(0, parseNumeroBR(restanteRaw)));
+    }
+    const planejada = round2Financeiro(parseNumeroBR(op?.qtd_planejada));
+    const produzida = round2Financeiro(parseNumeroBR(op?.qtd_produzida_acumulada));
+    return round2Financeiro(Math.max(0, planejada - produzida));
+  };
 
   if (chave === 'gasto_pago_mes') {
     itens = itensPagamentosMes;
@@ -2452,13 +2726,13 @@ function obterComposicaoCardDashboardFinanceiro(referenciaYm, cardKey, forcarRec
         if (!meta) return null;
         const precoVenda = round2Financeiro(precoVendaProdutoPorId[produtoId] || 0);
         if (precoVenda <= 0) return null;
-        const quantidade = round2Financeiro(parseNumeroBR(op?.qtd_planejada));
+        const quantidade = obterQtdRestanteProducao(op);
         if (quantidade <= 0) return null;
         return {
           linha_id: `OP_VAL:${opId}`,
           tipo_linha: 'producao_produto',
           titulo: meta.titulo,
-          detalhe: `${meta.detalhe} | Qtd planejada: ${quantidade} ${String(op?.unidade_produto || '').trim() || ''}`.trim(),
+          detalhe: `${meta.detalhe} | Qtd restante: ${quantidade} ${String(op?.unidade_produto || '').trim() || ''}`.trim(),
           data: formatarDataYmdFinanceiroSafe(op?.data_inicio || op?.criado_em),
           valor: round2Financeiro(quantidade * precoVenda),
           origem_tipo: meta.origem_tipo,

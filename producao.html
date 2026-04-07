@@ -63,6 +63,18 @@
   <div class="modal-content">
     <button class="modal-close-square" onclick="ProducaoUI.fecharModalConsumo()" aria-label="Fechar">X</button>
     <h3 id="consumoTitulo">Baixar do estoque</h3>
+    <div id="consumoResumoLote" class="comp-meta"></div>
+    <div class="campo-ajuda-wrap">
+      <span class="campo-ajuda-tag">Qtd produzida neste lote</span>
+      <input id="consumoQtdProduzida" type="number" step="0.01" min="0">
+    </div>
+    <div class="campo-ajuda-wrap">
+      <span class="campo-ajuda-tag">Entradas</span>
+      <label class="dash-fixo-toggle">
+        <input id="consumoBypassEntradas" type="checkbox">
+        <span>Ignorar entradas e lancar apenas saidas</span>
+      </label>
+    </div>
     <div id="consumoLista"></div>
     <div class="acoes">
       <button id="btnConfirmarConsumo" type="button">Confirmar</button>

@@ -81,6 +81,20 @@
       return isNaN(n) ? 0 : n;
     }
 
+    function obterContextoConsumo(item) {
+      const qtdPlanejada = parseNumeroInput(item?.qtd_planejada);
+      const qtdProduzidaAcumulada = parseNumeroInput(item?.qtd_produzida_acumulada);
+      const qtdRestanteInformada = parseNumeroInput(item?.qtd_restante);
+      const qtdRestante = qtdRestanteInformada > 0
+        ? qtdRestanteInformada
+        : Math.max(0, qtdPlanejada - qtdProduzidaAcumulada);
+      return {
+        qtd_planejada: qtdPlanejada,
+        qtd_produzida_acumulada: qtdProduzidaAcumulada,
+        qtd_restante: Number(qtdRestante.toFixed(6))
+      };
+    }
+
     function setSalvando(ativo) {
       salvando = !!ativo;
       if (window.AppMutationUI?.lock && window.AppMutationUI?.unlock) {
@@ -821,15 +835,9 @@
       const item = ProducaoStore.getById(id);
       if (!item) return;
 
-      const status = String(item.status || '');
-      const concluido = status === 'Concluido' || status === 'Concluida';
-      if (!concluido) {
-        mostrarToast('Atualizacao de estoque liberada apenas quando status for Concluido', 'erro');
-        return;
-      }
-
-      if (item.estoque_atualizado) {
-        mostrarToast('Estoque ja atualizado para esta producao', 'erro');
+      const contextoConsumo = obterContextoConsumo(item);
+      if (contextoConsumo.qtd_restante <= 0.000001) {
+        mostrarToast('Nao ha quantidade restante para registrar nesta OP', 'erro');
         return;
       }
       if (!item.receita_id) {
@@ -846,7 +854,13 @@
               custo_previsto: resp.custoPrevisto || 0
             });
             renderListaAtual();
-            ProducaoUI.abrirModalConsumo(id, item.nome_ordem || item.nome_produto || id, resp.itens || []);
+            const itemAtualizado = ProducaoStore.getById(id) || item;
+            ProducaoUI.abrirModalConsumo(
+              id,
+              itemAtualizado.nome_ordem || itemAtualizado.nome_produto || id,
+              itemAtualizado.materiaisPrevistos || [],
+              obterContextoConsumo(itemAtualizado)
+            );
           })
           .withFailureHandler(err => {
             const msg = err?.message || 'Erro ao carregar materiais';
@@ -856,7 +870,12 @@
         return;
       }
 
-      ProducaoUI.abrirModalConsumo(id, item.nome_ordem || item.nome_produto || id, item.materiaisPrevistos || []);
+      ProducaoUI.abrirModalConsumo(
+        id,
+        item.nome_ordem || item.nome_produto || id,
+        item.materiaisPrevistos || [],
+        contextoConsumo
+      );
     }
 
     function confirmarAtualizacaoEstoque() {
@@ -864,6 +883,10 @@
       const payload = ProducaoUI.obterConsumoPayload();
       if (!payload.producaoId) {
         mostrarToast('Producao invalida', 'erro');
+        return;
+      }
+      if (payload.qtdProduzida <= 0) {
+        mostrarToast('Informe a quantidade produzida do lote', 'erro');
         return;
       }
 
@@ -892,7 +915,7 @@
               resp.pendencias_vinculo || [],
               estoqueOpcoes
             );
-            mostrarToast('Vincule os itens de entrada pendentes para concluir');
+            mostrarToast('Vincule os itens de entrada pendentes para continuar');
             return;
           }
 
@@ -902,7 +925,7 @@
             });
           }
           const concluirSync = window.AppSyncFeedback?.iniciar
-            ? window.AppSyncFeedback.iniciar('Estoque atualizado. Atualizando dados...')
+            ? window.AppSyncFeedback.iniciar('Lote registrado. Atualizando dados...')
             : null;
           let pendenciasSync = 0;
           const concluirUmaSync = () => {
@@ -950,7 +973,14 @@
             }
           }
         })
-        .consumirEstoque(payload.producaoId, payload.itens);
+        .consumirEstoque(
+          payload.producaoId,
+          payload.itens,
+          {
+            qtd_produzida: payload.qtdProduzida,
+            bypass_entradas: payload.bypassEntradas
+          }
+        );
     }
 
     function confirmarPendenciasVinculo() {
@@ -992,7 +1022,8 @@
           ProducaoUI.abrirModalConsumo(
             payload.producaoId,
             item.nome_ordem || item.nome_produto || payload.producaoId,
-            item.materiaisPrevistos || []
+            item.materiaisPrevistos || [],
+            obterContextoConsumo(item)
           );
           mostrarToast('Vinculos atualizados. Confirme a baixa do estoque.');
         })

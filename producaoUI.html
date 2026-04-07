@@ -36,6 +36,9 @@
         // Modal consumo
         modalConsumo: document.getElementById('modalConsumoProducao'),
         consumoTitulo: document.getElementById('consumoTitulo'),
+        consumoResumoLote: document.getElementById('consumoResumoLote'),
+        consumoQtdProduzida: document.getElementById('consumoQtdProduzida'),
+        consumoBypassEntradas: document.getElementById('consumoBypassEntradas'),
         consumoLista: document.getElementById('consumoLista'),
 
         // Modal pendencias de vinculo
@@ -652,9 +655,10 @@
       const unidade = i.unidade_produto || '';
       const custoPrevisto = formatMoeda(i.custo_previsto || 0);
       const status = String(i.status || '');
-      const concluido = status === 'Concluido' || status === 'Concluida';
-      const estoqueAtualizado = !!i.estoque_atualizado;
-      const podeAtualizarEstoque = concluido && !estoqueAtualizado;
+      const qtdPlanejadaNum = Number(i.qtd_planejada || 0);
+      const qtdProduzidaNum = Number(i.qtd_produzida_acumulada || 0);
+      const qtdRestanteNum = Math.max(0, Number(i.qtd_restante ?? Math.max(0, qtdPlanejadaNum - qtdProduzidaNum)));
+      const podeAtualizarEstoque = qtdRestanteNum > 0.000001;
       const totalSaidasPrevistas = Number(i.saidas_previstas_total || 0);
       const tiposSaida = Number(
         i.saidas_previstas_tipos || (Array.isArray(i.saidas_previstas) ? i.saidas_previstas.length : 0)
@@ -682,6 +686,8 @@
       const nomeLabel = escapeHtml(nome);
       const statusLabel = escapeHtml(i.status || '');
       const qtdPlanejada = escapeHtml(i.qtd_planejada || 0);
+      const qtdProduzida = escapeHtml(formatQuantidadeResumo(qtdProduzidaNum));
+      const qtdRestante = escapeHtml(formatQuantidadeResumo(qtdRestanteNum));
       const unidadeLabel = escapeHtml(unidade);
       const resumoSaidasLabel = escapeHtml(resumoSaidas);
       const etapasConcluidasLabel = escapeHtml(`Etapas concluidas: ${etapasConcluidas}/${totalEtapas}`);
@@ -692,6 +698,7 @@
           <strong>${nomeLabel}</strong><br>
           ${statusLabel}<br>
           ${qtdPlanejada} ${unidadeLabel}<br>
+          Produzido: ${qtdProduzida} | Restante: ${qtdRestante}<br>
           ${etapasConcluidasLabel}<br>
           ${etapaAtualLabel}<br>
           ${resumoSaidasLabel}
@@ -705,11 +712,12 @@
 
     function montarDetalhesProducao(i) {
       const custoPrevisto = formatMoeda(i.custo_previsto || 0);
-      const status = String(i.status || '');
-      const concluido = status === 'Concluido' || status === 'Concluida';
+      const qtdPlanejadaNum = Number(i.qtd_planejada || 0);
+      const qtdProduzidaNum = Number(i.qtd_produzida_acumulada || 0);
+      const qtdRestanteNum = Math.max(0, Number(i.qtd_restante ?? Math.max(0, qtdPlanejadaNum - qtdProduzidaNum)));
       const estoqueAtualizado = !!i.estoque_atualizado;
-      const podeAtualizarEstoque = concluido && !estoqueAtualizado;
-      const labelEstoque = estoqueAtualizado ? 'Estoque atualizado' : 'Atualizar estoque';
+      const podeAtualizarEstoque = qtdRestanteNum > 0.000001;
+      const labelEstoque = podeAtualizarEstoque ? 'Registrar lote' : 'Estoque atualizado';
       const idJs = JSON.stringify(String(i.producao_id || ''));
       const saidasHtml = !estoqueAtualizado
         ? renderSaidasPrevistas(i.saidas_previstas, i.producao_id, true)
@@ -729,6 +737,7 @@
         <p><b>Receita:</b> ${receitaLabel}</p>
         <p><b>Inicio:</b> ${inicioLabel}</p>
         <p><b>Previsto:</b> ${previstoLabel}</p>
+        <p><b>Produzido:</b> ${escapeHtml(formatQuantidadeResumo(qtdProduzidaNum))} | <b>Restante:</b> ${escapeHtml(formatQuantidadeResumo(qtdRestanteNum))}</p>
         <p><b>Custo previsto:</b> R$ ${custoPrevisto}</p>
         <p><b>Observacao:</b> ${observacaoLabel}</p>
         ${estoqueAtualizado ? `<p><b>Estoque atualizado:</b> ${dataEstoqueAtualizadoLabel}</p>` : ''}
@@ -868,22 +877,86 @@
     /* =========================
        MODAL CONSUMO
     ========================== */
-    function abrirModalConsumo(producaoId, nome, materiais) {
-      const { modalConsumo, consumoTitulo, consumoLista } = el();
+    function atualizarSugestaoConsumoLote() {
+      const {
+        modalConsumo,
+        consumoLista,
+        consumoQtdProduzida,
+        consumoBypassEntradas,
+        consumoResumoLote
+      } = el();
       if (!modalConsumo || !consumoLista) return;
 
+      const qtdPlanejada = parseNumeroInput(modalConsumo.dataset.qtdPlanejada || 0);
+      const qtdProduzidaAcumulada = parseNumeroInput(modalConsumo.dataset.qtdProduzidaAcumulada || 0);
+      const qtdRestante = parseNumeroInput(modalConsumo.dataset.qtdRestante || 0);
+
+      let qtdLote = parseNumeroInput(consumoQtdProduzida?.value || 0);
+      if (qtdLote <= 0) {
+        qtdLote = qtdRestante > 1 ? 1 : qtdRestante;
+      }
+      if (qtdRestante > 0 && qtdLote > qtdRestante) {
+        qtdLote = qtdRestante;
+      }
+      if (consumoQtdProduzida) {
+        consumoQtdProduzida.value = qtdLote > 0 ? Number(qtdLote).toFixed(2) : '';
+      }
+
+      if (consumoResumoLote) {
+        consumoResumoLote.textContent = `Planejada: ${formatQuantidadeResumo(qtdPlanejada)} | Produzida: ${formatQuantidadeResumo(qtdProduzidaAcumulada)} | Restante: ${formatQuantidadeResumo(qtdRestante)}`;
+      }
+
+      const fator = qtdPlanejada > 0 ? (qtdLote / qtdPlanejada) : 0;
+      const bypass = !!consumoBypassEntradas?.checked;
+      const inputs = consumoLista.querySelectorAll('input[data-estoque-id]');
+      inputs.forEach(input => {
+        if (!input) return;
+        input.disabled = bypass;
+        if (bypass) return;
+        if (input.dataset.manual === '1') return;
+        const quantidadeBase = parseNumeroInput(input.dataset.quantidadeBase || 0);
+        const sugerida = Math.max(0, quantidadeBase * fator);
+        input.value = sugerida > 0 ? Number(sugerida).toFixed(2) : '';
+      });
+    }
+
+    function abrirModalConsumo(producaoId, nome, materiais, contexto) {
+      const {
+        modalConsumo,
+        consumoTitulo,
+        consumoLista,
+        consumoQtdProduzida,
+        consumoBypassEntradas
+      } = el();
+      if (!modalConsumo || !consumoLista) return;
+
+      const ctx = contexto || {};
+      const qtdPlanejada = parseNumeroInput(ctx.qtd_planejada || ctx.qtdPlanejada || 0);
+      const qtdProduzidaAcumulada = parseNumeroInput(ctx.qtd_produzida_acumulada || ctx.qtdProduzidaAcumulada || 0);
+      const qtdRestanteRaw = parseNumeroInput(ctx.qtd_restante || ctx.qtdRestante || 0);
+      const qtdRestante = qtdRestanteRaw > 0
+        ? qtdRestanteRaw
+        : Math.max(0, qtdPlanejada - qtdProduzidaAcumulada);
+      const qtdInicialLote = qtdRestante > 1 ? 1 : qtdRestante;
+
       modalConsumo.dataset.producaoId = producaoId;
+      modalConsumo.dataset.qtdPlanejada = String(qtdPlanejada || 0);
+      modalConsumo.dataset.qtdProduzidaAcumulada = String(qtdProduzidaAcumulada || 0);
+      modalConsumo.dataset.qtdRestante = String(qtdRestante || 0);
       if (consumoTitulo) consumoTitulo.textContent = `Atualizar estoque - ${nome}`;
+      if (consumoQtdProduzida) consumoQtdProduzida.value = qtdInicialLote > 0 ? Number(qtdInicialLote).toFixed(2) : '';
+      if (consumoBypassEntradas) consumoBypassEntradas.checked = false;
 
       consumoLista.innerHTML = '';
 
       (materiais || []).forEach(item => {
+        const quantidadeBase = Number(item.quantidade || 0);
         const row = document.createElement('div');
         row.className = 'linha-consumo';
         row.innerHTML = `
           <div>
             <div><strong>${item.item || item.estoque_id}</strong></div>
-            <div>${Number(item.quantidade || 0).toFixed(2)} ${item.unidade || ''}</div>
+            <div>${Number(quantidadeBase || 0).toFixed(2)} ${item.unidade || ''} (plano total)</div>
           </div>
           <div class="campo-ajuda-wrap campo-ajuda-consumo">
             <span class="campo-ajuda-tag">Qtd a baixar</span>
@@ -892,37 +965,94 @@
               step="0.01"
               min="0"
               data-estoque-id="${item.estoque_id}"
-              value="${Number(item.quantidade || 0).toFixed(2)}"
+              data-quantidade-base="${Number(quantidadeBase || 0).toFixed(6)}"
+              data-manual="0"
+              value=""
             >
           </div>
         `;
         consumoLista.appendChild(row);
       });
 
+      if (consumoQtdProduzida) {
+        consumoQtdProduzida.oninput = () => {
+          const inputs = consumoLista.querySelectorAll('input[data-estoque-id]');
+          inputs.forEach(input => { input.dataset.manual = '0'; });
+          atualizarSugestaoConsumoLote();
+        };
+      }
+      if (consumoBypassEntradas) {
+        consumoBypassEntradas.onchange = () => {
+          atualizarSugestaoConsumoLote();
+        };
+      }
+
+      const inputs = consumoLista.querySelectorAll('input[data-estoque-id]');
+      inputs.forEach(input => {
+        input.addEventListener('input', () => {
+          input.dataset.manual = '1';
+        });
+      });
+
+      atualizarSugestaoConsumoLote();
       modalConsumo.classList.remove('hidden');
     }
 
     function fecharModalConsumo() {
-      const { modalConsumo, consumoLista } = el();
+      const {
+        modalConsumo,
+        consumoLista,
+        consumoQtdProduzida,
+        consumoBypassEntradas,
+        consumoResumoLote
+      } = el();
       if (!modalConsumo || !consumoLista) return;
 
       modalConsumo.classList.add('hidden');
       consumoLista.innerHTML = '';
+      if (consumoQtdProduzida) {
+        consumoQtdProduzida.value = '';
+        consumoQtdProduzida.oninput = null;
+      }
+      if (consumoBypassEntradas) {
+        consumoBypassEntradas.checked = false;
+        consumoBypassEntradas.onchange = null;
+      }
+      if (consumoResumoLote) consumoResumoLote.textContent = '';
       delete modalConsumo.dataset.producaoId;
+      delete modalConsumo.dataset.qtdPlanejada;
+      delete modalConsumo.dataset.qtdProduzidaAcumulada;
+      delete modalConsumo.dataset.qtdRestante;
     }
 
     function obterConsumoPayload() {
-      const { modalConsumo, consumoLista } = el();
-      if (!modalConsumo || !consumoLista) return { producaoId: '', itens: [] };
+      const { modalConsumo, consumoLista, consumoQtdProduzida, consumoBypassEntradas } = el();
+      if (!modalConsumo || !consumoLista) {
+        return {
+          producaoId: '',
+          itens: [],
+          qtdProduzida: 0,
+          bypassEntradas: false
+        };
+      }
 
       const producaoId = modalConsumo.dataset.producaoId || '';
+      const bypassEntradas = !!consumoBypassEntradas?.checked;
+      const qtdProduzida = parseNumeroInput(consumoQtdProduzida?.value || 0);
       const inputs = consumoLista.querySelectorAll('input[data-estoque-id]');
-      const itens = [...inputs].map(input => ({
-        estoque_id: input.dataset.estoqueId,
-        quantidade: parseNumeroInput(input.value || 0)
-      })).filter(i => i.estoque_id && i.quantidade > 0);
+      const itens = bypassEntradas
+        ? []
+        : [...inputs].map(input => ({
+          estoque_id: input.dataset.estoqueId,
+          quantidade: parseNumeroInput(input.value || 0)
+        })).filter(i => i.estoque_id && i.quantidade > 0);
 
-      return { producaoId, itens };
+      return {
+        producaoId,
+        itens,
+        qtdProduzida,
+        bypassEntradas
+      };
     }
 
     function abrirModalPendenciasVinculo(producaoId, pendencias, opcoes) {
