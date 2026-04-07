@@ -442,9 +442,12 @@ function validarPagoPorFinanceiro(pagoPor, obrigatorio) {
 }
 
 function aplicarRateioPagoPorFinanceiro(acumulador, pagoPor, valor) {
-  const alvo = acumulador || { bruno: 0, zizu: 0 };
+  const alvo = acumulador || { bruno: 0, zizu: 0, investimento: 0 };
   const valorSeguro = round2Financeiro(parseNumeroBR(valor));
   if (valorSeguro <= 0) return alvo;
+  alvo.bruno = round2Financeiro(alvo.bruno);
+  alvo.zizu = round2Financeiro(alvo.zizu);
+  alvo.investimento = round2Financeiro(alvo.investimento);
 
   const pagoPorNormalizado = normalizarTextoSemAcentoFinanceiro(pagoPor);
   if (pagoPorNormalizado === 'AMBOS') {
@@ -461,6 +464,11 @@ function aplicarRateioPagoPorFinanceiro(acumulador, pagoPor, valor) {
 
   if (pagoPorNormalizado === 'ZIZU') {
     alvo.zizu = round2Financeiro(alvo.zizu + valorSeguro);
+    return alvo;
+  }
+
+  if (pagoPorNormalizado === 'INVESTIMENTO') {
+    alvo.investimento = round2Financeiro(alvo.investimento + valorSeguro);
     return alvo;
   }
 
@@ -1641,7 +1649,8 @@ function obterResumoDashboardFinanceiro(referenciaYm, forcarRecarregar) {
 
   let gastoPagoMes = 0;
   let recebidoVendasMes = 0;
-  const contadoresMes = { bruno: 0, zizu: 0 };
+  const contadoresMes = { bruno: 0, zizu: 0, investimento: 0 };
+  let contadorInvestimentoAcumulado = 0;
 
   eventosFinanceirosValidos.forEach(p => {
     let tipoOrigem = '';
@@ -1662,6 +1671,16 @@ function obterResumoDashboardFinanceiro(referenciaYm, forcarRecarregar) {
     const valor = round2Financeiro(parseNumeroBR(p.valor_pago));
     const dataPag = parseDataFinanceiro(p.data_pagamento);
     if (!dataPag || valor <= 0) return;
+    let itemOrigemPagamento = null;
+    if (natureza === NATUREZA_PAGAMENTO && (tipoOrigem === ORIGEM_TIPO_COMPRA || tipoOrigem === ORIGEM_TIPO_DESPESA)) {
+      itemOrigemPagamento = tipoOrigem === ORIGEM_TIPO_COMPRA
+        ? comprasPorId[String(p.origem_id || '').trim()]
+        : despesasPorId[String(p.origem_id || '').trim()];
+      const rateioAcumulado = calcularRateioLinhaPagoPorFinanceiro(itemOrigemPagamento?.pago_por, valor);
+      contadorInvestimentoAcumulado = round2Financeiro(
+        contadorInvestimentoAcumulado + round2Financeiro(rateioAcumulado.investimento || 0)
+      );
+    }
 
     if (natureza === NATUREZA_PAGAMENTO) {
       const chaveMes = gerarChaveMesFinanceiro(dataPag);
@@ -1673,12 +1692,7 @@ function obterResumoDashboardFinanceiro(referenciaYm, forcarRecarregar) {
     if (natureza === NATUREZA_PAGAMENTO) {
       gastoPagoMes = round2Financeiro(gastoPagoMes + valor);
 
-      let itemOrigem = null;
-      if (tipoOrigem === ORIGEM_TIPO_COMPRA) {
-        itemOrigem = comprasPorId[String(p.origem_id || '').trim()];
-      } else if (tipoOrigem === ORIGEM_TIPO_DESPESA) {
-        itemOrigem = despesasPorId[String(p.origem_id || '').trim()];
-      }
+      const itemOrigem = itemOrigemPagamento;
 
       const tipo = tipoOrigem === ORIGEM_TIPO_COMPRA
         ? String(itemOrigem?.tipo || 'SEM_TIPO').trim() || 'SEM_TIPO'
@@ -1850,7 +1864,9 @@ function obterResumoDashboardFinanceiro(referenciaYm, forcarRecarregar) {
       valor_produtos_estoque: round2Financeiro(valorProdutosEstoque),
       valor_produtos_producao: round2Financeiro(valorProdutosProducao),
       contador_bruno_mes: round2Financeiro(contadoresMes.bruno),
-      contador_zizu_mes: round2Financeiro(contadoresMes.zizu)
+      contador_zizu_mes: round2Financeiro(contadoresMes.zizu),
+      contador_investimento_mes: round2Financeiro(contadoresMes.investimento),
+      contador_investimento_acumulado: round2Financeiro(contadorInvestimentoAcumulado)
     },
     agregados: {
       gasto_por_tipo: ordenarAgregadoFinanceiro(porTipo, 10),
@@ -1879,7 +1895,9 @@ function normalizarCardKeyDashboardFinanceiro(cardKey) {
     valor_produtos_estoque: true,
     valor_produtos_producao: true,
     contador_bruno_mes: true,
-    contador_zizu_mes: true
+    contador_zizu_mes: true,
+    contador_investimento_mes: true,
+    contador_investimento_acumulado: true
   };
   if (!permitidos[chave]) {
     throw new Error('Card de dashboard invalido.');
@@ -1900,7 +1918,9 @@ function getRotuloCardDashboardFinanceiro(cardKey) {
     valor_produtos_estoque: 'Valor de produtos em estoque',
     valor_produtos_producao: 'Valor de produtos em producao',
     contador_bruno_mes: 'BRUNO (pago no mes)',
-    contador_zizu_mes: 'ZIZU (pago no mes)'
+    contador_zizu_mes: 'ZIZU (pago no mes)',
+    contador_investimento_mes: 'INVESTIMENTO (pago no mes)',
+    contador_investimento_acumulado: 'INVESTIMENTO (acumulado)'
   };
   return mapa[String(cardKey || '').trim().toLowerCase()] || 'Card';
 }
@@ -1917,7 +1937,7 @@ function getAbaOrigemDashboardFinanceiro(origemTipo) {
 
 function calcularRateioLinhaPagoPorFinanceiro(pagoPor, valor) {
   const valorSeguro = round2Financeiro(parseNumeroBR(valor));
-  const resultado = { bruno: 0, zizu: 0 };
+  const resultado = { bruno: 0, zizu: 0, investimento: 0 };
   if (valorSeguro <= 0) return resultado;
   const pagoPorNormalizado = normalizarTextoSemAcentoFinanceiro(pagoPor);
   if (pagoPorNormalizado === 'AMBOS') {
@@ -1932,6 +1952,10 @@ function calcularRateioLinhaPagoPorFinanceiro(pagoPor, valor) {
   }
   if (pagoPorNormalizado === 'ZIZU') {
     resultado.zizu = valorSeguro;
+    return resultado;
+  }
+  if (pagoPorNormalizado === 'INVESTIMENTO') {
+    resultado.investimento = valorSeguro;
     return resultado;
   }
   return resultado;
@@ -2472,12 +2496,21 @@ function obterComposicaoCardDashboardFinanceiro(referenciaYm, cardKey, forcarRec
         eh_contagem: false
       };
     }).filter(Boolean);
-  } else if (chave === 'contador_bruno_mes' || chave === 'contador_zizu_mes') {
-    const alvo = chave === 'contador_bruno_mes' ? 'bruno' : 'zizu';
+  } else if (
+    chave === 'contador_bruno_mes'
+    || chave === 'contador_zizu_mes'
+    || chave === 'contador_investimento_mes'
+    || chave === 'contador_investimento_acumulado'
+  ) {
+    const filtroMes = chave !== 'contador_investimento_acumulado';
+    const alvo = chave === 'contador_bruno_mes'
+      ? 'bruno'
+      : (chave === 'contador_zizu_mes' ? 'zizu' : 'investimento');
     itens = pagamentosValidos
       .filter(p => {
         const dataPag = parseDataFinanceiro(p.data_pagamento);
-        if (!dataPag || dataPag < inicio || dataPag >= fim) return false;
+        if (!dataPag) return false;
+        if (filtroMes && (dataPag < inicio || dataPag >= fim)) return false;
         const tipo = String(p.origem_tipo || '').trim().toUpperCase();
         if (tipo !== ORIGEM_TIPO_COMPRA && tipo !== ORIGEM_TIPO_DESPESA) return false;
         let natureza = '';
