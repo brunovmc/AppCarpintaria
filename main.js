@@ -1,4 +1,8 @@
-const DATA_SPREADSHEET_ID = "1j363esbdvygUO1s72bCz5u3Vhn2AnhiIHlmO4ZApowg";
+// Prod
+// const DATA_SPREADSHEET_ID = "1j363esbdvygUO1s72bCz5u3Vhn2AnhiIHlmO4ZApowg";
+
+// Dev
+const DATA_SPREADSHEET_ID = "1wqW2WPZvLWPr72Xsd_8ZAhAgbjvMw8A7b5Riapz6P4s";
 
 function doGet() {
   return HtmlService.createTemplateFromFile("index")
@@ -109,7 +113,11 @@ function prepararAbasFinanceiroVendas() {
   const ss = getDataSpreadsheet();
 
   function removerColunasPorHeader(sheet, headersParaRemover) {
-    if (!sheet || !Array.isArray(headersParaRemover) || headersParaRemover.length === 0) {
+    if (
+      !sheet ||
+      !Array.isArray(headersParaRemover) ||
+      headersParaRemover.length === 0
+    ) {
       return { removidas: [] };
     }
     const lastCol = sheet.getLastColumn();
@@ -117,12 +125,18 @@ function prepararAbasFinanceiroVendas() {
 
     const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
     const alvoUpper = headersParaRemover
-      .map((h) => String(h || "").trim().toUpperCase())
+      .map((h) =>
+        String(h || "")
+          .trim()
+          .toUpperCase(),
+      )
       .filter((h) => h);
     const colunas = [];
 
     headers.forEach((h, idx) => {
-      const label = String(h || "").trim().toUpperCase();
+      const label = String(h || "")
+        .trim()
+        .toUpperCase();
       if (alvoUpper.includes(label)) {
         colunas.push({ col: idx + 1, header: String(h || "").trim() });
       }
@@ -168,7 +182,10 @@ function prepararAbasFinanceiroVendas() {
     executado_em: new Date(),
     abas: {
       compras: garantirAbaComSchema("COMPRAS", COMPRAS_SCHEMA),
-      despesas_gerais: garantirAbaComSchema("DESPESAS_GERAIS", DESPESAS_GERAIS_SCHEMA),
+      despesas_gerais: garantirAbaComSchema(
+        "DESPESAS_GERAIS",
+        DESPESAS_GERAIS_SCHEMA,
+      ),
       vendas: garantirAbaComSchema("VENDAS", VENDAS_SCHEMA, {
         remover_headers: ["plano_recebimento", "data_entrega_prevista"],
       }),
@@ -180,6 +197,8 @@ function prepararAbasFinanceiroVendas() {
     },
   };
 
-  resultado.ok = Object.values(resultado.abas).every((item) => item?.ok !== false);
+  resultado.ok = Object.values(resultado.abas).every(
+    (item) => item?.ok !== false,
+  );
   return resultado;
 }
