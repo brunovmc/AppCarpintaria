@@ -455,9 +455,13 @@ function listarProdutos(forcarRecarregar) {
         const unidadeEntrada = String(e.unidade || '').trim().toUpperCase();
         const qtdInteira = Math.abs(qtdBase - Math.round(qtdBase)) < 0.000001;
         const modoLegadoQtdPecas = unidadeEntrada !== 'M3' && volumeM3 > 0 && qtdInteira;
-        quantidade = modoLegadoQtdPecas
-          ? (qtdBase * volumeM3)
-          : qtdBase;
+        if (unidadeEntrada === 'M3' && volumeM3 > 0) {
+          quantidade = volumeM3;
+        } else {
+          quantidade = modoLegadoQtdPecas
+            ? (qtdBase * volumeM3)
+            : qtdBase;
+        }
       } else {
         quantidade = qtdBase;
       }
@@ -1501,9 +1505,13 @@ function explodirReceitaDetalhada(produtoId, receitaId, qtdPlanejada) {
       const unidadeEntrada = String(e.unidade || '').trim().toUpperCase();
       const qtdInteira = Math.abs(qtdBase - Math.round(qtdBase)) < 0.000001;
       const modoLegadoQtdPecas = unidadeEntrada !== 'M3' && volumeM3 > 0 && qtdInteira;
-      quantidade = modoLegadoQtdPecas
-        ? (qtdBase * volumeM3 * fator)
-        : (qtdBase * fator);
+      if (unidadeEntrada === 'M3' && volumeM3 > 0) {
+        quantidade = volumeM3 * fator;
+      } else {
+        quantidade = modoLegadoQtdPecas
+          ? (qtdBase * volumeM3 * fator)
+          : (qtdBase * fator);
+      }
       unidade = unidade || 'M3';
     } else {
       quantidade = qtdBase * fator;

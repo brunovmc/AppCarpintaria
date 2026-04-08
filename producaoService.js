@@ -2301,7 +2301,7 @@ function consumirEstoque(producaoId, itensParaBaixar, opcoes) {
         throw new Error(`Item de estoque nao encontrado: ${i.estoque_id}`);
       }
       const saldo = parseNumeroBR(estoqueItem.quantidade);
-      if (saldo < i.quantidade) {
+      if ((saldo + 0.000001) < i.quantidade) {
         throw new Error(`Saldo insuficiente para ${estoqueItem.item || i.estoque_id}`);
       }
     });
@@ -2313,7 +2313,7 @@ function consumirEstoque(producaoId, itensParaBaixar, opcoes) {
       itensValidos.forEach(i => {
         const estoqueItem = estoqueMapAtivo[i.estoque_id];
         const saldo = parseNumeroBR(estoqueItem.quantidade);
-        const novoSaldo = Number((saldo - i.quantidade).toFixed(6));
+        const novoSaldo = Math.max(0, Number((saldo - i.quantidade).toFixed(6)));
 
         updateById(
           ABA_ESTOQUE,

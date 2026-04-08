@@ -68,6 +68,35 @@
       return n.toFixed(2);
     }
 
+    function normalizarUnidadeQuantidade(unidade) {
+      return String(unidade || '')
+        .trim()
+        .toUpperCase()
+        .replace(/³/g, '3')
+        .replace(/\s+/g, '');
+    }
+
+    function obterCasasQuantidade(unidade) {
+      const u = normalizarUnidadeQuantidade(unidade);
+      return u === 'M3' || u === 'M^3' ? 5 : 2;
+    }
+
+    function obterStepQuantidade(unidade) {
+      return obterCasasQuantidade(unidade) > 2 ? '0.00001' : '0.01';
+    }
+
+    function formatQuantidadePorUnidade(valor, unidade) {
+      const n = Number(valor || 0);
+      if (!isFinite(n)) return '0';
+      return n.toFixed(obterCasasQuantidade(unidade));
+    }
+
+    function formatQuantidadeInputPorUnidade(valor, unidade) {
+      const n = Number(valor || 0);
+      if (!isFinite(n) || n <= 0) return '';
+      return n.toFixed(obterCasasQuantidade(unidade)).replace(/\.?0+$/, '');
+    }
+
     function parseNumeroInput(valor) {
       const s = String(valor ?? '').trim();
       if (s === '') return 0;
@@ -126,9 +155,10 @@
         const id = String(i.ID || '');
         const nome = i.item || id;
         const tipo = String(i.tipo || '').toUpperCase();
-        const saldo = Number(i.quantidade || 0).toFixed(2);
+        const unidade = String(i.unidade || '').trim();
+        const saldo = formatQuantidadePorUnidade(i.quantidade, unidade);
         const selected = id === String(selecionadoId || '') ? 'selected' : '';
-        return `<option value="${escapeAttr(id)}" ${selected}>${escapeHtml(nome)} (${escapeHtml(tipo)}) - Saldo ${saldo}</option>`;
+        return `<option value="${escapeAttr(id)}" ${selected}>${escapeHtml(nome)} (${escapeHtml(tipo)}) - Saldo ${saldo}${unidade ? ` ${escapeHtml(unidade)}` : ''}</option>`;
       }).join('');
       return (incluirVazio ? '<option value="">Selecione no estoque</option>' : '') + opts;
     }
@@ -250,7 +280,7 @@
       const linhas = itens.map(i => `
         <div class="linha-material">
           <span>${escapeHtml(i.item || i.estoque_id)}</span>
-          <span>${Number(i.quantidade || 0).toFixed(2)} ${escapeHtml(i.unidade || '')}</span>
+          <span>${formatQuantidadePorUnidade(i.quantidade, i.unidade)} ${escapeHtml(i.unidade || '')}</span>
         </div>
       `);
 
@@ -274,7 +304,7 @@
               ${optsTipo}
             </select>
             <input id="manualNome_${escapeAttr(producaoId)}" placeholder="Nome do item">
-            <input id="manualQtd_${escapeAttr(producaoId)}" type="number" step="0.01" min="0" placeholder="Qtd prevista">
+            <input id="manualQtd_${escapeAttr(producaoId)}" type="number" step="0.00001" min="0" placeholder="Qtd prevista">
             <select id="manualEstoque_${escapeAttr(producaoId)}">
               ${optsEstoque}
             </select>
@@ -291,10 +321,10 @@
       }
 
       const linhas = lista.map(v => {
-        const prevista = Number(v.quantidade_prevista || 0).toFixed(2);
-        const consumida = Number(v.quantidade_consumida || 0).toFixed(2);
-        const pendente = Number(v.quantidade_pendente || 0).toFixed(2);
-        const saldo = Number(v.saldo_estoque || 0).toFixed(2);
+        const prevista = formatQuantidadePorUnidade(v.quantidade_prevista, v.unidade);
+        const consumida = formatQuantidadePorUnidade(v.quantidade_consumida, v.unidade);
+        const pendente = formatQuantidadePorUnidade(v.quantidade_pendente, v.unidade);
+        const saldo = formatQuantidadePorUnidade(v.saldo_estoque, v.unidade);
         const ok = !!v.saldo_suficiente;
         const vinculado = !!v.vinculado;
         const statusSaldo = vinculado ? (ok ? 'OK' : 'FALTA') : '-';
@@ -354,7 +384,7 @@
       };
 
       return lista.map(l => {
-        const quantidade = Number(l.quantidade || 0).toFixed(2);
+        const quantidade = formatQuantidadePorUnidade(l.quantidade, l.unidade);
         const custoUnit = Number(l.custo_unitario || 0).toFixed(4);
         const custoTotal = Number(l.custo_total || 0).toFixed(2);
         const inputId = `custoLote_${String(l.id || '').replace(/[^a-zA-Z0-9_-]/g, '')}`;
@@ -532,7 +562,7 @@
 
       const cards = lista.map((s, idx) => {
         const nome = String(s.nome_saida || '').trim() || '-';
-        const qtd = Number(s.quantidade || 0).toFixed(2);
+        const qtd = formatQuantidadePorUnidade(s.quantidade, s.unidade);
         const unidade = String(s.unidade || '').trim();
         const tipo = String(s.tipo_item || '').trim();
         const categoria = String(s.categoria || '').trim();
@@ -916,7 +946,7 @@
         if (input.dataset.manual === '1') return;
         const quantidadeBase = parseNumeroInput(input.dataset.quantidadeBase || 0);
         const sugerida = Math.max(0, quantidadeBase * fator);
-        input.value = sugerida > 0 ? Number(sugerida).toFixed(2) : '';
+        input.value = formatQuantidadeInputPorUnidade(sugerida, input.dataset.unidade || '');
       });
     }
 
@@ -951,20 +981,23 @@
 
       (materiais || []).forEach(item => {
         const quantidadeBase = Number(item.quantidade || 0);
+        const unidade = String(item.unidade || '').trim();
+        const stepQtd = obterStepQuantidade(unidade);
         const row = document.createElement('div');
         row.className = 'linha-consumo';
         row.innerHTML = `
           <div>
             <div><strong>${item.item || item.estoque_id}</strong></div>
-            <div>${Number(quantidadeBase || 0).toFixed(2)} ${item.unidade || ''} (plano total)</div>
+            <div>${formatQuantidadePorUnidade(quantidadeBase, unidade)} ${unidade || ''} (plano total)</div>
           </div>
           <div class="campo-ajuda-wrap campo-ajuda-consumo">
             <span class="campo-ajuda-tag">Qtd a baixar</span>
             <input
               type="number"
-              step="0.01"
+              step="${stepQtd}"
               min="0"
               data-estoque-id="${item.estoque_id}"
+              data-unidade="${unidade}"
               data-quantidade-base="${Number(quantidadeBase || 0).toFixed(6)}"
               data-manual="0"
               value=""
@@ -1082,7 +1115,7 @@
         row.innerHTML = `
           <div>
             <div><strong>${p.item || p.origem_item || p.id}</strong></div>
-            <div>${Number(p.quantidade_prevista || 0).toFixed(2)} ${p.unidade || ''} | Tipo ${tipo || '-'}</div>
+            <div>${formatQuantidadePorUnidade(p.quantidade_prevista, p.unidade)} ${p.unidade || ''} | Tipo ${tipo || '-'}</div>
           </div>
           <div class="campo-ajuda-wrap campo-ajuda-consumo">
             <span class="campo-ajuda-tag">Item do estoque</span>
