@@ -172,6 +172,178 @@
       return todos.filter(i => String(i.tipo || '').toUpperCase() === tipo);
     }
 
+    function getEstoqueOpcaoById(estoqueId) {
+      const id = String(estoqueId || '').trim();
+      if (!id) return null;
+      return (Array.isArray(estoqueOpcoes) ? estoqueOpcoes : [])
+        .find(i => String(i?.ID || '').trim() === id) || null;
+    }
+
+    function getCandidatosConsumo(item) {
+      const atualId = String(item?.estoque_id || '').trim();
+      const atual = getEstoqueOpcaoById(atualId);
+      const todos = Array.isArray(estoqueOpcoes) ? estoqueOpcoes : [];
+      if (!atual) return todos;
+
+      const tipoAtual = String(atual.tipo || '').toUpperCase().trim();
+      const categoriaAtual = String(atual.categoria || '').toUpperCase().trim();
+      const unidadeAtual = String(atual.unidade || '').toUpperCase().trim();
+
+      let candidatos = todos.filter(i => {
+        if (tipoAtual && String(i?.tipo || '').toUpperCase().trim() !== tipoAtual) return false;
+        return true;
+      });
+
+      const comCategoria = categoriaAtual
+        ? candidatos.filter(i => String(i?.categoria || '').toUpperCase().trim() === categoriaAtual)
+        : [];
+      if (comCategoria.length > 0) {
+        candidatos = comCategoria;
+      }
+
+      const comUnidade = unidadeAtual
+        ? candidatos.filter(i => String(i?.unidade || '').toUpperCase().trim() === unidadeAtual)
+        : [];
+      if (comUnidade.length > 0) {
+        candidatos = comUnidade;
+      }
+
+      if (!candidatos.some(i => String(i?.ID || '').trim() === atualId)) {
+        candidatos = [atual, ...candidatos];
+      }
+      return candidatos;
+    }
+
+    function atualizarFonteConsumoContexto(fonteEl, row) {
+      if (!fonteEl) return;
+      const select = fonteEl.querySelector('.consumo-estoque-select');
+      const input = fonteEl.querySelector('input[data-campo-qtd-consumo="1"]');
+      if (!input) return;
+
+      const estoqueId = String(
+        select?.value ||
+        input.dataset.estoqueId ||
+        row?.dataset?.estoqueIdOrigem ||
+        ''
+      ).trim();
+      const itemEstoque = getEstoqueOpcaoById(estoqueId);
+      const unidadeFallback = String(row?.dataset?.unidadeOrigem || '').trim();
+      const unidade = String(itemEstoque?.unidade || unidadeFallback).trim();
+
+      input.dataset.estoqueId = estoqueId;
+      input.dataset.unidade = unidade;
+      input.step = obterStepQuantidade(unidade);
+    }
+
+    function atualizarRemocaoFontesConsumo(row) {
+      if (!row) return;
+      const fontes = [...row.querySelectorAll('.consumo-fonte')];
+      const bloquear = fontes.length <= 1;
+      fontes.forEach(fonte => {
+        const btn = fonte.querySelector('.btn-consumo-remover-fonte');
+        if (btn) btn.disabled = bloquear;
+      });
+    }
+
+    function garantirFonteAutoSugestao(row) {
+      if (!row) return;
+      const fontes = [...row.querySelectorAll('.consumo-fonte')];
+      if (fontes.length === 0) return;
+
+      let encontrouAuto = false;
+      fontes.forEach((fonte, idx) => {
+        const input = fonte.querySelector('input[data-campo-qtd-consumo="1"]');
+        if (!input) return;
+        if (!encontrouAuto && input.dataset.autoSugestao === '1') {
+          encontrouAuto = true;
+          return;
+        }
+        if (!encontrouAuto && idx === 0) {
+          input.dataset.autoSugestao = '1';
+          if (input.dataset.manual !== '1') {
+            input.dataset.manual = '0';
+          }
+        } else {
+          input.dataset.autoSugestao = '0';
+        }
+      });
+    }
+
+    function criarFonteConsumo(row, opcoes = {}) {
+      const candidatos = getCandidatosConsumo({ estoque_id: row?.dataset?.estoqueIdOrigem || '' });
+      const estoqueIdSelecionado = String(opcoes.estoqueId || row?.dataset?.estoqueIdOrigem || '').trim();
+      const unidadeOrigem = String(row?.dataset?.unidadeOrigem || '').trim();
+      const estoqueSel = getEstoqueOpcaoById(estoqueIdSelecionado);
+      const unidade = String(opcoes.unidade || estoqueSel?.unidade || unidadeOrigem).trim();
+      const stepQtd = obterStepQuantidade(unidade);
+      const opcoesSelect = renderOpcoesEstoque(candidatos, estoqueIdSelecionado, false);
+      const quantidadeBase = parseNumeroInput((opcoes.quantidadeBase ?? row?.dataset?.quantidadeBase ?? 0));
+      const quantidade = parseNumeroInput(opcoes.quantidade);
+      const autoSugestao = !!opcoes.autoSugestao;
+
+      const fonte = document.createElement('div');
+      fonte.className = 'linha-add-destino consumo-fonte';
+      fonte.innerHTML = `
+        <select class="consumo-estoque-select">
+          ${opcoesSelect}
+        </select>
+        <input
+          type="number"
+          step="${stepQtd}"
+          min="0"
+          data-campo-qtd-consumo="1"
+          data-estoque-id="${escapeAttr(estoqueIdSelecionado)}"
+          data-unidade="${escapeAttr(unidade)}"
+          data-quantidade-base="${escapeAttr(Number(quantidadeBase || 0).toFixed(6))}"
+          data-auto-sugestao="${autoSugestao ? '1' : '0'}"
+          data-manual="${autoSugestao ? '0' : '1'}"
+          value="${autoSugestao ? '' : escapeAttr(formatQuantidadeInputPorUnidade(quantidade, unidade))}"
+        >
+        <button type="button" class="btn-consumo-remover-fonte">Remover item</button>
+      `;
+
+      const select = fonte.querySelector('.consumo-estoque-select');
+      const input = fonte.querySelector('input[data-campo-qtd-consumo="1"]');
+      const btnRemover = fonte.querySelector('.btn-consumo-remover-fonte');
+
+      if (select) {
+        select.addEventListener('change', () => {
+          atualizarFonteConsumoContexto(fonte, row);
+          if (input && input.dataset.manual !== '1') {
+            atualizarSugestaoConsumoLote();
+          }
+        });
+      }
+      if (input) {
+        input.addEventListener('input', () => {
+          input.dataset.manual = '1';
+        });
+      }
+      if (btnRemover) {
+        btnRemover.addEventListener('click', () => {
+          const wrap = row?.querySelector('[data-consumo-fontes="1"]');
+          if (!wrap) return;
+          fonte.remove();
+          garantirFonteAutoSugestao(row);
+          atualizarRemocaoFontesConsumo(row);
+          atualizarSugestaoConsumoLote();
+        });
+      }
+
+      atualizarFonteConsumoContexto(fonte, row);
+      return fonte;
+    }
+
+    function adicionarFonteConsumo(row, opcoes = {}) {
+      if (!row) return;
+      const wrap = row.querySelector('[data-consumo-fontes="1"]');
+      if (!wrap) return;
+      const fonte = criarFonteConsumo(row, opcoes);
+      wrap.appendChild(fonte);
+      garantirFonteAutoSugestao(row);
+      atualizarRemocaoFontesConsumo(row);
+    }
+
     /* =========================
        FORMULARIO
     ========================== */
@@ -938,11 +1110,24 @@
 
       const fator = qtdPlanejada > 0 ? (qtdLote / qtdPlanejada) : 0;
       const bypass = !!consumoBypassEntradas?.checked;
-      const inputs = consumoLista.querySelectorAll('input[data-estoque-id]');
+      const selects = consumoLista.querySelectorAll('.consumo-estoque-select');
+      selects.forEach(select => { select.disabled = bypass; });
+      const botoesAdd = consumoLista.querySelectorAll('.btn-consumo-add-fonte');
+      botoesAdd.forEach(btn => { btn.disabled = bypass; });
+      const linhasConsumo = [...consumoLista.querySelectorAll('.linha-consumo')];
+      linhasConsumo.forEach(row => {
+        if (bypass) {
+          row.querySelectorAll('.btn-consumo-remover-fonte').forEach(btn => { btn.disabled = true; });
+        } else {
+          atualizarRemocaoFontesConsumo(row);
+        }
+      });
+      const inputs = consumoLista.querySelectorAll('input[data-campo-qtd-consumo="1"]');
       inputs.forEach(input => {
         if (!input) return;
         input.disabled = bypass;
         if (bypass) return;
+        if (input.dataset.autoSugestao !== '1') return;
         if (input.dataset.manual === '1') return;
         const quantidadeBase = parseNumeroInput(input.dataset.quantidadeBase || 0);
         const sugerida = Math.max(0, quantidadeBase * fator);
@@ -982,35 +1167,51 @@
       (materiais || []).forEach(item => {
         const quantidadeBase = Number(item.quantidade || 0);
         const unidade = String(item.unidade || '').trim();
-        const stepQtd = obterStepQuantidade(unidade);
         const row = document.createElement('div');
         row.className = 'linha-consumo';
+        row.dataset.estoqueIdOrigem = String(item.estoque_id || '').trim();
+        row.dataset.unidadeOrigem = unidade;
+        row.dataset.quantidadeBase = Number(quantidadeBase || 0).toFixed(6);
         row.innerHTML = `
           <div>
             <div><strong>${item.item || item.estoque_id}</strong></div>
             <div>${formatQuantidadePorUnidade(quantidadeBase, unidade)} ${unidade || ''} (plano total)</div>
           </div>
-          <div class="campo-ajuda-wrap campo-ajuda-consumo">
-            <span class="campo-ajuda-tag">Qtd a baixar</span>
-            <input
-              type="number"
-              step="${stepQtd}"
-              min="0"
-              data-estoque-id="${item.estoque_id}"
-              data-unidade="${unidade}"
-              data-quantidade-base="${Number(quantidadeBase || 0).toFixed(6)}"
-              data-manual="0"
-              value=""
-            >
+          <div data-consumo-fontes="1"></div>
+          <div class="linha-add-destino">
+            <button type="button" class="btn-consumo-add-fonte">Adicionar item do estoque</button>
           </div>
         `;
         consumoLista.appendChild(row);
+
+        adicionarFonteConsumo(row, {
+          estoqueId: item.estoque_id,
+          unidade,
+          quantidadeBase,
+          autoSugestao: true
+        });
+
+        const btnAddFonte = row.querySelector('.btn-consumo-add-fonte');
+        if (btnAddFonte) {
+          btnAddFonte.addEventListener('click', () => {
+            adicionarFonteConsumo(row, {
+              estoqueId: item.estoque_id,
+              unidade,
+              quantidadeBase,
+              autoSugestao: false
+            });
+          });
+        }
       });
 
       if (consumoQtdProduzida) {
         consumoQtdProduzida.oninput = () => {
-          const inputs = consumoLista.querySelectorAll('input[data-estoque-id]');
-          inputs.forEach(input => { input.dataset.manual = '0'; });
+          const inputs = consumoLista.querySelectorAll('input[data-campo-qtd-consumo="1"]');
+          inputs.forEach(input => {
+            if (input.dataset.autoSugestao === '1') {
+              input.dataset.manual = '0';
+            }
+          });
           atualizarSugestaoConsumoLote();
         };
       }
@@ -1019,13 +1220,6 @@
           atualizarSugestaoConsumoLote();
         };
       }
-
-      const inputs = consumoLista.querySelectorAll('input[data-estoque-id]');
-      inputs.forEach(input => {
-        input.addEventListener('input', () => {
-          input.dataset.manual = '1';
-        });
-      });
 
       atualizarSugestaoConsumoLote();
       modalConsumo.classList.remove('hidden');
@@ -1072,13 +1266,17 @@
       const producaoId = modalConsumo.dataset.producaoId || '';
       const bypassEntradas = !!consumoBypassEntradas?.checked;
       const qtdProduzida = parseNumeroInput(consumoQtdProduzida?.value || 0);
-      const inputs = consumoLista.querySelectorAll('input[data-estoque-id]');
+      const fontes = consumoLista.querySelectorAll('.consumo-fonte');
       const itens = bypassEntradas
         ? []
-        : [...inputs].map(input => ({
-          estoque_id: input.dataset.estoqueId,
-          quantidade: parseNumeroInput(input.value || 0)
-        })).filter(i => i.estoque_id && i.quantidade > 0);
+        : [...fontes].map(fonte => {
+          const input = fonte.querySelector('input[data-campo-qtd-consumo="1"]');
+          const select = fonte.querySelector('.consumo-estoque-select');
+          return {
+            estoque_id: String(select?.value || input?.dataset.estoqueId || '').trim(),
+            quantidade: parseNumeroInput(input?.value || 0)
+          };
+        }).filter(i => i.estoque_id && i.quantidade > 0);
 
       return {
         producaoId,

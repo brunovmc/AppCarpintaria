@@ -1671,6 +1671,7 @@ function atualizarConsumoVinculosProducao(producaoId, itensConsumidos) {
   const idxPrevista = headers.indexOf('quantidade_prevista');
   const idxConsumida = headers.indexOf('quantidade_consumida');
   const idxStatus = headers.indexOf('status');
+  const idxTipo = headers.indexOf('tipo_item');
   const idxAtivo = headers.indexOf('ativo');
 
   if (
@@ -1684,14 +1685,29 @@ function atualizarConsumoVinculosProducao(producaoId, itensConsumidos) {
   }
 
   const consumoMap = {};
+  const consumoPorTipoMap = {};
+  const sheetEstoque = ss.getSheetByName(ABA_ESTOQUE);
+  const estoqueTipoMap = {};
+  if (sheetEstoque) {
+    rowsToObjects(sheetEstoque).forEach(item => {
+      const id = String(item?.ID || '').trim();
+      if (!id) return;
+      estoqueTipoMap[id] = String(item?.tipo || '').trim().toUpperCase();
+    });
+  }
+
   (Array.isArray(itensConsumidos) ? itensConsumidos : []).forEach(i => {
     const estoqueId = i && i.estoque_id ? String(i.estoque_id) : '';
     const qtd = parseNumeroBR(i ? i.quantidade : 0);
     if (!estoqueId || qtd <= 0) return;
     consumoMap[estoqueId] = (consumoMap[estoqueId] || 0) + qtd;
+    const tipo = String(estoqueTipoMap[estoqueId] || '').trim().toUpperCase();
+    if (tipo) {
+      consumoPorTipoMap[tipo] = (consumoPorTipoMap[tipo] || 0) + qtd;
+    }
   });
 
-  if (Object.keys(consumoMap).length === 0) return;
+  if (Object.keys(consumoMap).length === 0 && Object.keys(consumoPorTipoMap).length === 0) return;
 
   for (let i = 1; i < data.length; i++) {
     const row = data[i];
@@ -1710,6 +1726,11 @@ function atualizarConsumoVinculosProducao(producaoId, itensConsumidos) {
     const qtdAplicada = Math.min(qtdPendente, restante);
     const novaConsumida = qtdConsumidaAtual + qtdAplicada;
     consumoMap[estoqueId] = restante - qtdAplicada;
+    const tipoVinculo = String(idxTipo !== -1 ? row[idxTipo] : '').trim().toUpperCase();
+    if (tipoVinculo && qtdAplicada > 0) {
+      const saldoTipo = parseNumeroBR(consumoPorTipoMap[tipoVinculo]);
+      consumoPorTipoMap[tipoVinculo] = Math.max(0, saldoTipo - qtdAplicada);
+    }
 
     const novoStatus = novaConsumida <= 0
       ? 'Pendente'
@@ -1717,6 +1738,39 @@ function atualizarConsumoVinculosProducao(producaoId, itensConsumidos) {
 
     sheet.getRange(i + 1, idxConsumida + 1).setValue(novaConsumida);
     sheet.getRange(i + 1, idxStatus + 1).setValue(novoStatus);
+    data[i][idxConsumida] = novaConsumida;
+    data[i][idxStatus] = novoStatus;
+  }
+
+  if (idxTipo !== -1) {
+    for (let i = 1; i < data.length; i++) {
+      const row = data[i];
+      if (row[idxProducao] !== producaoId) continue;
+      if (idxAtivo !== -1 && String(row[idxAtivo]).toLowerCase() !== 'true') continue;
+
+      const tipoVinculo = String(row[idxTipo] || '').trim().toUpperCase();
+      if (!tipoVinculo) continue;
+      const restanteTipo = parseNumeroBR(consumoPorTipoMap[tipoVinculo]);
+      if (restanteTipo <= 0) continue;
+
+      const qtdPrevista = parseNumeroBR(row[idxPrevista]);
+      const qtdConsumidaAtual = parseNumeroBR(row[idxConsumida]);
+      const qtdPendente = Math.max(qtdPrevista - qtdConsumidaAtual, 0);
+      if (qtdPendente <= 0) continue;
+
+      const qtdAplicada = Math.min(qtdPendente, restanteTipo);
+      const novaConsumida = qtdConsumidaAtual + qtdAplicada;
+      consumoPorTipoMap[tipoVinculo] = restanteTipo - qtdAplicada;
+
+      const novoStatus = novaConsumida <= 0
+        ? 'Pendente'
+        : (novaConsumida >= qtdPrevista ? 'Concluido' : 'Parcial');
+
+      sheet.getRange(i + 1, idxConsumida + 1).setValue(novaConsumida);
+      sheet.getRange(i + 1, idxStatus + 1).setValue(novoStatus);
+      data[i][idxConsumida] = novaConsumida;
+      data[i][idxStatus] = novoStatus;
+    }
   }
   invalidarCachesRelacionadosAba(ABA_PRODUCAO);
 }
@@ -2279,19 +2333,35 @@ function consumirEstoque(producaoId, itensParaBaixar, opcoes) {
       if (!estoqueId || qtd <= 0) return;
       previstosMap[estoqueId] = (previstosMap[estoqueId] || 0) + qtd;
     });
+    const tiposPrevistosMap = {};
+    if (!bypassEntradas) {
+      const vinculosMateriais = listarVinculosMateriaisProducao(producaoId);
+      (Array.isArray(vinculosMateriais) ? vinculosMateriais : []).forEach(v => {
+        const tipo = String(v?.tipo_item || '').trim().toUpperCase();
+        const pendente = parseNumeroBR(v?.quantidade_pendente);
+        if (!tipo || pendente <= 0.000001) return;
+        tiposPrevistosMap[tipo] = true;
+      });
+    }
 
     if (!bypassEntradas && Object.keys(previstosMap).length > 0 && itensValidos.length === 0) {
       throw new Error('Nenhum item de entrada informado para baixa.');
     }
 
     if (!bypassEntradas) {
-      const naoPrevistos = Object.keys(itensMap).filter(estoqueId => !previstosMap[estoqueId]);
+      const naoPrevistos = Object.keys(itensMap).filter(estoqueId => {
+        if (previstosMap[estoqueId]) return false;
+        const estoqueItem = estoqueMapAtivo[estoqueId];
+        const tipoItem = String(estoqueItem?.tipo || '').trim().toUpperCase();
+        if (tipoItem && tiposPrevistosMap[tipoItem]) return false;
+        return true;
+      });
       if (naoPrevistos.length > 0) {
         const nomes = naoPrevistos.map(id => {
           const it = estoqueMapAtivo[id];
           return it ? (it.item || id) : id;
         });
-        throw new Error(`Itens nao previstos informados para baixa: ${nomes.join(', ')}`);
+        throw new Error(`Itens nao compativeis com os tipos previstos para baixa: ${nomes.join(', ')}`);
       }
     }
 
