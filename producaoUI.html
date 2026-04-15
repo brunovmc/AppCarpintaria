@@ -104,6 +104,43 @@
       return isNaN(n) ? 0 : n;
     }
 
+    function parseBoolLike(valor) {
+      if (valor === true) return true;
+      const s = String(valor ?? '').trim().toLowerCase();
+      return s === 'true' || s === '1' || s === 'sim';
+    }
+
+    function normalizarStatusProducao(valor) {
+      return String(valor || '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .trim()
+        .toUpperCase();
+    }
+
+    function isProducaoConcluidaComEstoque(item) {
+      const status = normalizarStatusProducao(item?.status);
+      const estoqueAtualizado = parseBoolLike(item?.estoque_atualizado);
+      const statusConcluido = status === 'CONCLUIDO' || status === 'CONCLUIDA';
+      return estoqueAtualizado && statusConcluido;
+    }
+
+    function separarListasProducao(itens) {
+      const lista = Array.isArray(itens) ? itens : [];
+      const emAndamento = [];
+      const concluidas = [];
+
+      lista.forEach(item => {
+        if (isProducaoConcluidaComEstoque(item)) {
+          concluidas.push(item);
+          return;
+        }
+        emAndamento.push(item);
+      });
+
+      return { emAndamento, concluidas };
+    }
+
     function escapeHtml(valor) {
       return String(valor ?? '')
         .replace(/&/g, '&amp;')
@@ -704,7 +741,7 @@
       miniDashboard.innerHTML = `
         <div class="producao-mini-dashboard-head">
           <div class="producao-mini-dashboard-card">
-            <div class="producao-mini-dashboard-label">OPs no filtro</div>
+            <div class="producao-mini-dashboard-label">OPs em andamento</div>
             <div class="producao-mini-dashboard-valor">${escapeHtml(String(totalOps))}</div>
           </div>
 
@@ -996,7 +1033,8 @@
       const jobId = renderJobSeq;
       lista.innerHTML = '';
       listaFiltradaAtual = Array.isArray(listaItens) ? listaItens : [];
-      renderMiniDashboardProducao(listaFiltradaAtual);
+      const grupos = separarListasProducao(listaFiltradaAtual);
+      renderMiniDashboardProducao(grupos.emAndamento);
       qtdRenderizada = 0;
 
       if (listaFiltradaAtual.length === 0) {
@@ -1007,18 +1045,55 @@
         return;
       }
 
+      const filaCards = [];
+
+      const criarSecao = (titulo, quantidade, itensSecao) => {
+        const secao = document.createElement('section');
+        secao.className = 'producao-secao';
+        secao.innerHTML = `
+          <div class="producao-secao-head">
+            <h4 class="producao-secao-titulo">${escapeHtml(titulo)}</h4>
+            <span class="producao-secao-meta">${escapeHtml(String(quantidade))} OP${quantidade === 1 ? '' : 's'}</span>
+          </div>
+        `;
+        const corpo = document.createElement('div');
+        corpo.className = 'producao-secao-lista';
+        secao.appendChild(corpo);
+        lista.appendChild(secao);
+
+        (Array.isArray(itensSecao) ? itensSecao : []).forEach(item => {
+          filaCards.push({ container: corpo, item });
+        });
+      };
+
+      if (grupos.emAndamento.length > 0) {
+        criarSecao('Em andamento', grupos.emAndamento.length, grupos.emAndamento);
+      }
+      if (grupos.concluidas.length > 0) {
+        criarSecao('Producoes concluidas', grupos.concluidas.length, grupos.concluidas);
+      }
+
       let idx = 0;
       const processarChunk = () => {
         if (jobId !== renderJobSeq) return;
-        const limite = Math.min(idx + RENDER_CHUNK_SIZE, listaFiltradaAtual.length);
-        const fragment = document.createDocumentFragment();
+        const limite = Math.min(idx + RENDER_CHUNK_SIZE, filaCards.length);
+        const fragments = new Map();
         for (; idx < limite; idx++) {
-          fragment.appendChild(montarCardProducao(listaFiltradaAtual[idx]));
+          const alvo = filaCards[idx];
+          if (!alvo || !alvo.container) continue;
+          let fragment = fragments.get(alvo.container);
+          if (!fragment) {
+            fragment = document.createDocumentFragment();
+            fragments.set(alvo.container, fragment);
+          }
+          fragment.appendChild(montarCardProducao(alvo.item));
         }
-        lista.appendChild(fragment);
+        fragments.forEach((fragment, container) => {
+          container.appendChild(fragment);
+        });
         qtdRenderizada = idx;
 
-        if (idx < listaFiltradaAtual.length) {
+        if (idx < filaCards.length) {
           proximoFrame(processarChunk);
           return;
         }
