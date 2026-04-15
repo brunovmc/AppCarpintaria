@@ -338,19 +338,21 @@ function listarProdutos(forcarRecarregar) {
     }
   }
 
-  const sheet = getDataSpreadsheet().getSheetByName(ABA_PRODUTOS);
+  const ss = getDataSpreadsheet();
+  const contextoLeitura = criarContextoLeituraRows();
+  const sheet = ss.getSheetByName(ABA_PRODUTOS);
   if (!sheet) {
     salvarCacheProdutos([]);
     return [];
   }
 
-  const produtosAtivos = rowsToObjects(sheet)
+  const produtosAtivos = rowsToObjects(sheet, { context: contextoLeitura })
     .filter(i => String(i.ativo).toLowerCase() === 'true')
     .map(i => ({ ...i }));
 
-  const receitasSheet = getDataSpreadsheet().getSheetByName(ABA_PRODUTOS_RECEITAS);
+  const receitasSheet = ss.getSheetByName(ABA_PRODUTOS_RECEITAS);
   const receitasAtivas = receitasSheet
-    ? rowsToObjects(receitasSheet).filter(i => String(i.ativo).toLowerCase() === 'true')
+    ? rowsToObjects(receitasSheet, { context: contextoLeitura }).filter(i => String(i.ativo).toLowerCase() === 'true')
     : [];
   const receitasPorProduto = {};
   receitasAtivas.forEach(r => {
@@ -368,9 +370,9 @@ function listarProdutos(forcarRecarregar) {
     receitaPrincipalPorProduto[produtoId] = semParent || receitas[0] || null;
   });
 
-  const entradasSheet = getDataSpreadsheet().getSheetByName(ABA_PRODUTOS_RECEITAS_ENTRADAS);
+  const entradasSheet = ss.getSheetByName(ABA_PRODUTOS_RECEITAS_ENTRADAS);
   const entradasAtivas = entradasSheet
-    ? rowsToObjects(entradasSheet).filter(i => String(i.ativo).toLowerCase() === 'true')
+    ? rowsToObjects(entradasSheet, { context: contextoLeitura }).filter(i => String(i.ativo).toLowerCase() === 'true')
     : [];
   const entradasPorReceita = {};
   entradasAtivas.forEach(e => {
@@ -382,9 +384,9 @@ function listarProdutos(forcarRecarregar) {
     entradasPorReceita[receitaId].push(e);
   });
 
-  const saidasSheet = getDataSpreadsheet().getSheetByName(ABA_PRODUTOS_RECEITAS_SAIDAS);
+  const saidasSheet = ss.getSheetByName(ABA_PRODUTOS_RECEITAS_SAIDAS);
   const saidasAtivas = saidasSheet
-    ? rowsToObjects(saidasSheet).filter(i => String(i.ativo).toLowerCase() === 'true')
+    ? rowsToObjects(saidasSheet, { context: contextoLeitura }).filter(i => String(i.ativo).toLowerCase() === 'true')
     : [];
   const saidasPorReceita = {};
   saidasAtivas.forEach(s => {
@@ -396,9 +398,9 @@ function listarProdutos(forcarRecarregar) {
     saidasPorReceita[receitaId].push(s);
   });
 
-  const etapasSheet = getDataSpreadsheet().getSheetByName(ABA_PRODUTOS_ETAPAS);
+  const etapasSheet = ss.getSheetByName(ABA_PRODUTOS_ETAPAS);
   const etapasAtivas = etapasSheet
-    ? rowsToObjects(etapasSheet).filter(i => String(i.ativo).toLowerCase() === 'true')
+    ? rowsToObjects(etapasSheet, { context: contextoLeitura }).filter(i => String(i.ativo).toLowerCase() === 'true')
     : [];
   const etapasPorProduto = {};
   etapasAtivas.forEach(et => {
@@ -410,10 +412,10 @@ function listarProdutos(forcarRecarregar) {
     etapasPorProduto[produtoId].push(et);
   });
 
-  const estoqueSheet = getDataSpreadsheet().getSheetByName(ABA_ESTOQUE);
+  const estoqueSheet = ss.getSheetByName(ABA_ESTOQUE);
   const estoqueMap = {};
   if (estoqueSheet) {
-    rowsToObjects(estoqueSheet).forEach(item => {
+    rowsToObjects(estoqueSheet, { context: contextoLeitura }).forEach(item => {
       const estoqueId = String(item.ID || '').trim();
       if (!estoqueId) return;
       estoqueMap[estoqueId] = item;
@@ -683,6 +685,41 @@ function deletarComponenteProduto(id) {
   );
 }
 
+function inativarLinhasEmBlocosProdutos(sheet, ativoCol, linhasAlvo) {
+  if (!sheet || ativoCol < 0) return 0;
+
+  const linhas = Array.isArray(linhasAlvo)
+    ? linhasAlvo.filter(l => Number.isFinite(l) && l >= 2).sort((a, b) => a - b)
+    : [];
+  if (linhas.length === 0) return 0;
+
+  let totalInativado = 0;
+  let blocoInicio = linhas[0];
+  let blocoTamanho = 1;
+
+  function flushBloco() {
+    const valores = Array.from({ length: blocoTamanho }, () => [false]);
+    sheet.getRange(blocoInicio, ativoCol + 1, blocoTamanho, 1).setValues(valores);
+    totalInativado += blocoTamanho;
+  }
+
+  for (let i = 1; i < linhas.length; i++) {
+    const linhaAtual = linhas[i];
+    const linhaAnterior = linhas[i - 1];
+    if (linhaAtual === linhaAnterior + 1) {
+      blocoTamanho += 1;
+      continue;
+    }
+
+    flushBloco();
+    blocoInicio = linhaAtual;
+    blocoTamanho = 1;
+  }
+
+  flushBloco();
+  return totalInativado;
+}
+
 function salvarComposicaoProduto(produtoId, linhas) {
   assertCanWriteProdutos('Salvamento de composicao de produto');
   const ss = getDataSpreadsheet();
@@ -698,13 +735,17 @@ function salvarComposicaoProduto(produtoId, linhas) {
   const data = sheet.getDataRange().getValues();
   const headers = data[0] || [];
   const idCol = headers.indexOf('produto_id');
+  const ativoCol = headers.indexOf('ativo');
 
-  if (idCol !== -1 && data.length > 1) {
-    for (let i = data.length - 1; i >= 1; i--) {
-      if (data[i][idCol] === produtoId) {
-        sheet.deleteRow(i + 1);
-      }
+  if (idCol !== -1 && ativoCol !== -1 && data.length > 1) {
+    const produtoIdAlvo = String(produtoId || '').trim();
+    const linhasAlvo = [];
+    for (let i = 1; i < data.length; i++) {
+      if (String(data[i][idCol] || '').trim() !== produtoIdAlvo) continue;
+      if (String(data[i][ativoCol]).toLowerCase() === 'false') continue;
+      linhasAlvo.push(i + 1);
     }
+    inativarLinhasEmBlocosProdutos(sheet, ativoCol, linhasAlvo);
   }
 
   const linhasValidas = Array.isArray(linhas) ? linhas : [];
@@ -831,14 +872,19 @@ function limparEtapasProduto(produtoId) {
   const data = sheet.getDataRange().getValues();
   const headers = data[0] || [];
   const idxProduto = headers.indexOf('produto_id');
+  const idxAtivo = headers.indexOf('ativo');
 
-  if (idxProduto === -1 || data.length <= 1) return;
+  if (idxProduto === -1 || idxAtivo === -1 || data.length <= 1) return;
 
-  for (let i = data.length - 1; i >= 1; i--) {
-    if (String(data[i][idxProduto] || '') === String(produtoId || '')) {
-      sheet.deleteRow(i + 1);
-    }
+  const produtoIdAlvo = String(produtoId || '').trim();
+  const linhasAlvo = [];
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][idxProduto] || '').trim() !== produtoIdAlvo) continue;
+    if (String(data[i][idxAtivo]).toLowerCase() === 'false') continue;
+    linhasAlvo.push(i + 1);
   }
+
+  inativarLinhasEmBlocosProdutos(sheet, idxAtivo, linhasAlvo);
 }
 
 function salvarEtapasProduto(produtoId, etapas) {
@@ -962,38 +1008,16 @@ function inativarLinhasReceita(sheetName, receitaId) {
   const ativoCol = headers.indexOf('ativo');
 
   if (idCol === -1 || ativoCol === -1) return;
+  const receitaIdAlvo = String(receitaId || '').trim();
   const linhasAlvo = [];
 
   for (let i = 1; i < data.length; i++) {
-    if (data[i][idCol] === receitaId) {
-      linhasAlvo.push(i + 1);
-    }
+    if (String(data[i][idCol] || '').trim() !== receitaIdAlvo) continue;
+    if (String(data[i][ativoCol]).toLowerCase() === 'false') continue;
+    linhasAlvo.push(i + 1);
   }
 
-  if (linhasAlvo.length === 0) return;
-
-  let blocoInicio = linhasAlvo[0];
-  let blocoTamanho = 1;
-
-  function flushBloco() {
-    const valores = Array.from({ length: blocoTamanho }, () => [false]);
-    sheet.getRange(blocoInicio, ativoCol + 1, blocoTamanho, 1).setValues(valores);
-  }
-
-  for (let i = 1; i < linhasAlvo.length; i++) {
-    const linhaAtual = linhasAlvo[i];
-    const linhaAnterior = linhasAlvo[i - 1];
-    if (linhaAtual === linhaAnterior + 1) {
-      blocoTamanho += 1;
-      continue;
-    }
-
-    flushBloco();
-    blocoInicio = linhaAtual;
-    blocoTamanho = 1;
-  }
-
-  flushBloco();
+  inativarLinhasEmBlocosProdutos(sheet, ativoCol, linhasAlvo);
 }
 
 function deletarReceitaProduto(receitaId) {
@@ -1021,17 +1045,28 @@ function limparLinhasReceita(sheetName, receitaId) {
     sheet = ss.insertSheet(sheetName);
   }
 
+  const schema = sheetName === ABA_PRODUTOS_RECEITAS_ENTRADAS
+    ? PRODUTOS_RECEITAS_ENTRADAS_SCHEMA
+    : (sheetName === ABA_PRODUTOS_RECEITAS_SAIDAS ? PRODUTOS_RECEITAS_SAIDAS_SCHEMA : null);
+  if (Array.isArray(schema)) {
+    ensureSchema(sheet, schema);
+  }
+
   const data = sheet.getDataRange().getValues();
   const headers = data[0] || [];
   const idCol = headers.indexOf('receita_id');
+  const ativoCol = headers.indexOf('ativo');
+  if (idCol === -1 || ativoCol === -1 || data.length <= 1) return;
 
-  if (idCol !== -1 && data.length > 1) {
-    for (let i = data.length - 1; i >= 1; i--) {
-      if (data[i][idCol] === receitaId) {
-        sheet.deleteRow(i + 1);
-      }
-    }
+  const receitaIdAlvo = String(receitaId || '').trim();
+  const linhasAlvo = [];
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][idCol] || '').trim() !== receitaIdAlvo) continue;
+    if (String(data[i][ativoCol]).toLowerCase() === 'false') continue;
+    linhasAlvo.push(i + 1);
   }
+
+  inativarLinhasEmBlocosProdutos(sheet, ativoCol, linhasAlvo);
 }
 
 function salvarEntradasReceita(receitaId, linhas) {

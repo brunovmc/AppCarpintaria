@@ -1,3 +1,17 @@
+const EXECUTION_MEMORY_CACHE_KEY = '__APP_EXECUTION_MEMORY_CACHE__';
+
+function getExecutionMemoryCache() {
+  const globalScope = (typeof globalThis !== 'undefined' && globalThis)
+    ? globalThis
+    : (typeof this !== 'undefined' ? this : {});
+
+  if (!globalScope[EXECUTION_MEMORY_CACHE_KEY]) {
+    globalScope[EXECUTION_MEMORY_CACHE_KEY] = {};
+  }
+
+  return globalScope[EXECUTION_MEMORY_CACHE_KEY];
+}
+
 function getDataSpreadsheet(opcoes) {
   const opts = opcoes || {};
   if (!opts.skipAccessCheck && typeof assertCanRead === 'function') {
@@ -12,8 +26,15 @@ function getDataSpreadsheet(opcoes) {
     throw new Error('DATA_SPREADSHEET_ID nao configurado em main.js');
   }
 
+  const executionCache = getExecutionMemoryCache();
+  if (executionCache[id]) {
+    return executionCache[id];
+  }
+
   try {
-    return SpreadsheetApp.openById(id);
+    const ss = SpreadsheetApp.openById(id);
+    executionCache[id] = ss;
+    return ss;
   } catch (error) {
     throw new Error('Nao foi possivel abrir a planilha de dados. Verifique o DATA_SPREADSHEET_ID e as permissoes de acesso. Detalhes: ' + error.message);
   }
@@ -188,15 +209,66 @@ function ensureSchema(sheet, schema) {
   sheet.getRange(1, startCol, 1, missing.length).setValues([missing]);
 }
 
-function rowsToObjects(sheet) {
-  const data = sheet.getDataRange().getValues();
-  const headers = data.shift();
+function criarContextoLeituraRows() {
+  return { __rowsToObjectsCache: {} };
+}
 
-  return data.map(row => {
+function getRowsToObjectsCacheBucket(contexto) {
+  if (!contexto || typeof contexto !== 'object') return null;
+  if (!contexto.__rowsToObjectsCache || typeof contexto.__rowsToObjectsCache !== 'object') {
+    contexto.__rowsToObjectsCache = {};
+  }
+  return contexto.__rowsToObjectsCache;
+}
+
+function getRowsToObjectsCacheKey(sheet) {
+  if (!sheet) return '';
+  const planilha = sheet.getParent();
+  const planilhaId = planilha && typeof planilha.getId === 'function'
+    ? String(planilha.getId() || '').trim()
+    : '';
+  const aba = typeof sheet.getName === 'function'
+    ? String(sheet.getName() || '').trim()
+    : '';
+  if (!aba) return '';
+  return `${planilhaId || 'SEM_ID'}:${aba}`;
+}
+
+function cloneRowsToObjects(rows) {
+  return (Array.isArray(rows) ? rows : []).map(row => ({ ...row }));
+}
+
+function rowsToObjects(sheet, opcoes) {
+  if (!sheet) return [];
+
+  const opts = opcoes || {};
+  const contexto = (opts.context && typeof opts.context === 'object')
+    ? opts.context
+    : null;
+  const cacheBucket = getRowsToObjectsCacheBucket(contexto);
+  const cacheKey = cacheBucket ? getRowsToObjectsCacheKey(sheet) : '';
+
+  if (cacheBucket && cacheKey && Array.isArray(cacheBucket[cacheKey])) {
+    return cloneRowsToObjects(cacheBucket[cacheKey]);
+  }
+
+  const data = sheet.getDataRange().getValues();
+  if (!Array.isArray(data) || data.length === 0) {
+    return [];
+  }
+
+  const headers = Array.isArray(data[0]) ? data[0] : [];
+  const rows = data.slice(1).map(row => {
     const obj = {};
     headers.forEach((h, i) => obj[h] = row[i]);
     return obj;
   });
+
+  if (cacheBucket && cacheKey) {
+    cacheBucket[cacheKey] = rows;
+  }
+
+  return cloneRowsToObjects(rows);
 }
 
 function normalizeIdValue(value) {

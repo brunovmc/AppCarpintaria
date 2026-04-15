@@ -259,14 +259,16 @@ function listarProducao(forcarRecarregar) {
     }
   }
 
-  const sheet = getDataSpreadsheet().getSheetByName(ABA_PRODUCAO);
+  const ss = getDataSpreadsheet();
+  const contextoLeitura = criarContextoLeituraRows();
+  const sheet = ss.getSheetByName(ABA_PRODUCAO);
   if (!sheet) {
     salvarCacheProducao([]);
     return [];
   }
 
-  const produtosSheet = getDataSpreadsheet().getSheetByName(ABA_PRODUTOS);
-  const produtos = produtosSheet ? rowsToObjects(produtosSheet) : [];
+  const produtosSheet = ss.getSheetByName(ABA_PRODUTOS);
+  const produtos = produtosSheet ? rowsToObjects(produtosSheet, { context: contextoLeitura }) : [];
   const produtosMap = {};
   const produtosAtivosPorNome = {};
   produtos
@@ -299,8 +301,8 @@ function listarProducao(forcarRecarregar) {
       }
     });
 
-  const receitasSheet = getDataSpreadsheet().getSheetByName(ABA_PRODUTOS_RECEITAS);
-  const receitasRows = receitasSheet ? rowsToObjects(receitasSheet) : [];
+  const receitasSheet = ss.getSheetByName(ABA_PRODUTOS_RECEITAS);
+  const receitasRows = receitasSheet ? rowsToObjects(receitasSheet, { context: contextoLeitura }) : [];
   const receitasMap = {};
   receitasRows
     .filter(i => String(i.ativo).toLowerCase() === 'true')
@@ -308,8 +310,8 @@ function listarProducao(forcarRecarregar) {
       receitasMap[r.receita_id] = r;
     });
 
-  const saidasReceitaSheet = getDataSpreadsheet().getSheetByName(ABA_PRODUTOS_RECEITAS_SAIDAS);
-  const saidasReceitaRows = saidasReceitaSheet ? rowsToObjects(saidasReceitaSheet) : [];
+  const saidasReceitaSheet = ss.getSheetByName(ABA_PRODUTOS_RECEITAS_SAIDAS);
+  const saidasReceitaRows = saidasReceitaSheet ? rowsToObjects(saidasReceitaSheet, { context: contextoLeitura }) : [];
   const saidasReceitaMap = {};
   saidasReceitaRows
     .filter(i => String(i.ativo).toLowerCase() === 'true')
@@ -327,8 +329,8 @@ function listarProducao(forcarRecarregar) {
       });
     });
 
-  const etapasSheet = getDataSpreadsheet().getSheetByName(ABA_PRODUCAO_ETAPAS);
-  const etapasRows = etapasSheet ? rowsToObjects(etapasSheet) : [];
+  const etapasSheet = ss.getSheetByName(ABA_PRODUCAO_ETAPAS);
+  const etapasRows = etapasSheet ? rowsToObjects(etapasSheet, { context: contextoLeitura }) : [];
   const etapasMap = {};
   etapasRows
     .filter(i => String(i.ativo).toLowerCase() === 'true')
@@ -346,7 +348,7 @@ function listarProducao(forcarRecarregar) {
     etapasMap[id].sort((a, b) => parseNumeroBR(a.ordem) - parseNumeroBR(b.ordem));
   });
 
-  const rows = rowsToObjects(sheet);
+  const rows = rowsToObjects(sheet, { context: contextoLeitura });
   const lista = rows
     .filter(i => String(i.ativo).toLowerCase() === 'true')
     .map(i => {
@@ -694,6 +696,41 @@ function listarMateriaisPrevistosSnapshot(producaoId) {
   });
 }
 
+function inativarLinhasEmBlocosProducao(sheet, ativoCol, linhasAlvo) {
+  if (!sheet || ativoCol < 0) return 0;
+
+  const linhas = Array.isArray(linhasAlvo)
+    ? linhasAlvo.filter(l => Number.isFinite(l) && l >= 2).sort((a, b) => a - b)
+    : [];
+  if (linhas.length === 0) return 0;
+
+  let totalInativado = 0;
+  let blocoInicio = linhas[0];
+  let blocoTamanho = 1;
+
+  function flushBloco() {
+    const valores = Array.from({ length: blocoTamanho }, () => [false]);
+    sheet.getRange(blocoInicio, ativoCol + 1, blocoTamanho, 1).setValues(valores);
+    totalInativado += blocoTamanho;
+  }
+
+  for (let i = 1; i < linhas.length; i++) {
+    const linhaAtual = linhas[i];
+    const linhaAnterior = linhas[i - 1];
+    if (linhaAtual === linhaAnterior + 1) {
+      blocoTamanho += 1;
+      continue;
+    }
+
+    flushBloco();
+    blocoInicio = linhaAtual;
+    blocoTamanho = 1;
+  }
+
+  flushBloco();
+  return totalInativado;
+}
+
 function limparMateriaisPrevistosSnapshot(producaoId) {
   assertCanWriteProducao('Limpeza de snapshot de materiais previstos');
   const ss = getDataSpreadsheet();
@@ -702,16 +739,22 @@ function limparMateriaisPrevistosSnapshot(producaoId) {
     sheet = ss.insertSheet(ABA_PRODUCAO_MATERIAIS_PREVISTOS);
   }
 
+  ensureSchema(sheet, PRODUCAO_MATERIAIS_PREVISTOS_SCHEMA);
+
   const data = sheet.getDataRange().getValues();
   const headers = data[0] || [];
   const idCol = headers.indexOf('producao_id');
+  const ativoCol = headers.indexOf('ativo');
 
-  if (idCol !== -1 && data.length > 1) {
-    for (let i = data.length - 1; i >= 1; i--) {
-      if (data[i][idCol] === producaoId) {
-        sheet.deleteRow(i + 1);
-      }
+  if (idCol !== -1 && ativoCol !== -1 && data.length > 1) {
+    const producaoIdAlvo = String(producaoId || '').trim();
+    const linhasAlvo = [];
+    for (let i = 1; i < data.length; i++) {
+      if (String(data[i][idCol] || '').trim() !== producaoIdAlvo) continue;
+      if (String(data[i][ativoCol]).toLowerCase() === 'false') continue;
+      linhasAlvo.push(i + 1);
     }
+    inativarLinhasEmBlocosProducao(sheet, ativoCol, linhasAlvo);
   }
 }
 
@@ -794,22 +837,29 @@ function limparVinculosMateriaisProducao(producaoId, opcoes) {
     sheet = ss.insertSheet(ABA_PRODUCAO_VINCULOS);
   }
 
+  ensureSchema(sheet, PRODUCAO_VINCULOS_SCHEMA);
+
   const data = sheet.getDataRange().getValues();
   const headers = data[0] || [];
   const idCol = headers.indexOf('producao_id');
   const receitaEntradaCol = headers.indexOf('receita_entrada_id');
+  const ativoCol = headers.indexOf('ativo');
 
-  if (idCol !== -1 && data.length > 1) {
-    for (let i = data.length - 1; i >= 1; i--) {
-      if (data[i][idCol] !== producaoId) continue;
+  if (idCol !== -1 && ativoCol !== -1 && data.length > 1) {
+    const producaoIdAlvo = String(producaoId || '').trim();
+    const linhasAlvo = [];
+    for (let i = 1; i < data.length; i++) {
+      if (String(data[i][idCol] || '').trim() !== producaoIdAlvo) continue;
+      if (String(data[i][ativoCol]).toLowerCase() === 'false') continue;
 
       if (preservarManuais && receitaEntradaCol !== -1) {
         const receitaEntradaId = String(data[i][receitaEntradaCol] || '').trim();
         if (!receitaEntradaId) continue;
       }
 
-      sheet.deleteRow(i + 1);
+      linhasAlvo.push(i + 1);
     }
+    inativarLinhasEmBlocosProducao(sheet, ativoCol, linhasAlvo);
   }
 }
 
@@ -871,23 +921,31 @@ function limparDestinosProducao(producaoId, opcoes) {
     sheet = ss.insertSheet(ABA_PRODUCAO_DESTINOS);
   }
 
+  ensureSchema(sheet, PRODUCAO_DESTINOS_SCHEMA);
+
   const data = sheet.getDataRange().getValues();
   const headers = data[0] || [];
   const idxProducao = headers.indexOf('producao_id');
   const idxReceitaSaida = headers.indexOf('receita_saida_id');
+  const idxAtivo = headers.indexOf('ativo');
 
-  if (idxProducao === -1 || data.length <= 1) return;
+  if (idxProducao === -1 || idxAtivo === -1 || data.length <= 1) return;
 
-  for (let i = data.length - 1; i >= 1; i--) {
-    if (data[i][idxProducao] !== producaoId) continue;
+  const producaoIdAlvo = String(producaoId || '').trim();
+  const linhasAlvo = [];
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][idxProducao] || '').trim() !== producaoIdAlvo) continue;
+    if (String(data[i][idxAtivo]).toLowerCase() === 'false') continue;
 
     if (preservarManuais && idxReceitaSaida !== -1) {
       const receitaSaidaId = String(data[i][idxReceitaSaida] || '').trim();
       if (!receitaSaidaId) continue;
     }
 
-    sheet.deleteRow(i + 1);
+    linhasAlvo.push(i + 1);
   }
+
+  inativarLinhasEmBlocosProducao(sheet, idxAtivo, linhasAlvo);
 }
 
 function salvarDestinosProducao(producaoId, receitaId, destinos, opcoes) {
