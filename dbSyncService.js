@@ -304,75 +304,67 @@ function ajustarDimensaoAbaParaSync_(sheet, rowsNeed, colsNeed) {
 }
 
 function copiarDadosPlanilhaCompleta_(sourceSpreadsheetId, targetSpreadsheetId) {
-  const source = SpreadsheetApp.openById(sourceSpreadsheetId);
-  const target = SpreadsheetApp.openById(targetSpreadsheetId);
+  const sourceId = String(sourceSpreadsheetId || '').trim();
+  const targetId = String(targetSpreadsheetId || '').trim();
+  if (!sourceId || !targetId) {
+    throw new Error('IDs de origem/destino invalidos para sincronizacao.');
+  }
+  if (sourceId === targetId) {
+    throw new Error('Sync invalido: origem e destino apontam para a mesma planilha.');
+  }
+
+  const source = SpreadsheetApp.openById(sourceId);
+  const target = SpreadsheetApp.openById(targetId);
 
   const sourceSheets = source.getSheets();
   if (!Array.isArray(sourceSheets) || sourceSheets.length === 0) {
     throw new Error('Planilha de origem sem abas para sincronizar.');
   }
 
-  const sourceNameSet = {};
-  sourceSheets.forEach(s => {
-    sourceNameSet[s.getName()] = true;
-  });
-
-  const targetByName = {};
-  target.getSheets().forEach(s => {
-    targetByName[s.getName()] = s;
-  });
-
   const resumoAbas = [];
+  const copiasTemporarias = [];
+  const marker = `__SYNC_TMP_${Date.now()}_${Math.floor(Math.random() * 100000)}_`;
 
   sourceSheets.forEach((sourceSheet, idx) => {
-    const name = sourceSheet.getName();
-    let targetSheet = targetByName[name];
-    if (!targetSheet) {
-      targetSheet = target.insertSheet(name);
-      targetByName[name] = targetSheet;
-    }
+    const nomeFinal = sourceSheet.getName();
+    const linhaMax = sourceSheet.getLastRow();
+    const colunaMax = sourceSheet.getLastColumn();
+    const clone = sourceSheet.copyTo(target);
+    const nomeTemporario = `${marker}${idx + 1}`;
+    clone.setName(nomeTemporario);
 
-    ajustarDimensaoAbaParaSync_(
-      targetSheet,
-      sourceSheet.getMaxRows(),
-      sourceSheet.getMaxColumns()
-    );
-
-    targetSheet.clear();
-
-    const sourceLastRow = sourceSheet.getLastRow();
-    const sourceLastCol = sourceSheet.getLastColumn();
-    if (sourceLastRow > 0 && sourceLastCol > 0) {
-      const sourceRange = sourceSheet.getRange(1, 1, sourceLastRow, sourceLastCol);
-      const targetRange = targetSheet.getRange(1, 1, sourceLastRow, sourceLastCol);
-      sourceRange.copyTo(targetRange, SpreadsheetApp.CopyPasteType.PASTE_NORMAL, false);
-    }
-
-    targetSheet.setFrozenRows(sourceSheet.getFrozenRows());
-    targetSheet.setFrozenColumns(sourceSheet.getFrozenColumns());
-    try {
-      targetSheet.setTabColor(sourceSheet.getTabColor());
-    } catch (error) {
-      // sem acao
-    }
-
-    target.setActiveSheet(targetSheet);
-    target.moveActiveSheet(idx + 1);
+    copiasTemporarias.push({
+      sheet: clone,
+      nomeTemporario,
+      nomeFinal,
+      ordem: idx + 1
+    });
 
     resumoAbas.push({
-      aba: name,
-      linhas: sourceLastRow,
-      colunas: sourceLastCol
+      aba: nomeFinal,
+      linhas: linhaMax,
+      colunas: colunaMax
     });
   });
 
-  const sheetsToDelete = target
-    .getSheets()
-    .filter(s => !sourceNameSet[s.getName()]);
+  const idsCopiados = {};
+  copiasTemporarias.forEach(item => {
+    idsCopiados[item.sheet.getSheetId()] = true;
+  });
 
-  sheetsToDelete.forEach(sheet => {
+  const abasRemovidas = [];
+  const abasAtuaisDestino = target.getSheets();
+  abasAtuaisDestino.forEach(sheet => {
+    if (idsCopiados[sheet.getSheetId()]) return;
+    abasRemovidas.push(sheet.getName());
     if (target.getSheets().length <= 1) return;
     target.deleteSheet(sheet);
+  });
+
+  copiasTemporarias.forEach(item => {
+    item.sheet.setName(item.nomeFinal);
+    target.setActiveSheet(item.sheet);
+    target.moveActiveSheet(item.ordem);
   });
 
   SpreadsheetApp.flush();
@@ -380,7 +372,7 @@ function copiarDadosPlanilhaCompleta_(sourceSpreadsheetId, targetSpreadsheetId) 
   return {
     total_abas_copiadas: resumoAbas.length,
     abas: resumoAbas,
-    abas_removidas: sheetsToDelete.map(s => s.getName())
+    abas_removidas: abasRemovidas
   };
 }
 
