@@ -104,6 +104,12 @@
       return isNaN(n) ? 0 : n;
     }
 
+    function normalizarQuantidadeInteiraUI(valor) {
+      const n = parseNumeroInput(valor);
+      if (!isFinite(n) || n <= 0) return 0;
+      return Math.max(0, Math.round(n));
+    }
+
     function parseBoolLike(valor) {
       if (valor === true) return true;
       const s = String(valor ?? '').trim().toLowerCase();
@@ -897,7 +903,7 @@
       const qtdPlanejadaNum = Number(i.qtd_planejada || 0);
       const qtdProduzidaNum = Number(i.qtd_produzida_acumulada || 0);
       const qtdRestanteNum = Math.max(0, Number(i.qtd_restante ?? Math.max(0, qtdPlanejadaNum - qtdProduzidaNum)));
-      const podeAtualizarEstoque = qtdRestanteNum > 0.000001;
+      const podeAtualizarEstoque = !isProducaoConcluidaComEstoque(i) && qtdRestanteNum > 0;
       const totalSaidasPrevistas = Number(i.saidas_previstas_total || 0);
       const tiposSaida = Number(
         i.saidas_previstas_tipos || (Array.isArray(i.saidas_previstas) ? i.saidas_previstas.length : 0)
@@ -955,7 +961,7 @@
       const qtdProduzidaNum = Number(i.qtd_produzida_acumulada || 0);
       const qtdRestanteNum = Math.max(0, Number(i.qtd_restante ?? Math.max(0, qtdPlanejadaNum - qtdProduzidaNum)));
       const estoqueAtualizado = !!i.estoque_atualizado;
-      const podeAtualizarEstoque = qtdRestanteNum > 0.000001;
+      const podeAtualizarEstoque = !isProducaoConcluidaComEstoque(i) && qtdRestanteNum > 0;
       const labelEstoque = podeAtualizarEstoque ? 'Registrar lote' : 'Estoque atualizado';
       const idJs = JSON.stringify(String(i.producao_id || ''));
       const saidasHtml = !estoqueAtualizado
@@ -1167,23 +1173,26 @@
       const qtdPlanejada = parseNumeroInput(modalConsumo.dataset.qtdPlanejada || 0);
       const qtdProduzidaAcumulada = parseNumeroInput(modalConsumo.dataset.qtdProduzidaAcumulada || 0);
       const qtdRestante = parseNumeroInput(modalConsumo.dataset.qtdRestante || 0);
+      const qtdPlanejadaInteira = normalizarQuantidadeInteiraUI(qtdPlanejada);
+      const qtdProduzidaInteira = normalizarQuantidadeInteiraUI(qtdProduzidaAcumulada);
+      const qtdRestanteInteira = normalizarQuantidadeInteiraUI(qtdRestante);
 
-      let qtdLote = parseNumeroInput(consumoQtdProduzida?.value || 0);
+      let qtdLote = normalizarQuantidadeInteiraUI(consumoQtdProduzida?.value || 0);
       if (qtdLote <= 0) {
-        qtdLote = qtdRestante > 1 ? 1 : qtdRestante;
+        qtdLote = qtdRestanteInteira > 1 ? 1 : qtdRestanteInteira;
       }
-      if (qtdRestante > 0 && qtdLote > qtdRestante) {
-        qtdLote = qtdRestante;
+      if (qtdRestanteInteira > 0 && qtdLote > qtdRestanteInteira) {
+        qtdLote = qtdRestanteInteira;
       }
       if (consumoQtdProduzida) {
-        consumoQtdProduzida.value = qtdLote > 0 ? Number(qtdLote).toFixed(2) : '';
+        consumoQtdProduzida.value = qtdLote > 0 ? String(qtdLote) : '';
       }
 
       if (consumoResumoLote) {
-        consumoResumoLote.textContent = `Planejada: ${formatQuantidadeResumo(qtdPlanejada)} | Produzida: ${formatQuantidadeResumo(qtdProduzidaAcumulada)} | Restante: ${formatQuantidadeResumo(qtdRestante)}`;
+        consumoResumoLote.textContent = `Planejada: ${formatQuantidadeResumo(qtdPlanejadaInteira)} | Produzida: ${formatQuantidadeResumo(qtdProduzidaInteira)} | Restante: ${formatQuantidadeResumo(qtdRestanteInteira)}`;
       }
 
-      const fator = qtdPlanejada > 0 ? (qtdLote / qtdPlanejada) : 0;
+      const fator = qtdPlanejadaInteira > 0 ? (qtdLote / qtdPlanejadaInteira) : 0;
       const bypass = !!consumoBypassEntradas?.checked;
       const selects = consumoLista.querySelectorAll('.consumo-estoque-select');
       selects.forEach(select => { select.disabled = bypass; });
@@ -1221,9 +1230,9 @@
       if (!modalConsumo || !consumoLista) return;
 
       const ctx = contexto || {};
-      const qtdPlanejada = parseNumeroInput(ctx.qtd_planejada || ctx.qtdPlanejada || 0);
-      const qtdProduzidaAcumulada = parseNumeroInput(ctx.qtd_produzida_acumulada || ctx.qtdProduzidaAcumulada || 0);
-      const qtdRestanteRaw = parseNumeroInput(ctx.qtd_restante || ctx.qtdRestante || 0);
+      const qtdPlanejada = normalizarQuantidadeInteiraUI(ctx.qtd_planejada || ctx.qtdPlanejada || 0);
+      const qtdProduzidaAcumulada = normalizarQuantidadeInteiraUI(ctx.qtd_produzida_acumulada || ctx.qtdProduzidaAcumulada || 0);
+      const qtdRestanteRaw = normalizarQuantidadeInteiraUI(ctx.qtd_restante || ctx.qtdRestante || 0);
       const qtdRestante = qtdRestanteRaw > 0
         ? qtdRestanteRaw
         : Math.max(0, qtdPlanejada - qtdProduzidaAcumulada);
@@ -1234,7 +1243,7 @@
       modalConsumo.dataset.qtdProduzidaAcumulada = String(qtdProduzidaAcumulada || 0);
       modalConsumo.dataset.qtdRestante = String(qtdRestante || 0);
       if (consumoTitulo) consumoTitulo.textContent = `Atualizar estoque - ${nome}`;
-      if (consumoQtdProduzida) consumoQtdProduzida.value = qtdInicialLote > 0 ? Number(qtdInicialLote).toFixed(2) : '';
+      if (consumoQtdProduzida) consumoQtdProduzida.value = qtdInicialLote > 0 ? String(qtdInicialLote) : '';
       if (consumoBypassEntradas) consumoBypassEntradas.checked = false;
 
       consumoLista.innerHTML = '';

@@ -127,6 +127,23 @@ function formatDateSafe(value, pattern) {
   return Utilities.formatDate(dt, Session.getScriptTimeZone(), fmt);
 }
 
+function normalizarQuantidadeInteiraProducao(valor) {
+  const n = parseNumeroBR(valor);
+  if (!isFinite(n) || n <= 0) return 0;
+  return Math.max(0, Math.round(n));
+}
+
+function validarQuantidadeInteiraProducao(valor, campoLabel) {
+  const n = parseNumeroBR(valor);
+  if (!isFinite(n) || n <= 0) {
+    throw new Error(`${campoLabel} invalida.`);
+  }
+  if (Math.abs(n - Math.round(n)) > 0.000001) {
+    throw new Error(`${campoLabel} deve ser inteira.`);
+  }
+  return Math.round(n);
+}
+
 function lerCacheProducao() {
   return appCacheGetJson(PRODUCAO_CACHE_SCOPE);
 }
@@ -354,9 +371,9 @@ function listarProducao(forcarRecarregar) {
     .map(i => {
       const prod = produtosMap[i.produto_id] || {};
       const receita = receitasMap[i.receita_id] || {};
-      const qtdPlanejada = parseNumeroBR(i.qtd_planejada);
+      const qtdPlanejada = normalizarQuantidadeInteiraProducao(i.qtd_planejada);
       const estoqueAtualizado = String(i.estoque_atualizado).toLowerCase() === 'true';
-      let qtdProduzidaAcumulada = parseNumeroBR(i.qtd_produzida_acumulada);
+      let qtdProduzidaAcumulada = normalizarQuantidadeInteiraProducao(i.qtd_produzida_acumulada);
       if (qtdProduzidaAcumulada <= 0 && estoqueAtualizado && qtdPlanejada > 0) {
         qtdProduzidaAcumulada = qtdPlanejada;
       }
@@ -365,12 +382,12 @@ function listarProducao(forcarRecarregar) {
       }
 
       const qtdRestanteRaw = String(i.qtd_restante || '').trim();
-      const qtdRestanteInformada = parseNumeroBR(qtdRestanteRaw);
+      const qtdRestanteInformada = normalizarQuantidadeInteiraProducao(qtdRestanteRaw);
       let qtdRestante = qtdRestanteRaw !== ''
-        ? Math.max(0, qtdRestanteInformada)
+        ? qtdRestanteInformada
         : Math.max(qtdPlanejada - qtdProduzidaAcumulada, 0);
       if (qtdRestante < 0) qtdRestante = 0;
-      if (qtdRestante <= 0.009) {
+      if (qtdRestante <= 0) {
         qtdRestante = 0;
       }
 
@@ -442,8 +459,8 @@ function listarProducao(forcarRecarregar) {
         unidade_produto: prod.unidade_produto || '',
         receita_nome: receita.nome_receita || '',
         qtd_planejada: qtdPlanejada,
-        qtd_produzida_acumulada: Number(qtdProduzidaAcumulada.toFixed(6)),
-        qtd_restante: Number(qtdRestante.toFixed(6)),
+        qtd_produzida_acumulada: qtdProduzidaAcumulada,
+        qtd_restante: qtdRestante,
         saidas_previstas: saidasPrevistas,
         saidas_previstas_tipos: saidasPrevistas.length,
         saidas_previstas_total: parseNumeroBR(totalSaidasPrevistas),
@@ -477,7 +494,7 @@ function listarProducao(forcarRecarregar) {
 
 function criarProducao(payload) {
   assertCanWriteProducao('Criacao de producao');
-  const qtdPlanejada = parseNumeroBR(payload.qtd_planejada);
+  const qtdPlanejada = validarQuantidadeInteiraProducao(payload.qtd_planejada, 'Quantidade planejada');
   const novo = {
     ...payload,
     producao_id: gerarId('OP'),
@@ -564,7 +581,10 @@ function atualizarProducao(id, payload) {
 
   const payloadPersistencia = { ...(payload || {}) };
   if (Object.prototype.hasOwnProperty.call(payloadPersistencia, 'qtd_planejada')) {
-    payloadPersistencia.qtd_planejada = parseNumeroBR(payloadPersistencia.qtd_planejada);
+    payloadPersistencia.qtd_planejada = validarQuantidadeInteiraProducao(
+      payloadPersistencia.qtd_planejada,
+      'Quantidade planejada'
+    );
   }
 
   const dadosAtualizados = {
@@ -577,28 +597,28 @@ function atualizarProducao(id, payload) {
   const mudouProduto = Object.prototype.hasOwnProperty.call(payloadPersistencia, 'produto_id') &&
     payloadPersistencia.produto_id !== atual.produto_id;
   const mudouQtd = Object.prototype.hasOwnProperty.call(payloadPersistencia, 'qtd_planejada') &&
-    parseNumeroBR(payloadPersistencia.qtd_planejada) !== parseNumeroBR(atual.qtd_planejada);
+    normalizarQuantidadeInteiraProducao(payloadPersistencia.qtd_planejada) !== normalizarQuantidadeInteiraProducao(atual.qtd_planejada);
 
   if (Object.prototype.hasOwnProperty.call(payloadPersistencia, 'qtd_planejada')) {
-    const qtdPlanejadaAtualizada = parseNumeroBR(payloadPersistencia.qtd_planejada);
-    let qtdProduzidaAcumuladaAtual = parseNumeroBR(atual.qtd_produzida_acumulada);
+    const qtdPlanejadaAtualizada = normalizarQuantidadeInteiraProducao(payloadPersistencia.qtd_planejada);
+    let qtdProduzidaAcumuladaAtual = normalizarQuantidadeInteiraProducao(atual.qtd_produzida_acumulada);
     if (qtdProduzidaAcumuladaAtual <= 0 && String(atual.estoque_atualizado).toLowerCase() === 'true') {
-      qtdProduzidaAcumuladaAtual = parseNumeroBR(atual.qtd_planejada);
+      qtdProduzidaAcumuladaAtual = normalizarQuantidadeInteiraProducao(atual.qtd_planejada);
     }
     if (qtdProduzidaAcumuladaAtual < 0) qtdProduzidaAcumuladaAtual = 0;
 
     const qtdRestanteAtualizada = Math.max(0, qtdPlanejadaAtualizada - qtdProduzidaAcumuladaAtual);
-    payloadPersistencia.qtd_restante = Number(qtdRestanteAtualizada.toFixed(6));
-    payloadPersistencia.estoque_atualizado = qtdRestanteAtualizada <= 0.009;
+    payloadPersistencia.qtd_restante = qtdRestanteAtualizada;
+    payloadPersistencia.estoque_atualizado = qtdRestanteAtualizada <= 0;
   }
 
   let materiaisRegerados = null;
   if (mudouReceita || mudouProduto || mudouQtd) {
     const detalhado = explodirReceitaDetalhada(
-      dadosAtualizados.produto_id,
-      dadosAtualizados.receita_id,
-      parseNumeroBR(dadosAtualizados.qtd_planejada)
-    );
+        dadosAtualizados.produto_id,
+        dadosAtualizados.receita_id,
+        normalizarQuantidadeInteiraProducao(dadosAtualizados.qtd_planejada)
+      );
     materiaisRegerados = {
       detalhado: detalhado.itens || []
     };
@@ -1601,7 +1621,7 @@ function regenerarVinculosProducaoExistentes() {
         o.producao_id,
         o.produto_id,
         o.receita_id,
-        parseNumeroBR(o.qtd_planejada)
+        normalizarQuantidadeInteiraProducao(o.qtd_planejada)
       );
       atualizadas++;
     } catch (err) {
@@ -1945,7 +1965,7 @@ function obterMateriaisPrevistosProducao(producaoId) {
         producaoId,
         ordem.produto_id,
         ordem.receita_id,
-        ordem.qtd_planejada
+        normalizarQuantidadeInteiraProducao(ordem.qtd_planejada)
       );
       baseItens = base.itensAgregados || [];
       custoPrevisto = parseNumeroBR(base.custoPrevisto);
@@ -2346,12 +2366,12 @@ function consumirEstoque(producaoId, itensParaBaixar, opcoes) {
       throw new Error('Receita nao informada');
     }
 
-    const qtdPlanejada = parseNumeroBR(ordem.qtd_planejada);
+    const qtdPlanejada = normalizarQuantidadeInteiraProducao(ordem.qtd_planejada);
     if (qtdPlanejada <= 0) {
       throw new Error('Quantidade planejada invalida');
     }
 
-    let qtdProduzidaAcumuladaAtual = parseNumeroBR(ordem.qtd_produzida_acumulada);
+    let qtdProduzidaAcumuladaAtual = normalizarQuantidadeInteiraProducao(ordem.qtd_produzida_acumulada);
     if (qtdProduzidaAcumuladaAtual <= 0 && String(ordem.estoque_atualizado).toLowerCase() === 'true') {
       qtdProduzidaAcumuladaAtual = qtdPlanejada;
     }
@@ -2360,7 +2380,7 @@ function consumirEstoque(producaoId, itensParaBaixar, opcoes) {
     }
 
     const qtdRestanteAtual = Math.max(0, qtdPlanejada - qtdProduzidaAcumuladaAtual);
-    if (qtdRestanteAtual <= 0.009) {
+    if (qtdRestanteAtual <= 0) {
       throw new Error('Quantidade planejada ja foi totalmente produzida');
     }
 
@@ -2368,10 +2388,13 @@ function consumirEstoque(producaoId, itensParaBaixar, opcoes) {
     if (!qtdProduzidaLote || qtdProduzidaLote <= 0) {
       qtdProduzidaLote = qtdRestanteAtual;
     }
-    if (qtdProduzidaLote > qtdRestanteAtual + 0.000001) {
-      throw new Error(`Quantidade do lote maior que o restante da OP (${Number(qtdRestanteAtual.toFixed(2))}).`);
+    if (Math.abs(qtdProduzidaLote - Math.round(qtdProduzidaLote)) > 0.000001) {
+      throw new Error('Quantidade do lote deve ser inteira.');
     }
-    qtdProduzidaLote = Number(qtdProduzidaLote.toFixed(6));
+    qtdProduzidaLote = normalizarQuantidadeInteiraProducao(qtdProduzidaLote);
+    if (qtdProduzidaLote > qtdRestanteAtual) {
+      throw new Error(`Quantidade do lote maior que o restante da OP (${qtdRestanteAtual}).`);
+    }
 
     const sheetEstoque = getDataSpreadsheet().getSheetByName(ABA_ESTOQUE);
     if (!sheetEstoque) {
@@ -2536,9 +2559,9 @@ function consumirEstoque(producaoId, itensParaBaixar, opcoes) {
     );
     estoqueAtualizados.push(...(resultadoSaidas.atualizados || []));
 
-    const qtdProduzidaAcumuladaNova = Number((qtdProduzidaAcumuladaAtual + qtdProduzidaLote).toFixed(6));
-    const qtdRestanteNova = Math.max(0, Number((qtdPlanejada - qtdProduzidaAcumuladaNova).toFixed(6)));
-    const concluiuOP = qtdRestanteNova <= 0.009;
+    const qtdProduzidaAcumuladaNova = qtdProduzidaAcumuladaAtual + qtdProduzidaLote;
+    const qtdRestanteNova = Math.max(0, qtdPlanejada - qtdProduzidaAcumuladaNova);
+    const concluiuOP = qtdRestanteNova <= 0;
     const dataAtualizacao = new Date();
     const statusAtual = String(ordem.status || '').trim();
     const statusAtualNorm = normalizarTextoSemAcentoProducao(statusAtual);
@@ -2555,7 +2578,7 @@ function consumirEstoque(producaoId, itensParaBaixar, opcoes) {
 
     const payloadAtualizacaoOP = {
       qtd_produzida_acumulada: qtdProduzidaAcumuladaNova,
-      qtd_restante: Number(qtdRestanteNova.toFixed(6)),
+      qtd_restante: qtdRestanteNova,
       estoque_atualizado: concluiuOP,
       data_estoque_atualizado: concluiuOP ? dataAtualizacao : '',
       data_ultima_movimentacao_estoque: dataAtualizacao,
@@ -2595,7 +2618,7 @@ function consumirEstoque(producaoId, itensParaBaixar, opcoes) {
         status: statusNovo,
         estoque_atualizado: concluiuOP,
         qtd_produzida_acumulada: qtdProduzidaAcumuladaNova,
-        qtd_restante: Number(qtdRestanteNova.toFixed(6)),
+        qtd_restante: qtdRestanteNova,
         data_conclusao: concluiuOP
           ? formatDateSafe(payloadAtualizacaoOP.data_conclusao, 'yyyy-MM-dd')
           : formatDateSafe(ordem.data_conclusao, 'yyyy-MM-dd'),
@@ -2808,7 +2831,7 @@ function atualizarPrecoVendaProdutoSaidaProducao(producaoId, nomeSaida, precoVen
         (explodirSaidasReceitaDetalhada(
           ordem.produto_id,
           ordem.receita_id,
-          parseNumeroBR(ordem.qtd_planejada)
+          normalizarQuantidadeInteiraProducao(ordem.qtd_planejada)
         )?.itens) || []
       );
       pertencePrevista = saidasPrevistas.some(s => {

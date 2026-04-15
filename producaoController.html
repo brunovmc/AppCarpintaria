@@ -81,17 +81,39 @@
       return isNaN(n) ? 0 : n;
     }
 
+    function isQuantidadeInteira(valor) {
+      const n = Number(valor || 0);
+      if (!isFinite(n)) return false;
+      return Math.abs(n - Math.round(n)) < 0.000001;
+    }
+
+    function normalizarQuantidadeInteira(valor) {
+      const n = parseNumeroInput(valor);
+      if (!isFinite(n) || n <= 0) return 0;
+      return Math.max(0, Math.round(n));
+    }
+
+    function isProducaoConcluidaComEstoque(item) {
+      const status = String(item?.status || '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .trim()
+        .toUpperCase();
+      const estoqueAtualizado = String(item?.estoque_atualizado || '').trim().toLowerCase() === 'true';
+      return estoqueAtualizado && (status === 'CONCLUIDO' || status === 'CONCLUIDA');
+    }
+
     function obterContextoConsumo(item) {
-      const qtdPlanejada = parseNumeroInput(item?.qtd_planejada);
-      const qtdProduzidaAcumulada = parseNumeroInput(item?.qtd_produzida_acumulada);
-      const qtdRestanteInformada = parseNumeroInput(item?.qtd_restante);
+      const qtdPlanejada = normalizarQuantidadeInteira(item?.qtd_planejada);
+      const qtdProduzidaAcumulada = normalizarQuantidadeInteira(item?.qtd_produzida_acumulada);
+      const qtdRestanteInformada = normalizarQuantidadeInteira(item?.qtd_restante);
       const qtdRestante = qtdRestanteInformada > 0
         ? qtdRestanteInformada
         : Math.max(0, qtdPlanejada - qtdProduzidaAcumulada);
       return {
         qtd_planejada: qtdPlanejada,
         qtd_produzida_acumulada: qtdProduzidaAcumulada,
-        qtd_restante: Number(qtdRestante.toFixed(6))
+        qtd_restante: qtdRestante
       };
     }
 
@@ -344,6 +366,12 @@
         data_prevista_termino: get('producaoDataPrevista'),
         observacao: get('producaoObservacao')
       };
+
+      if (!isQuantidadeInteira(dados.qtd_planejada) || dados.qtd_planejada <= 0) {
+        mostrarToast('Quantidade planejada deve ser um numero inteiro maior que zero', 'erro');
+        return;
+      }
+      dados.qtd_planejada = normalizarQuantidadeInteira(dados.qtd_planejada);
 
       if (!dados.produto_id) {
         mostrarToast('Selecione o produto', 'erro');
@@ -835,8 +863,13 @@
       const item = ProducaoStore.getById(id);
       if (!item) return;
 
+      if (isProducaoConcluidaComEstoque(item)) {
+        mostrarToast('OP concluida e estoque atualizado. Nao ha novo lote para registrar.', 'erro');
+        return;
+      }
+
       const contextoConsumo = obterContextoConsumo(item);
-      if (contextoConsumo.qtd_restante <= 0.000001) {
+      if (contextoConsumo.qtd_restante <= 0) {
         mostrarToast('Nao ha quantidade restante para registrar nesta OP', 'erro');
         return;
       }
@@ -889,6 +922,11 @@
         mostrarToast('Informe a quantidade produzida do lote', 'erro');
         return;
       }
+      if (!isQuantidadeInteira(payload.qtdProduzida)) {
+        mostrarToast('A quantidade produzida do lote deve ser inteira', 'erro');
+        return;
+      }
+      payload.qtdProduzida = normalizarQuantidadeInteira(payload.qtdProduzida);
 
       mostrarToast('Atualizando estoque...');
 
