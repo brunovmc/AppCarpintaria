@@ -8,7 +8,295 @@
   const LAST_TAB_STORAGE_KEY = 'app:lasttab:v1';
   const QUICK_FILTER_STOCK_TYPE_KEY = 'app:quickfilter:v1:estoque:tipo';
   const QUICK_FILTER_PURCHASE_TYPE_KEY = 'app:quickfilter:v1:compras:tipo';
+  const DB_ENV_SESSION_STORAGE_KEY = 'app:db_env_session:v1';
   let listenerFecharMenuNavbarAtivo = false;
+
+  function normalizarDbEnvFront(valor) {
+    const env = String(valor || '').trim().toLowerCase();
+    return env === 'dev' ? 'dev' : 'prod';
+  }
+
+  function lerDbEnvSessaoFront() {
+    try {
+      if (!window.sessionStorage) return 'prod';
+      const raw = window.sessionStorage.getItem(DB_ENV_SESSION_STORAGE_KEY);
+      return normalizarDbEnvFront(raw);
+    } catch (error) {
+      return 'prod';
+    }
+  }
+
+  function salvarDbEnvSessaoFront(valor) {
+    const env = normalizarDbEnvFront(valor);
+    try {
+      if (!window.sessionStorage) return env;
+      window.sessionStorage.setItem(DB_ENV_SESSION_STORAGE_KEY, env);
+    } catch (error) {
+      // sem acao
+    }
+    return env;
+  }
+
+  function getDbEnvEls() {
+    return {
+      section: document.getElementById('dbEnvMenuSection'),
+      btnProd: document.getElementById('btnDbEnvProd'),
+      btnDev: document.getElementById('btnDbEnvDev'),
+      banner: document.getElementById('appDbEnvBanner'),
+      bannerText: document.getElementById('appDbEnvBannerText')
+    };
+  }
+
+  function createDbEnvironmentHelper() {
+    let contexto = {
+      can_toggle: false,
+      effective_env: 'prod',
+      selected_env: 'prod',
+      role: 'viewer'
+    };
+    let inFlight = null;
+    let menuInitDone = false;
+
+    function withTimeout(promise, timeoutMs, timeoutMsg) {
+      const ms = Math.max(500, Number(timeoutMs) || 5000);
+      return Promise.race([
+        Promise.resolve(promise),
+        new Promise((_, reject) => {
+          setTimeout(() => {
+            reject(new Error(String(timeoutMsg || 'Tempo limite excedido').trim()));
+          }, ms);
+        })
+      ]);
+    }
+
+    function isAdmin(acesso) {
+      return String(acesso?.role || '').trim().toLowerCase() === 'admin' && acesso?.can_write === true;
+    }
+
+    function normalizarContexto(raw) {
+      const base = raw && typeof raw === 'object' ? raw : {};
+      return {
+        ...base,
+        can_toggle: base.can_toggle === true,
+        effective_env: normalizarDbEnvFront(base.effective_env || base.selected_env || 'prod'),
+        selected_env: normalizarDbEnvFront(base.selected_env || base.effective_env || 'prod'),
+        role: String(base.role || '').trim().toLowerCase() || 'viewer'
+      };
+    }
+
+    function render() {
+      const { section, btnProd, btnDev, banner, bannerText } = getDbEnvEls();
+      const canToggle = contexto.can_toggle === true;
+      const envAtivo = normalizarDbEnvFront(contexto.effective_env);
+      const isDev = envAtivo === 'dev';
+
+      if (section) {
+        section.classList.toggle('hidden', !canToggle);
+      }
+
+      if (btnProd) {
+        btnProd.classList.toggle('active', envAtivo === 'prod');
+        btnProd.disabled = !canToggle || inFlight !== null;
+        btnProd.setAttribute('aria-pressed', envAtivo === 'prod' ? 'true' : 'false');
+      }
+
+      if (btnDev) {
+        btnDev.classList.toggle('active', envAtivo === 'dev');
+        btnDev.disabled = !canToggle || inFlight !== null;
+        btnDev.setAttribute('aria-pressed', envAtivo === 'dev' ? 'true' : 'false');
+      }
+
+      if (banner) {
+        banner.classList.toggle('hidden', !isDev);
+      }
+      if (bannerText) {
+        bannerText.textContent = isDev
+          ? 'MODO DEV ativo - voce esta trabalhando no banco de testes'
+          : 'MODO PROD ativo';
+      }
+    }
+
+    function recarregarAplicacaoAposTrocaDb_() {
+      let fallbackTimer = null;
+      try {
+        fallbackTimer = setTimeout(() => {
+          try {
+            window.location.reload();
+          } catch (error) {
+            // sem acao
+          }
+        }, 1200);
+      } catch (error) {
+        // sem acao
+      }
+
+      try {
+        const url = new URL(window.location.href);
+        url.searchParams.set('db_refresh', String(Date.now()));
+        window.location.assign(url.toString());
+        return;
+      } catch (error) {
+        // fallback abaixo
+      }
+
+      try {
+        window.location.reload();
+      } catch (error) {
+        // sem acao
+      } finally {
+        if (fallbackTimer) {
+          clearTimeout(fallbackTimer);
+        }
+      }
+    }
+
+    function aplicar(raw) {
+      contexto = normalizarContexto(raw);
+      render();
+      if (typeof window !== 'undefined') {
+        try {
+          window.dispatchEvent(new CustomEvent('app:db-env:changed', {
+            detail: contexto
+          }));
+        } catch (error) {
+          // sem acao
+        }
+      }
+      return contexto;
+    }
+
+    async function bootstrap(acessoCtx) {
+      if (!window.AppRequest?.call) {
+        aplicar({
+          can_toggle: isAdmin(acessoCtx),
+          effective_env: 'prod',
+          selected_env: 'prod',
+          role: String(acessoCtx?.role || '').trim().toLowerCase() || 'viewer'
+        });
+        return contexto;
+      }
+
+      const admin = isAdmin(acessoCtx);
+      let desiredEnv = 'prod';
+      if (admin) {
+        desiredEnv = salvarDbEnvSessaoFront(lerDbEnvSessaoFront());
+      } else {
+        salvarDbEnvSessaoFront('prod');
+      }
+
+      try {
+        const payload = await withTimeout(
+          window.AppRequest.call('definirContextoBancoDados', [desiredEnv], {
+            context: 'db.env.bootstrap',
+            errorMessage: 'Falha ao aplicar ambiente de banco de dados.'
+          }),
+          6000,
+          'Timeout ao aplicar ambiente de banco de dados.'
+        );
+        const ctx = aplicar(payload || {});
+        if (ctx.can_toggle) {
+          salvarDbEnvSessaoFront(ctx.effective_env);
+        } else {
+          salvarDbEnvSessaoFront('prod');
+        }
+        return ctx;
+      } catch (error) {
+        const fallback = aplicar({
+          can_toggle: admin,
+          effective_env: 'prod',
+          selected_env: 'prod',
+          role: admin ? 'admin' : 'viewer'
+        });
+        salvarDbEnvSessaoFront('prod');
+        return fallback;
+      }
+    }
+
+    async function trocar(ambiente) {
+      const alvo = normalizarDbEnvFront(ambiente);
+      if (!contexto.can_toggle) {
+        if (typeof mostrarToast === 'function') {
+          mostrarToast('Somente admin pode trocar o banco de dados ativo.', 'erro');
+        }
+        return contexto;
+      }
+      if (normalizarDbEnvFront(contexto.effective_env) === alvo) {
+        fecharMenuNavbar();
+        return contexto;
+      }
+      if (!window.AppRequest?.call) {
+        throw new Error('google.script.run indisponivel');
+      }
+      if (inFlight) return inFlight;
+
+      inFlight = withTimeout(
+        window.AppRequest.call('definirContextoBancoDados', [alvo], {
+          context: 'db.env.toggle',
+          errorMessage: 'Falha ao trocar banco de dados.'
+        }),
+        8000,
+        'Timeout ao trocar banco de dados.'
+      )
+        .then(payload => {
+          const ctx = aplicar(payload || {});
+          const envAtivo = normalizarDbEnvFront(ctx.effective_env);
+          salvarDbEnvSessaoFront(envAtivo);
+          fecharMenuNavbar();
+          if (typeof mostrarToast === 'function') {
+            mostrarToast(`Banco ativo: ${envAtivo.toUpperCase()}`);
+          }
+          setTimeout(() => {
+            recarregarAplicacaoAposTrocaDb_();
+          }, 120);
+          return ctx;
+        })
+        .finally(() => {
+          inFlight = null;
+          render();
+        });
+
+      render();
+      return inFlight;
+    }
+
+    function initMenu() {
+      if (menuInitDone) return;
+      menuInitDone = true;
+      const { btnProd, btnDev } = getDbEnvEls();
+      if (btnProd) {
+        btnProd.addEventListener('click', () => {
+          trocar('prod').catch(error => {
+            if (typeof mostrarToast === 'function') {
+              mostrarToast(error?.message || 'Falha ao trocar para PROD', 'erro');
+            }
+          });
+        });
+      }
+      if (btnDev) {
+        btnDev.addEventListener('click', () => {
+          trocar('dev').catch(error => {
+            if (typeof mostrarToast === 'function') {
+              mostrarToast(error?.message || 'Falha ao trocar para DEV', 'erro');
+            }
+          });
+        });
+      }
+      render();
+    }
+
+    function getContext() {
+      return contexto;
+    }
+
+    return {
+      bootstrap,
+      initMenu,
+      getContext,
+      apply: aplicar
+    };
+  }
+
+  window.AppDbEnv = window.AppDbEnv || createDbEnvironmentHelper();
 
   function normalizarNomeAba(valor) {
     const aba = String(valor || '').trim().toLowerCase();
@@ -2827,6 +3115,15 @@
   }
 
   document.addEventListener('DOMContentLoaded', async () => {
+    const bootWatchdog = setTimeout(() => {
+      if (document?.body?.classList?.contains('app-booting')) {
+        document.body.classList.remove('app-booting');
+        if (typeof mostrarToast === 'function') {
+          mostrarToast('A inicializacao demorou demais. Interface liberada em modo de recuperacao.', 'erro');
+        }
+      }
+    }, 9000);
+
     try {
       syncLongTaskMonitor();
       resetarEstadoInicialFiltros();
@@ -2841,6 +3138,19 @@
       }
 
       if (contextoAcesso && contextoAcesso.can_read === false) return;
+
+      if (window.AppDbEnv?.initMenu) {
+        window.AppDbEnv.initMenu();
+      }
+      if (window.AppDbEnv?.bootstrap) {
+        try {
+          await window.AppDbEnv.bootstrap(contextoAcesso || {});
+        } catch (error) {
+          if (typeof mostrarToast === 'function') {
+            mostrarToast(error?.message || 'Falha ao configurar ambiente de banco de dados.', 'erro');
+          }
+        }
+      }
 
       initNavbarHamburger();
       registrarListenersFiltrosStore();
@@ -2859,6 +3169,7 @@
         await window.AppBootGate.waitForTabReady(abaInicial, { timeoutMs: 2600 });
       }
     } finally {
+      clearTimeout(bootWatchdog);
       finalizarBootVisual();
     }
   });

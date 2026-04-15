@@ -1,8 +1,9 @@
-// Prod
-// const DATA_SPREADSHEET_ID = "1j363esbdvygUO1s72bCz5u3Vhn2AnhiIHlmO4ZApowg";
+// Ambiente de dados
+const DATA_SPREADSHEET_ID_PROD = "1j363esbdvygUO1s72bCz5u3Vhn2AnhiIHlmO4ZApowg";
+const DATA_SPREADSHEET_ID_DEV = "1wqW2WPZvLWPr72Xsd_8ZAhAgbjvMw8A7b5Riapz6P4s";
 
-// Dev
-const DATA_SPREADSHEET_ID = "1wqW2WPZvLWPr72Xsd_8ZAhAgbjvMw8A7b5Riapz6P4s";
+// Fallback legado (evita quebrar referencias antigas)
+const DATA_SPREADSHEET_ID = DATA_SPREADSHEET_ID_PROD;
 
 function doGet() {
   return HtmlService.createTemplateFromFile("index")

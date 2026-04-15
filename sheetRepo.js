@@ -18,12 +18,12 @@ function getDataSpreadsheet(opcoes) {
     assertCanRead('Acesso aos dados');
   }
 
-  const id = (typeof DATA_SPREADSHEET_ID === 'string')
-    ? DATA_SPREADSHEET_ID.trim()
-    : '';
+  const id = (typeof getDataSpreadsheetIdAtivo === 'function')
+    ? String(getDataSpreadsheetIdAtivo(opts) || '').trim()
+    : String((typeof DATA_SPREADSHEET_ID === 'string' ? DATA_SPREADSHEET_ID : '') || '').trim();
 
   if (!id) {
-    throw new Error('DATA_SPREADSHEET_ID nao configurado em main.js');
+    throw new Error('ID da planilha de dados nao configurado.');
   }
 
   const executionCache = getExecutionMemoryCache();
@@ -36,7 +36,7 @@ function getDataSpreadsheet(opcoes) {
     executionCache[id] = ss;
     return ss;
   } catch (error) {
-    throw new Error('Nao foi possivel abrir a planilha de dados. Verifique o DATA_SPREADSHEET_ID e as permissoes de acesso. Detalhes: ' + error.message);
+    throw new Error('Nao foi possivel abrir a planilha de dados. Verifique os IDs de PROD/DEV e as permissoes de acesso. Detalhes: ' + error.message);
   }
 }
 
@@ -45,9 +45,9 @@ const ROW_LOOKUP_CACHE_VERSION = 'v1';
 const ROW_LOOKUP_CACHE_TTL_SEC = 21600; // 6h
 
 function getAppCacheKey(scope) {
-  const id = (typeof DATA_SPREADSHEET_ID === 'string')
-    ? DATA_SPREADSHEET_ID.trim()
-    : '';
+  const id = (typeof getDataSpreadsheetIdAtivo === 'function')
+    ? String(getDataSpreadsheetIdAtivo({ skipAccessCheck: true }) || '').trim()
+    : String((typeof DATA_SPREADSHEET_ID === 'string' ? DATA_SPREADSHEET_ID : '') || '').trim();
   const escopo = String(scope || '').trim().toUpperCase();
   return `APP_CACHE:${id || 'SEM_ID'}:${APP_CACHE_VERSION}:${escopo}`;
 }
@@ -276,9 +276,9 @@ function normalizeIdValue(value) {
 }
 
 function getRowLookupCacheKey(sheetName, idField, idNorm) {
-  const planilhaId = (typeof DATA_SPREADSHEET_ID === 'string')
-    ? DATA_SPREADSHEET_ID.trim()
-    : '';
+  const planilhaId = (typeof getDataSpreadsheetIdAtivo === 'function')
+    ? String(getDataSpreadsheetIdAtivo({ skipAccessCheck: true }) || '').trim()
+    : String((typeof DATA_SPREADSHEET_ID === 'string' ? DATA_SPREADSHEET_ID : '') || '').trim();
   const aba = String(sheetName || '').trim().toUpperCase();
   const campo = String(idField || '').trim().toUpperCase();
   const id = normalizeIdValue(idNorm);

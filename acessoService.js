@@ -102,7 +102,7 @@ function carregarUsuariosAcessoConfig(forcarRecarregar) {
     }
   }
 
-  const sheet = getDataSpreadsheet({ skipAccessCheck: true }).getSheetByName(ABA_USUARIOS_ACESSO);
+  const sheet = getDataSpreadsheet({ skipAccessCheck: true, targetEnv: 'prod' }).getSheetByName(ABA_USUARIOS_ACESSO);
   if (!sheet) {
     const vazio = { configurado: false, mapa: {}, total_usuarios_ativos: 0 };
     salvarCacheUsuariosAcesso(vazio);
@@ -213,7 +213,12 @@ function assertCanRead(acao) {
 function assertCanWrite(acao) {
   const contexto = String(acao || 'Operacao de escrita').trim() || 'Operacao de escrita';
   const acesso = obterContextoUsuario(false);
-  if (acesso.can_write) return true;
+  if (acesso.can_write) {
+    if (typeof assertPodeEscreverNoBancoDados === 'function') {
+      assertPodeEscreverNoBancoDados(contexto);
+    }
+    return true;
+  }
   const motivo = String(acesso.motivo || 'Usuario sem permissao de escrita.').trim();
   throw new Error(`${contexto} bloqueada. ${motivo}`);
 }

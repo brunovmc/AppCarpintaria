@@ -27,7 +27,9 @@ const VALIDACOES_CACHE_TTL_SEC = 21600; // 6 horas (maximo do CacheService)
 const VALIDACOES_CACHE_VERSION = 'v1';
 
 function getValidacoesCacheKey() {
-  const id = String(typeof DATA_SPREADSHEET_ID === 'string' ? DATA_SPREADSHEET_ID : '').trim();
+  const id = (typeof getDataSpreadsheetIdAtivo === 'function')
+    ? String(getDataSpreadsheetIdAtivo({ skipAccessCheck: true }) || '').trim()
+    : String(typeof DATA_SPREADSHEET_ID === 'string' ? DATA_SPREADSHEET_ID : '').trim();
   return `VALIDACOES_CACHE:${id || 'SEM_ID'}:${VALIDACOES_CACHE_VERSION}`;
 }
 
