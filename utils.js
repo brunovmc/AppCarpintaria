@@ -1,14 +1,19 @@
 function gerarId(prefixo) {
-  const ss = getDataSpreadsheet();
   const props = PropertiesService.getScriptProperties();
   const chave = `SEQ_${prefixo}`;
+  const lock = LockService.getScriptLock();
 
-  let seq = Number(props.getProperty(chave)) || 0;
-  seq++;
+  lock.waitLock(10000);
+  try {
+    let seq = Number(props.getProperty(chave)) || 0;
+    seq++;
 
-  props.setProperty(chave, seq);
+    props.setProperty(chave, String(seq));
 
-  return `${prefixo}-${String(seq).padStart(4, '0')}`;
+    return `${prefixo}-${String(seq).padStart(4, '0')}`;
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 function agora() {
