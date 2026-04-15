@@ -296,6 +296,44 @@ function encontrarLinhaPorId(sheet, sheetName, idField, idCol, idNorm) {
   return 0;
 }
 
+function insertMany(sheetName, payloads, schema) {
+  if (typeof assertCanWrite === 'function') {
+    assertCanWrite(`Criacao em lote na aba ${String(sheetName || '').trim().toUpperCase() || 'SEM_NOME'}`);
+  }
+
+  const lista = Array.isArray(payloads) ? payloads : [];
+  if (lista.length === 0) return 0;
+
+  const ss = getDataSpreadsheet();
+  let sheet = ss.getSheetByName(sheetName);
+  if (!sheet) {
+    sheet = ss.insertSheet(sheetName);
+  }
+
+  ensureSchema(sheet, schema);
+  const headerMap = getHeaderMap(sheet);
+  const totalColunas = sheet.getLastColumn();
+  if (totalColunas <= 0) return 0;
+
+  const rows = lista.map(payload => {
+    const row = Array(totalColunas).fill('');
+    const item = payload || {};
+    schema.forEach(key => {
+      if (key in headerMap) {
+        row[headerMap[key]] = item[key] ?? '';
+      }
+    });
+    return row;
+  });
+
+  if (rows.length === 0) return 0;
+
+  const startRow = sheet.getLastRow() + 1;
+  sheet.getRange(startRow, 1, rows.length, totalColunas).setValues(rows);
+  invalidarCachesRelacionadosAba(sheetName);
+  return rows.length;
+}
+
 function insert(sheetName, payload, schema) {
   if (typeof assertCanWrite === 'function') {
     assertCanWrite(`Criacao na aba ${String(sheetName || '').trim().toUpperCase() || 'SEM_NOME'}`);

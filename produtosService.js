@@ -962,12 +962,38 @@ function inativarLinhasReceita(sheetName, receitaId) {
   const ativoCol = headers.indexOf('ativo');
 
   if (idCol === -1 || ativoCol === -1) return;
+  const linhasAlvo = [];
 
   for (let i = 1; i < data.length; i++) {
     if (data[i][idCol] === receitaId) {
-      sheet.getRange(i + 1, ativoCol + 1).setValue(false);
+      linhasAlvo.push(i + 1);
     }
   }
+
+  if (linhasAlvo.length === 0) return;
+
+  let blocoInicio = linhasAlvo[0];
+  let blocoTamanho = 1;
+
+  function flushBloco() {
+    const valores = Array.from({ length: blocoTamanho }, () => [false]);
+    sheet.getRange(blocoInicio, ativoCol + 1, blocoTamanho, 1).setValues(valores);
+  }
+
+  for (let i = 1; i < linhasAlvo.length; i++) {
+    const linhaAtual = linhasAlvo[i];
+    const linhaAnterior = linhasAlvo[i - 1];
+    if (linhaAtual === linhaAnterior + 1) {
+      blocoTamanho += 1;
+      continue;
+    }
+
+    flushBloco();
+    blocoInicio = linhaAtual;
+    blocoTamanho = 1;
+  }
+
+  flushBloco();
 }
 
 function deletarReceitaProduto(receitaId) {

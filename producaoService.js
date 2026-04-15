@@ -1708,6 +1708,7 @@ function atualizarConsumoVinculosProducao(producaoId, itensConsumidos) {
   });
 
   if (Object.keys(consumoMap).length === 0 && Object.keys(consumoPorTipoMap).length === 0) return;
+  const updatesByRow = {};
 
   for (let i = 1; i < data.length; i++) {
     const row = data[i];
@@ -1736,8 +1737,8 @@ function atualizarConsumoVinculosProducao(producaoId, itensConsumidos) {
       ? 'Pendente'
       : (novaConsumida >= qtdPrevista ? 'Concluido' : 'Parcial');
 
-    sheet.getRange(i + 1, idxConsumida + 1).setValue(novaConsumida);
-    sheet.getRange(i + 1, idxStatus + 1).setValue(novoStatus);
+    const rowNumber = i + 1;
+    updatesByRow[rowNumber] = [novaConsumida, novoStatus];
     data[i][idxConsumida] = novaConsumida;
     data[i][idxStatus] = novoStatus;
   }
@@ -1766,12 +1767,45 @@ function atualizarConsumoVinculosProducao(producaoId, itensConsumidos) {
         ? 'Pendente'
         : (novaConsumida >= qtdPrevista ? 'Concluido' : 'Parcial');
 
-      sheet.getRange(i + 1, idxConsumida + 1).setValue(novaConsumida);
-      sheet.getRange(i + 1, idxStatus + 1).setValue(novoStatus);
+      const rowNumber = i + 1;
+      updatesByRow[rowNumber] = [novaConsumida, novoStatus];
       data[i][idxConsumida] = novaConsumida;
       data[i][idxStatus] = novoStatus;
     }
   }
+
+  const linhasAtualizadas = Object.keys(updatesByRow)
+    .map(n => Number(n))
+    .filter(n => Number.isFinite(n) && n >= 2)
+    .sort((a, b) => a - b);
+
+  if (linhasAtualizadas.length > 0) {
+    let blocoInicio = linhasAtualizadas[0];
+    let blocoLinhas = [linhasAtualizadas[0]];
+
+    function flushBloco() {
+      if (blocoLinhas.length === 0) return;
+      const valoresConsumida = blocoLinhas.map(row => [updatesByRow[row][0]]);
+      const valoresStatus = blocoLinhas.map(row => [updatesByRow[row][1]]);
+      sheet.getRange(blocoInicio, idxConsumida + 1, blocoLinhas.length, 1).setValues(valoresConsumida);
+      sheet.getRange(blocoInicio, idxStatus + 1, blocoLinhas.length, 1).setValues(valoresStatus);
+    }
+
+    for (let i = 1; i < linhasAtualizadas.length; i++) {
+      const row = linhasAtualizadas[i];
+      const prev = linhasAtualizadas[i - 1];
+      if (row === prev + 1) {
+        blocoLinhas.push(row);
+        continue;
+      }
+
+      flushBloco();
+      blocoInicio = row;
+      blocoLinhas = [row];
+    }
+    flushBloco();
+  }
+
   invalidarCachesRelacionadosAba(ABA_PRODUCAO);
 }
 

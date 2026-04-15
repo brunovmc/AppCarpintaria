@@ -908,24 +908,24 @@ function gerarParcelasFinanceirasOrigem(origemTipo, origemId) {
     );
   }
 
-  plano.forEach(p => {
-    insert(ABA_PARCELAS_FINANCEIRAS, {
-      ID: gerarId('PAR'),
-      origem_tipo: origem.tipo,
-      origem_id: origem.id,
-      natureza: origem.natureza,
-      parcela_numero: p.numero,
-      parcelas_total: p.total,
-      data_prevista: formatarDataYmdFinanceiro(p.data),
-      valor_previsto: round2Financeiro(p.valor),
-      valor_pago: 0,
-      status: 'PENDENTE',
-      data_quitacao: '',
-      pagamento_id: '',
-      ativo: true,
-      criado_em: new Date()
-    }, PARCELAS_FINANCEIRAS_SCHEMA);
-  });
+  const parcelasParaInserir = plano.map(p => ({
+    ID: gerarId('PAR'),
+    origem_tipo: origem.tipo,
+    origem_id: origem.id,
+    natureza: origem.natureza,
+    parcela_numero: p.numero,
+    parcelas_total: p.total,
+    data_prevista: formatarDataYmdFinanceiro(p.data),
+    valor_previsto: round2Financeiro(p.valor),
+    valor_pago: 0,
+    status: 'PENDENTE',
+    data_quitacao: '',
+    pagamento_id: '',
+    ativo: true,
+    criado_em: new Date()
+  }));
+
+  insertMany(ABA_PARCELAS_FINANCEIRAS, parcelasParaInserir, PARCELAS_FINANCEIRAS_SCHEMA);
 
   return listarParcelasFinanceirasOrigem(origem.tipo, origem.id);
 }
