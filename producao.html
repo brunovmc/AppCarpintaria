@@ -62,7 +62,7 @@
 <div id="modalConsumoProducao" class="modal hidden">
   <div class="modal-content">
     <button class="modal-close-square" onclick="ProducaoUI.fecharModalConsumo()" aria-label="Fechar">X</button>
-    <h3 id="consumoTitulo">Baixar do estoque</h3>
+    <h3 id="consumoTitulo">Revisar baixa da producao</h3>
     <div id="consumoResumoLote" class="comp-meta"></div>
     <div class="campo-ajuda-wrap">
       <span class="campo-ajuda-tag">Qtd produzida neste lote</span>
@@ -76,6 +76,10 @@
       </label>
     </div>
     <div id="consumoLista"></div>
+    <div class="bloco">
+      <p><b>Saidas a adicionar no estoque</b></p>
+      <div id="consumoSaidasLista"></div>
+    </div>
     <div class="acoes">
       <button id="btnConfirmarConsumo" type="button">Confirmar</button>
       <button id="btnCancelarConsumo" type="button">Cancelar</button>

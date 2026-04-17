@@ -770,7 +770,7 @@
         return `
           <div class="receita-card editing" data-produto-id="${escapeAttr(produtoId)}" data-receita-id="${escapeAttr(receita.receita_id)}">
             <div class="receita-header">
-              <input class="receita-nome" placeholder="Nome da receita" value="${escapeAttr(receita.nome_receita || '')}">
+              <input class="receita-nome" placeholder="Nome do modelo" value="${escapeAttr(receita.nome_receita || '')}">
             </div>
             <textarea class="receita-desc" placeholder="Descricao">${escapeHtml(receita.descricao || '')}</textarea>
 
@@ -805,7 +805,7 @@
       return `
         <div class="receita-card" data-produto-id="${escapeAttr(produtoId)}" data-receita-id="${escapeAttr(receita.receita_id)}">
           <div class="receita-header">
-            <strong>${escapeHtml(receita.nome_receita || 'Receita')}</strong>
+            <strong>${escapeHtml(receita.nome_receita || 'Modelo')}</strong>
             <span class="receita-tag">Modelo</span>
           </div>
           ${receita.descricao ? `<div class="comp-meta">${escapeHtml(receita.descricao)}</div>` : ''}
@@ -831,14 +831,14 @@
     function renderReceitas(receitas, carregada, produtoId) {
       if (!carregada) {
         return `
-          <p>Receitas nao carregadas.</p>
-          <button class="btn-receita-carregar" data-produto-id="${escapeAttr(produtoId)}">Carregar receitas</button>
+          <p>Modelo nao carregado.</p>
+          <button class="btn-receita-carregar" data-produto-id="${escapeAttr(produtoId)}">Carregar modelo</button>
         `;
       }
 
       const lista = Array.isArray(receitas) ? receitas : [];
       const conteudo = lista.length === 0
-        ? '<p>Nenhuma receita cadastrada.</p>'
+        ? '<p>Nenhum modelo cadastrado.</p>'
         : lista.map(r => renderReceita(r, produtoId)).join('');
 
       return conteudo;
@@ -984,7 +984,7 @@
         <p><b>Preco de venda:</b> ${escapeHtml(precoVendaLabel)}</p>
 
         <div class="bloco">
-          <p><b>Receitas</b></p>
+          <p><b>Modelo</b></p>
           ${renderReceitas(receitas, receitasCarregadas, i.produto_id)}
         </div>
 

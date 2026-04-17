@@ -185,18 +185,31 @@ function listarEstoque(forcarRecarregar) {
   }
 
   const rows = rowsToObjects(sheet);
+  const resumoReservas = typeof listarResumoReservasEstoqueProducao === 'function'
+    ? listarResumoReservasEstoqueProducao()
+    : {};
 
   const lista = rows
     .filter(i => String(i.ativo).toLowerCase() === 'true')
-    .map(i => ({
-      ...i,
-      custo_unitario: parseNumeroBR(i.custo_unitario || i.valor_unit),
-      preco_venda: String(i.preco_venda || '').trim() === '' ? '' : parseNumeroBR(i.preco_venda),
-      valor_unit: parseNumeroBR(i.custo_unitario || i.valor_unit),
-      criado_em: formatarDataEstoqueSeguro(i.criado_em, 'yyyy-MM-dd HH:mm'),
-      comprado_em: formatarDataEstoqueSeguro(i.comprado_em, 'yyyy-MM-dd'),
-      data_pagamento: formatarDataEstoqueSeguro(i.data_pagamento, 'yyyy-MM-dd')
-    }));
+    .map(i => {
+      const id = String(i.ID || '').trim();
+      const quantidade = parseNumeroBR(i.quantidade);
+      const reservado = parseNumeroBR(resumoReservas[id]?.quantidade_reservada);
+      const disponivel = Math.max(quantidade - reservado, 0);
+      return {
+        ...i,
+        custo_unitario: parseNumeroBR(i.custo_unitario || i.valor_unit),
+        preco_venda: String(i.preco_venda || '').trim() === '' ? '' : parseNumeroBR(i.preco_venda),
+        valor_unit: parseNumeroBR(i.custo_unitario || i.valor_unit),
+        quantidade: quantidade,
+        quantidade_reservada: reservado,
+        reservado_quantidade: reservado,
+        quantidade_disponivel: disponivel,
+        criado_em: formatarDataEstoqueSeguro(i.criado_em, 'yyyy-MM-dd HH:mm'),
+        comprado_em: formatarDataEstoqueSeguro(i.comprado_em, 'yyyy-MM-dd'),
+        data_pagamento: formatarDataEstoqueSeguro(i.data_pagamento, 'yyyy-MM-dd')
+      };
+    });
   salvarCacheListaEstoque(lista);
   return lista;
 }
@@ -250,6 +263,12 @@ function obterItemEstoque(id) {
 
   const item = rowsToObjects(sheet).find(i => i.ID === id);
   if (!item) return null;
+  const resumoReservas = typeof listarResumoReservasEstoqueProducao === 'function'
+    ? listarResumoReservasEstoqueProducao()
+    : {};
+  const reservado = parseNumeroBR(resumoReservas[String(item.ID || '').trim()]?.quantidade_reservada);
+  const quantidade = parseNumeroBR(item.quantidade);
+  const disponivel = Math.max(quantidade - reservado, 0);
 
   return {
     ID: item.ID,
@@ -257,7 +276,10 @@ function obterItemEstoque(id) {
     item: item.item || '',
     categoria: item.categoria || '',
     unidade: item.unidade || '',
-    quantidade: item.quantidade || '',
+    quantidade: quantidade,
+    quantidade_reservada: reservado,
+    reservado_quantidade: reservado,
+    quantidade_disponivel: disponivel,
     comprimento_cm: item.comprimento_cm || '',
     largura_cm: item.largura_cm || '',
     espessura_cm: item.espessura_cm || '',

@@ -40,6 +40,7 @@
         consumoQtdProduzida: document.getElementById('consumoQtdProduzida'),
         consumoBypassEntradas: document.getElementById('consumoBypassEntradas'),
         consumoLista: document.getElementById('consumoLista'),
+        consumoSaidasLista: document.getElementById('consumoSaidasLista'),
 
         // Modal pendencias de vinculo
         modalPendencias: document.getElementById('modalPendenciasVinculoProducao'),
@@ -199,20 +200,53 @@
         const nome = i.item || id;
         const tipo = String(i.tipo || '').toUpperCase();
         const unidade = String(i.unidade || '').trim();
-        const saldo = formatQuantidadePorUnidade(i.quantidade, unidade);
+        const saldoFisico = formatQuantidadePorUnidade(i.quantidade, unidade);
+        const saldoDisponivel = formatQuantidadePorUnidade(
+          Object.prototype.hasOwnProperty.call(i || {}, 'quantidade_disponivel')
+            ? i.quantidade_disponivel
+            : i.quantidade,
+          unidade
+        );
         const selected = id === String(selecionadoId || '') ? 'selected' : '';
-        return `<option value="${escapeAttr(id)}" ${selected}>${escapeHtml(nome)} (${escapeHtml(tipo)}) - Saldo ${saldo}${unidade ? ` ${escapeHtml(unidade)}` : ''}</option>`;
+        return `<option value="${escapeAttr(id)}" ${selected}>${escapeHtml(nome)} (${escapeHtml(tipo)}) - Disp ${saldoDisponivel}${unidade ? ` ${escapeHtml(unidade)}` : ''} | Fisico ${saldoFisico}${unidade ? ` ${escapeHtml(unidade)}` : ''}</option>`;
       }).join('');
       return (incluirVazio ? '<option value="">Selecione no estoque</option>' : '') + opts;
     }
 
     function getCandidatosVinculo(vinculo) {
       const tipo = String(vinculo?.tipo_item || '').toUpperCase().trim();
+      const categoria = String(vinculo?.categoria || '').toUpperCase().trim();
+      const unidade = String(vinculo?.unidade || '').toUpperCase().trim();
+      const modo = String(vinculo?.modo_atendimento || '').toUpperCase().trim();
+      const comprimentoMin = parseNumeroInput(vinculo?.comprimento_min_cm || 0);
+      const larguraMin = parseNumeroInput(vinculo?.largura_min_cm || 0);
+      const espessuraMin = parseNumeroInput(vinculo?.espessura_min_cm || 0);
       const todos = Array.isArray(estoqueOpcoes) ? estoqueOpcoes : [];
-      if (!tipo) {
-        return todos;
-      }
-      return todos.filter(i => String(i.tipo || '').toUpperCase() === tipo);
+      return todos.filter(i => {
+        if (tipo && String(i?.tipo || '').toUpperCase().trim() !== tipo) return false;
+        if (categoria && String(i?.categoria || '').toUpperCase().trim() !== categoria) return false;
+        if (unidade && String(i?.unidade || '').toUpperCase().trim() !== unidade) return false;
+
+        const disponivel = parseNumeroInput(
+          Object.prototype.hasOwnProperty.call(i || {}, 'quantidade_disponivel')
+            ? i.quantidade_disponivel
+            : i.quantidade
+        );
+        if (disponivel <= 0 && String(i?.ID || '').trim() !== String(vinculo?.estoque_id || '').trim()) {
+          return false;
+        }
+
+        if (modo !== 'PECA_UNICA') return true;
+
+        const comprimento = parseNumeroInput(i?.comprimento_cm || 0);
+        const largura = parseNumeroInput(i?.largura_cm || 0);
+        const espessura = parseNumeroInput(i?.espessura_cm || 0);
+        return (
+          comprimento >= comprimentoMin &&
+          largura >= larguraMin &&
+          espessura >= espessuraMin
+        );
+      });
     }
 
     function getEstoqueOpcaoById(estoqueId) {
@@ -223,38 +257,7 @@
     }
 
     function getCandidatosConsumo(item) {
-      const atualId = String(item?.estoque_id || '').trim();
-      const atual = getEstoqueOpcaoById(atualId);
-      const todos = Array.isArray(estoqueOpcoes) ? estoqueOpcoes : [];
-      if (!atual) return todos;
-
-      const tipoAtual = String(atual.tipo || '').toUpperCase().trim();
-      const categoriaAtual = String(atual.categoria || '').toUpperCase().trim();
-      const unidadeAtual = String(atual.unidade || '').toUpperCase().trim();
-
-      let candidatos = todos.filter(i => {
-        if (tipoAtual && String(i?.tipo || '').toUpperCase().trim() !== tipoAtual) return false;
-        return true;
-      });
-
-      const comCategoria = categoriaAtual
-        ? candidatos.filter(i => String(i?.categoria || '').toUpperCase().trim() === categoriaAtual)
-        : [];
-      if (comCategoria.length > 0) {
-        candidatos = comCategoria;
-      }
-
-      const comUnidade = unidadeAtual
-        ? candidatos.filter(i => String(i?.unidade || '').toUpperCase().trim() === unidadeAtual)
-        : [];
-      if (comUnidade.length > 0) {
-        candidatos = comUnidade;
-      }
-
-      if (!candidatos.some(i => String(i?.ID || '').trim() === atualId)) {
-        candidatos = [atual, ...candidatos];
-      }
-      return candidatos;
+      return getCandidatosVinculo(item);
     }
 
     function atualizarFonteConsumoContexto(fonteEl, row) {
@@ -276,12 +279,24 @@
       input.dataset.estoqueId = estoqueId;
       input.dataset.unidade = unidade;
       input.step = obterStepQuantidade(unidade);
+      if (String(row?.dataset?.modoAtendimento || '').toUpperCase() === 'PECA_UNICA') {
+        const quantidadePeca = parseNumeroInput(itemEstoque?.quantidade || 0);
+        input.readOnly = true;
+        input.dataset.quantidadeBase = String(Number(quantidadePeca || 0).toFixed(6));
+        if (input.dataset.manual !== '1') {
+          input.value = quantidadePeca > 0
+            ? formatQuantidadeInputPorUnidade(quantidadePeca, unidade)
+            : '';
+        }
+      } else {
+        input.readOnly = false;
+      }
     }
 
     function atualizarRemocaoFontesConsumo(row) {
       if (!row) return;
       const fontes = [...row.querySelectorAll('.consumo-fonte')];
-      const bloquear = fontes.length <= 1;
+      const bloquear = fontes.length <= 1 || String(row.dataset.modoAtendimento || '').toUpperCase() === 'PECA_UNICA';
       fontes.forEach(fonte => {
         const btn = fonte.querySelector('.btn-consumo-remover-fonte');
         if (btn) btn.disabled = bloquear;
@@ -313,7 +328,16 @@
     }
 
     function criarFonteConsumo(row, opcoes = {}) {
-      const candidatos = getCandidatosConsumo({ estoque_id: row?.dataset?.estoqueIdOrigem || '' });
+      const candidatos = getCandidatosConsumo({
+        tipo_item: row?.dataset?.tipoItem || '',
+        categoria: row?.dataset?.categoria || '',
+        unidade: row?.dataset?.unidadeOrigem || '',
+        modo_atendimento: row?.dataset?.modoAtendimento || '',
+        comprimento_min_cm: row?.dataset?.comprimentoMin || '',
+        largura_min_cm: row?.dataset?.larguraMin || '',
+        espessura_min_cm: row?.dataset?.espessuraMin || '',
+        estoque_id: row?.dataset?.estoqueIdOrigem || ''
+      });
       const estoqueIdSelecionado = String(opcoes.estoqueId || row?.dataset?.estoqueIdOrigem || '').trim();
       const unidadeOrigem = String(row?.dataset?.unidadeOrigem || '').trim();
       const estoqueSel = getEstoqueOpcaoById(estoqueIdSelecionado);
@@ -323,6 +347,8 @@
       const quantidadeBase = parseNumeroInput((opcoes.quantidadeBase ?? row?.dataset?.quantidadeBase ?? 0));
       const quantidade = parseNumeroInput(opcoes.quantidade);
       const autoSugestao = !!opcoes.autoSugestao;
+      const modoAtendimento = String(row?.dataset?.modoAtendimento || '').toUpperCase();
+      const reservaId = String(opcoes.reservaId || '').trim();
 
       const fonte = document.createElement('div');
       fonte.className = 'linha-add-destino consumo-fonte';
@@ -338,9 +364,11 @@
           data-estoque-id="${escapeAttr(estoqueIdSelecionado)}"
           data-unidade="${escapeAttr(unidade)}"
           data-quantidade-base="${escapeAttr(Number(quantidadeBase || 0).toFixed(6))}"
+          data-reserva-id="${escapeAttr(reservaId)}"
           data-auto-sugestao="${autoSugestao ? '1' : '0'}"
           data-manual="${autoSugestao ? '0' : '1'}"
           value="${autoSugestao ? '' : escapeAttr(formatQuantidadeInputPorUnidade(quantidade, unidade))}"
+          ${modoAtendimento === 'PECA_UNICA' ? 'readonly' : ''}
         >
         <button type="button" class="btn-consumo-remover-fonte">Remover item</button>
       `;
@@ -359,6 +387,7 @@
       }
       if (input) {
         input.addEventListener('input', () => {
+          if (String(row?.dataset?.modoAtendimento || '').toUpperCase() === 'PECA_UNICA') return;
           input.dataset.manual = '1';
         });
       }
@@ -381,6 +410,9 @@
       if (!row) return;
       const wrap = row.querySelector('[data-consumo-fontes="1"]');
       if (!wrap) return;
+      if (String(row.dataset.modoAtendimento || '').toUpperCase() === 'PECA_UNICA' && wrap.children.length > 0) {
+        return;
+      }
       const fonte = criarFonteConsumo(row, opcoes);
       wrap.appendChild(fonte);
       garantirFonteAutoSugestao(row);
@@ -489,7 +521,7 @@
     ========================== */
     function renderMateriais(itens) {
       if (!Array.isArray(itens) || itens.length === 0) {
-        return '<p>Nenhum material previsto.</p>';
+        return '<p>Nenhum material reservado.</p>';
       }
 
       const linhas = itens.map(i => `
@@ -529,6 +561,53 @@
       `;
     }
 
+    function renderDimensoesNecessidade(vinculo) {
+      if (String(vinculo?.modo_atendimento || '').toUpperCase() !== 'PECA_UNICA') return '';
+      const comp = formatQuantidadeResumo(vinculo?.comprimento_min_cm || 0);
+      const larg = formatQuantidadeResumo(vinculo?.largura_min_cm || 0);
+      const esp = formatQuantidadeResumo(vinculo?.espessura_min_cm || 0);
+      return `Dimensoes minimas: ${escapeHtml(comp)} x ${escapeHtml(larg)} x ${escapeHtml(esp)} cm`;
+    }
+
+    function renderReservaLinha(vinculo, reserva = {}) {
+      const reservaId = String(reserva?.id || '').trim();
+      const estoqueId = String(reserva?.estoque_id || '').trim();
+      const candidatos = getCandidatosVinculo({
+        ...vinculo,
+        estoque_id: estoqueId
+      });
+      const opcoes = renderOpcoesEstoque(candidatos, estoqueId, true);
+      const unidade = String(reserva?.unidade || vinculo?.unidade || '').trim();
+      const quantidade = parseNumeroInput(
+        reservaId
+          ? (reserva?.quantidade_restante ?? reserva?.quantidade_reservada)
+          : ''
+      );
+      const modoExclusivo = String(vinculo?.modo_atendimento || '').toUpperCase() === 'PECA_UNICA';
+      const quantidadeLabel = modoExclusivo
+        ? 'Peca reservada'
+        : 'Qtd reservada';
+
+      return `
+        <div class="linha-add-destino reserva-entrada-row" data-vinculo-id="${escapeAttr(vinculo.id)}" data-reserva-id="${escapeAttr(reservaId)}">
+          <select class="reserva-estoque-select">
+            ${opcoes}
+          </select>
+          <input
+            class="reserva-qtd-input"
+            type="number"
+            step="${escapeAttr(obterStepQuantidade(unidade || vinculo?.unidade || ''))}"
+            min="0"
+            placeholder="${escapeAttr(quantidadeLabel)}"
+            value="${escapeAttr(quantidade > 0 ? formatQuantidadeInputPorUnidade(quantidade, unidade || vinculo?.unidade || '') : '')}"
+            ${modoExclusivo ? 'readonly' : ''}
+          >
+          <button class="btn-reserva-salvar" data-vinculo-id="${escapeAttr(vinculo.id)}" data-reserva-id="${escapeAttr(reservaId)}">Salvar</button>
+          ${reservaId ? `<button class="btn-reserva-remover" data-vinculo-id="${escapeAttr(vinculo.id)}" data-reserva-id="${escapeAttr(reservaId)}">Remover</button>` : ''}
+        </div>
+      `;
+    }
+
     function renderVinculos(vinculos, producaoId) {
       const lista = Array.isArray(vinculos) ? vinculos : [];
       if (lista.length === 0) {
@@ -537,36 +616,45 @@
 
       const linhas = lista.map(v => {
         const prevista = formatQuantidadePorUnidade(v.quantidade_prevista, v.unidade);
-        const consumida = formatQuantidadePorUnidade(v.quantidade_consumida, v.unidade);
+        const reservada = formatQuantidadePorUnidade(v.quantidade_reservada, v.unidade);
+        const consumida = formatQuantidadePorUnidade(v.quantidade_baixada, v.unidade);
         const pendente = formatQuantidadePorUnidade(v.quantidade_pendente, v.unidade);
-        const saldo = formatQuantidadePorUnidade(v.saldo_estoque, v.unidade);
-        const ok = !!v.saldo_suficiente;
-        const vinculado = !!v.vinculado;
-        const statusSaldo = vinculado ? (ok ? 'OK' : 'FALTA') : '-';
+        const dimensoes = renderDimensoesNecessidade(v);
         const origem = v.origem_item ? `Origem: ${escapeHtml(v.origem_item)}` : 'Origem: -';
-
-        let candidatos = getCandidatosVinculo(v);
-        if (v.estoque_id && !candidatos.some(i => String(i.ID) === String(v.estoque_id))) {
-          const atual = (estoqueOpcoes || []).find(i => String(i.ID) === String(v.estoque_id));
-          if (atual) {
-            candidatos = [atual, ...candidatos];
-          }
-        }
-        const opcoes = renderOpcoesEstoque(candidatos, v.estoque_id, true);
+        const reservas = Array.isArray(v.reservas) ? v.reservas : [];
+        const modoExclusivo = String(v.modo_atendimento || '').toUpperCase() === 'PECA_UNICA';
+        const podeAdicionarReserva = !modoExclusivo || reservas.length === 0;
+        const reservasHtml = reservas.length > 0
+          ? reservas.map(r => renderReservaLinha(v, r)).join('')
+          : '<p class="comp-meta">Nenhuma reserva cadastrada.</p>';
+        const linhaNovaReserva = podeAdicionarReserva
+          ? renderReservaLinha(v, {})
+          : '';
 
         return `
-          <div class="receita-card linha-vinculo" data-producao-id="${escapeAttr(producaoId)}" data-vinculo-id="${escapeAttr(v.id)}">
+          <div
+            class="receita-card linha-vinculo"
+            data-producao-id="${escapeAttr(producaoId)}"
+            data-vinculo-id="${escapeAttr(v.id)}"
+            data-tipo-item="${escapeAttr(v.tipo_item || '')}"
+            data-categoria="${escapeAttr(v.categoria || '')}"
+            data-unidade="${escapeAttr(v.unidade || '')}"
+            data-modo-atendimento="${escapeAttr(v.modo_atendimento || '')}"
+            data-comprimento-min="${escapeAttr(v.comprimento_min_cm || '')}"
+            data-largura-min="${escapeAttr(v.largura_min_cm || '')}"
+            data-espessura-min="${escapeAttr(v.espessura_min_cm || '')}"
+          >
             <div><strong>${escapeHtml(v.item || v.origem_item || v.id)}</strong></div>
-            <div class="comp-meta">Tipo: ${escapeHtml(v.tipo_item || '-')} | Status: ${escapeHtml(v.status || '-')}</div>
+            <div class="comp-meta">Tipo: ${escapeHtml(v.tipo_item || '-')} | Categoria: ${escapeHtml(v.categoria || '-')} | Status: ${escapeHtml(v.status || '-')}</div>
             <div class="comp-meta">
-              Prev: ${prevista} ${escapeHtml(v.unidade || '')} | Cons: ${consumida} | Pend: ${pendente} | Saldo: ${saldo} (${escapeHtml(statusSaldo)})
+              Prev: ${prevista} ${escapeHtml(v.unidade || '')} | Reserv: ${reservada} | Baix: ${consumida} | Falta reservar: ${pendente}
             </div>
             <div class="comp-meta">${origem}</div>
-            <div class="linha-add-destino">
-              <select class="vinculo-estoque-select">
-                ${opcoes}
-              </select>
-              <button class="btn-vincular-estoque" data-producao-id="${escapeAttr(producaoId)}" data-vinculo-id="${escapeAttr(v.id)}">Salvar vinculo</button>
+            ${dimensoes ? `<div class="comp-meta">${dimensoes}</div>` : ''}
+            <div class="bloco">
+              <p><b>Reservas</b></p>
+              ${reservasHtml}
+              ${linhaNovaReserva}
             </div>
           </div>
         `;
@@ -979,7 +1067,7 @@
 
       return `
         <p><b>Produto:</b> ${produtoLabel}</p>
-        <p><b>Receita:</b> ${receitaLabel}</p>
+        <p><b>Modelo:</b> ${receitaLabel}</p>
         <p><b>Inicio:</b> ${inicioLabel}</p>
         <p><b>Previsto:</b> ${previstoLabel}</p>
         <p><b>Produzido:</b> ${escapeHtml(formatQuantidadeResumo(qtdProduzidaNum))} | <b>Restante:</b> ${escapeHtml(formatQuantidadeResumo(qtdRestanteNum))}</p>
@@ -988,12 +1076,12 @@
         ${estoqueAtualizado ? `<p><b>Estoque atualizado:</b> ${dataEstoqueAtualizadoLabel}</p>` : ''}
 
         <div class="bloco">
-          <p><b>Materiais previstos</b></p>
+          <p><b>Materiais reservados</b></p>
           ${i.materiaisPrevistos ? renderMateriais(i.materiaisPrevistos) : '<p>Carregando materiais...</p>'}
         </div>
 
         <div class="bloco">
-          <p><b>Vinculos com estoque</b></p>
+          <p><b>Entradas e reservas</b></p>
           ${i.vinculosMateriais ? renderVinculos(i.vinculosMateriais, i.producao_id) : '<p>Carregando vinculos...</p>'}
         </div>
 
@@ -1160,13 +1248,36 @@
     /* =========================
        MODAL CONSUMO
     ========================== */
+    function renderSaidaRevisaoLinha(saida = {}) {
+      const unidade = String(saida?.unidade || '').trim();
+      const quantidadeBase = parseNumeroInput(saida?.quantidade || 0);
+      return `
+        <div class="linha-consumo saida-revisao-row">
+          <label class="dash-fixo-toggle">
+            <input class="saida-revisao-ativa" type="checkbox" checked>
+            <span>${escapeHtml(saida?.nome_saida || 'Saida')}</span>
+          </label>
+          <div class="linha-add-destino">
+            <input class="saida-revisao-qtd" type="number" step="${escapeAttr(obterStepQuantidade(unidade || 'UN'))}" min="0" data-quantidade-base="${escapeAttr(Number(quantidadeBase || 0).toFixed(6))}" value="">
+            <input class="saida-revisao-nome hidden" type="hidden" value="${escapeAttr(saida?.nome_saida || '')}">
+            <input class="saida-revisao-produto-ref hidden" type="hidden" value="${escapeAttr(saida?.produto_ref_id || '')}">
+            <input class="saida-revisao-tipo hidden" type="hidden" value="${escapeAttr(saida?.tipo_item || '')}">
+            <input class="saida-revisao-categoria hidden" type="hidden" value="${escapeAttr(saida?.categoria || '')}">
+            <input class="saida-revisao-unidade hidden" type="hidden" value="${escapeAttr(unidade)}">
+            <input class="saida-revisao-receita-saida hidden" type="hidden" value="${escapeAttr(saida?.receita_saida_id || '')}">
+          </div>
+        </div>
+      `;
+    }
+
     function atualizarSugestaoConsumoLote() {
       const {
         modalConsumo,
         consumoLista,
         consumoQtdProduzida,
         consumoBypassEntradas,
-        consumoResumoLote
+        consumoResumoLote,
+        consumoSaidasLista
       } = el();
       if (!modalConsumo || !consumoLista) return;
 
@@ -1213,19 +1324,49 @@
         if (bypass) return;
         if (input.dataset.autoSugestao !== '1') return;
         if (input.dataset.manual === '1') return;
+        const row = input.closest('.linha-consumo');
+        const modoAtendimento = String(row?.dataset?.modoAtendimento || '').toUpperCase();
+        if (modoAtendimento === 'PECA_UNICA') {
+          const serieItem = normalizarQuantidadeInteiraUI(row?.dataset?.serieItem || 0);
+          const dentroDoLote = serieItem > qtdProduzidaInteira && serieItem <= (qtdProduzidaInteira + qtdLote);
+          if (!dentroDoLote) {
+            input.value = '';
+            return;
+          }
+          const quantidadeBase = parseNumeroInput(input.dataset.quantidadeBase || 0);
+          input.value = quantidadeBase > 0
+            ? formatQuantidadeInputPorUnidade(quantidadeBase, input.dataset.unidade || '')
+            : '';
+          return;
+        }
         const quantidadeBase = parseNumeroInput(input.dataset.quantidadeBase || 0);
         const sugerida = Math.max(0, quantidadeBase * fator);
         input.value = formatQuantidadeInputPorUnidade(sugerida, input.dataset.unidade || '');
       });
+
+      const saidasAtivas = consumoSaidasLista?.querySelectorAll('.saida-revisao-row') || [];
+      [...saidasAtivas].forEach(row => {
+        const checkbox = row.querySelector('.saida-revisao-ativa');
+        const inputQtd = row.querySelector('.saida-revisao-qtd');
+        if (!checkbox || !inputQtd) return;
+        inputQtd.disabled = !checkbox.checked;
+        if (!checkbox.checked) return;
+        const quantidadeBase = parseNumeroInput(inputQtd.dataset.quantidadeBase || 0);
+        const sugerida = Math.max(0, quantidadeBase * fator);
+        if (inputQtd.dataset.manual !== '1') {
+          inputQtd.value = formatQuantidadeInputPorUnidade(sugerida, row.querySelector('.saida-revisao-unidade')?.value || '');
+        }
+      });
     }
 
-    function abrirModalConsumo(producaoId, nome, materiais, contexto) {
+    function abrirModalConsumo(producaoId, nome, necessidades, saidasPrevistas, contexto) {
       const {
         modalConsumo,
         consumoTitulo,
         consumoLista,
         consumoQtdProduzida,
-        consumoBypassEntradas
+        consumoBypassEntradas,
+        consumoSaidasLista
       } = el();
       if (!modalConsumo || !consumoLista) return;
 
@@ -1247,39 +1388,70 @@
       if (consumoBypassEntradas) consumoBypassEntradas.checked = false;
 
       consumoLista.innerHTML = '';
+      if (consumoSaidasLista) consumoSaidasLista.innerHTML = '';
 
-      (materiais || []).forEach(item => {
-        const quantidadeBase = Number(item.quantidade || 0);
+      (necessidades || []).forEach(item => {
+        const quantidadeBase = Number(item.quantidade_prevista || 0);
         const unidade = String(item.unidade || '').trim();
+        const modoAtendimento = String(item.modo_atendimento || '').toUpperCase();
+        const reservas = Array.isArray(item.reservas) ? item.reservas : [];
         const row = document.createElement('div');
         row.className = 'linha-consumo';
-        row.dataset.estoqueIdOrigem = String(item.estoque_id || '').trim();
+        row.dataset.vinculoId = String(item.id || '').trim();
+        row.dataset.estoqueIdOrigem = String(reservas[0]?.estoque_id || '').trim();
         row.dataset.unidadeOrigem = unidade;
+        row.dataset.tipoItem = String(item.tipo_item || '').trim();
+        row.dataset.categoria = String(item.categoria || '').trim();
+        row.dataset.modoAtendimento = modoAtendimento;
+        row.dataset.comprimentoMin = String(item.comprimento_min_cm || '').trim();
+        row.dataset.larguraMin = String(item.largura_min_cm || '').trim();
+        row.dataset.espessuraMin = String(item.espessura_min_cm || '').trim();
+        row.dataset.serieItem = String(item.serie_item || '').trim();
         row.dataset.quantidadeBase = Number(quantidadeBase || 0).toFixed(6);
+        const metaPeca = modoAtendimento === 'PECA_UNICA'
+          ? ` | Serie ${escapeHtml(String(item.serie_item || '-'))}`
+          : '';
         row.innerHTML = `
           <div>
-            <div><strong>${item.item || item.estoque_id}</strong></div>
-            <div>${formatQuantidadePorUnidade(quantidadeBase, unidade)} ${unidade || ''} (plano total)</div>
+            <div><strong>${escapeHtml(item.item || item.estoque_id || item.id)}</strong></div>
+            <div>
+              Prev: ${formatQuantidadePorUnidade(quantidadeBase, unidade)} ${escapeHtml(unidade || '')}
+              | Reservado: ${formatQuantidadePorUnidade(item.quantidade_reservada || 0, unidade)}${metaPeca}
+            </div>
           </div>
           <div data-consumo-fontes="1"></div>
           <div class="linha-add-destino">
-            <button type="button" class="btn-consumo-add-fonte">Adicionar item do estoque</button>
+            <button type="button" class="btn-consumo-add-fonte" ${modoAtendimento === 'PECA_UNICA' ? 'disabled' : ''}>Adicionar item do estoque</button>
           </div>
         `;
         consumoLista.appendChild(row);
 
-        adicionarFonteConsumo(row, {
-          estoqueId: item.estoque_id,
-          unidade,
-          quantidadeBase,
-          autoSugestao: true
-        });
+        if (reservas.length > 0) {
+          reservas.forEach(reserva => {
+            adicionarFonteConsumo(row, {
+              reservaId: reserva.id,
+              estoqueId: reserva.estoque_id,
+              unidade: reserva.unidade || unidade,
+              quantidadeBase: reserva.quantidade_restante || reserva.quantidade_reservada || 0,
+              quantidade: reserva.quantidade_restante || reserva.quantidade_reservada || 0,
+              autoSugestao: true
+            });
+          });
+        } else {
+          adicionarFonteConsumo(row, {
+            estoqueId: '',
+            unidade,
+            quantidadeBase,
+            quantidade: 0,
+            autoSugestao: false
+          });
+        }
 
         const btnAddFonte = row.querySelector('.btn-consumo-add-fonte');
         if (btnAddFonte) {
           btnAddFonte.addEventListener('click', () => {
             adicionarFonteConsumo(row, {
-              estoqueId: item.estoque_id,
+              estoqueId: '',
               unidade,
               quantidadeBase,
               autoSugestao: false
@@ -1288,6 +1460,28 @@
         }
       });
 
+      if (consumoSaidasLista) {
+        const linhasSaida = Array.isArray(saidasPrevistas) ? saidasPrevistas : [];
+        consumoSaidasLista.innerHTML = linhasSaida.length === 0
+          ? '<p>Nenhuma saida configurada.</p>'
+          : linhasSaida.map(renderSaidaRevisaoLinha).join('');
+
+        consumoSaidasLista.querySelectorAll('.saida-revisao-ativa').forEach(checkbox => {
+          checkbox.addEventListener('change', () => {
+            const row = checkbox.closest('.saida-revisao-row');
+            const inputQtd = row?.querySelector('.saida-revisao-qtd');
+            if (inputQtd) {
+              inputQtd.disabled = !checkbox.checked;
+            }
+          });
+        });
+        consumoSaidasLista.querySelectorAll('.saida-revisao-qtd').forEach(input => {
+          input.addEventListener('input', () => {
+            input.dataset.manual = '1';
+          });
+        });
+      }
+
       if (consumoQtdProduzida) {
         consumoQtdProduzida.oninput = () => {
           const inputs = consumoLista.querySelectorAll('input[data-campo-qtd-consumo="1"]');
@@ -1295,6 +1489,10 @@
             if (input.dataset.autoSugestao === '1') {
               input.dataset.manual = '0';
             }
+          });
+          const saidasInputs = consumoSaidasLista?.querySelectorAll('.saida-revisao-qtd') || [];
+          [...saidasInputs].forEach(input => {
+            input.dataset.manual = '0';
           });
           atualizarSugestaoConsumoLote();
         };
@@ -1315,12 +1513,14 @@
         consumoLista,
         consumoQtdProduzida,
         consumoBypassEntradas,
-        consumoResumoLote
+        consumoResumoLote,
+        consumoSaidasLista
       } = el();
       if (!modalConsumo || !consumoLista) return;
 
       modalConsumo.classList.add('hidden');
       consumoLista.innerHTML = '';
+      if (consumoSaidasLista) consumoSaidasLista.innerHTML = '';
       if (consumoQtdProduzida) {
         consumoQtdProduzida.value = '';
         consumoQtdProduzida.oninput = null;
@@ -1343,30 +1543,61 @@
           producaoId: '',
           itens: [],
           qtdProduzida: 0,
-          bypassEntradas: false
+          bypassEntradas: false,
+          saidas: []
         };
       }
 
       const producaoId = modalConsumo.dataset.producaoId || '';
       const bypassEntradas = !!consumoBypassEntradas?.checked;
       const qtdProduzida = parseNumeroInput(consumoQtdProduzida?.value || 0);
-      const fontes = consumoLista.querySelectorAll('.consumo-fonte');
       const itens = bypassEntradas
         ? []
-        : [...fontes].map(fonte => {
-          const input = fonte.querySelector('input[data-campo-qtd-consumo="1"]');
-          const select = fonte.querySelector('.consumo-estoque-select');
-          return {
-            estoque_id: String(select?.value || input?.dataset.estoqueId || '').trim(),
-            quantidade: parseNumeroInput(input?.value || 0)
-          };
-        }).filter(i => i.estoque_id && i.quantidade > 0);
+        : [...consumoLista.querySelectorAll('.linha-consumo')].flatMap(row => {
+          const necessidadeId = String(row.dataset.vinculoId || '').trim();
+          const modoAtendimento = String(row.dataset.modoAtendimento || '').toUpperCase();
+          const fontes = [...row.querySelectorAll('.consumo-fonte')];
+          return fontes.map(fonte => {
+            const input = fonte.querySelector('input[data-campo-qtd-consumo="1"]');
+            const select = fonte.querySelector('.consumo-estoque-select');
+            const quantidade = parseNumeroInput(input?.value || 0);
+            return {
+              necessidade_id: necessidadeId,
+              reserva_id: String(input?.dataset.reservaId || '').trim(),
+              estoque_id: String(select?.value || input?.dataset.estoqueId || '').trim(),
+              quantidade: modoAtendimento === 'PECA_UNICA'
+                ? quantidade
+                : quantidade
+            };
+          }).filter(i => i.estoque_id && i.quantidade > 0);
+        });
+
+      const { consumoSaidasLista } = el();
+      const saidas = consumoSaidasLista
+        ? [...consumoSaidasLista.querySelectorAll('.saida-revisao-row')]
+          .map(row => {
+            const ativa = row.querySelector('.saida-revisao-ativa')?.checked;
+            const quantidade = parseNumeroInput(row.querySelector('.saida-revisao-qtd')?.value || 0);
+            if (!ativa || quantidade <= 0) return null;
+            return {
+              receita_saida_id: row.querySelector('.saida-revisao-receita-saida')?.value || '',
+              nome_saida: row.querySelector('.saida-revisao-nome')?.value || '',
+              produto_ref_id: row.querySelector('.saida-revisao-produto-ref')?.value || '',
+              tipo_item: row.querySelector('.saida-revisao-tipo')?.value || '',
+              categoria: row.querySelector('.saida-revisao-categoria')?.value || '',
+              unidade: row.querySelector('.saida-revisao-unidade')?.value || '',
+              quantidade
+            };
+          })
+          .filter(v => !!v)
+        : [];
 
       return {
         producaoId,
         itens,
         qtdProduzida,
-        bypassEntradas
+        bypassEntradas,
+        saidas
       };
     }
 
@@ -1485,14 +1716,31 @@
           return;
         }
 
-        if (e.target.classList.contains('btn-vincular-estoque')) {
-          const producaoId = e.target.dataset.producaoId;
-          const vinculoId = e.target.dataset.vinculoId;
-          const row = e.target.closest('.linha-vinculo');
-          const select = row?.querySelector('.vinculo-estoque-select');
-          const estoqueId = select ? (select.value || '') : '';
+        if (e.target.classList.contains('btn-reserva-salvar')) {
+          const needId = e.target.dataset.vinculoId || '';
+          const reservaId = e.target.dataset.reservaId || '';
+          const linha = e.target.closest('.reserva-entrada-row');
+          const card = e.target.closest('.linha-vinculo');
+          const producaoId = card?.dataset.producaoId || '';
+          const estoqueId = linha?.querySelector('.reserva-estoque-select')?.value || '';
+          const quantidade = linha?.querySelector('.reserva-qtd-input')?.value || '';
           if (window.ProducaoController) {
-            ProducaoController.vincularItemEstoque(producaoId, vinculoId, estoqueId);
+            ProducaoController.salvarReservaEntrada(producaoId, needId, {
+              reserva_id: reservaId,
+              estoque_id: estoqueId,
+              quantidade_reservada: quantidade
+            });
+          }
+          return;
+        }
+
+        if (e.target.classList.contains('btn-reserva-remover')) {
+          const needId = e.target.dataset.vinculoId || '';
+          const reservaId = e.target.dataset.reservaId || '';
+          const card = e.target.closest('.linha-vinculo');
+          const producaoId = card?.dataset.producaoId || '';
+          if (window.ProducaoController) {
+            ProducaoController.removerReservaEntrada(producaoId, needId, reservaId);
           }
           return;
         }

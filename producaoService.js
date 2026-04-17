@@ -4,6 +4,8 @@ const ABA_PRODUCAO_CONSUMO = 'PRODUCAO_CONSUMO';
 const ABA_PRODUCAO_MATERIAIS = 'PRODUCAO_MATERIAIS';
 const ABA_PRODUCAO_MATERIAIS_PREVISTOS = 'PRODUCAO_MATERIAIS_PREVISTOS';
 const ABA_PRODUCAO_VINCULOS = 'PRODUCAO_VINCULOS_MATERIAIS';
+const ABA_PRODUCAO_NECESSIDADES_ENTRADA = 'PRODUCAO_NECESSIDADES_ENTRADA';
+const ABA_PRODUCAO_RESERVAS_ENTRADA = 'PRODUCAO_RESERVAS_ENTRADA';
 const ABA_PRODUCAO_DESTINOS = 'PRODUCAO_DESTINOS';
 const ABA_PRODUCAO_SAIDAS_LOTES = 'PRODUCAO_SAIDAS_LOTES';
 const PRODUCAO_CACHE_SCOPE = 'PRODUCAO_LISTA_ATIVAS';
@@ -90,6 +92,43 @@ const PRODUCAO_VINCULOS_SCHEMA = [
   'ativo'
 ];
 
+const PRODUCAO_NECESSIDADES_ENTRADA_SCHEMA = [
+  'id',
+  'producao_id',
+  'receita_id',
+  'receita_entrada_id',
+  'tipo_item',
+  'categoria',
+  'nome_item',
+  'unidade',
+  'modo_atendimento',
+  'quantidade_prevista',
+  'quantidade_baixada',
+  'valor_unit_referencia',
+  'comprimento_min_cm',
+  'largura_min_cm',
+  'espessura_min_cm',
+  'serie_item',
+  'origem_manual',
+  'criado_em',
+  'ativo'
+];
+
+const PRODUCAO_RESERVAS_ENTRADA_SCHEMA = [
+  'id',
+  'producao_id',
+  'necessidade_id',
+  'estoque_id',
+  'quantidade_reservada',
+  'quantidade_consumida',
+  'reserva_exclusiva',
+  'item_snapshot',
+  'unidade_snapshot',
+  'valor_unit_snapshot',
+  'criado_em',
+  'ativo'
+];
+
 const PRODUCAO_DESTINOS_SCHEMA = [
   'id',
   'producao_id',
@@ -169,6 +208,646 @@ function recarregarCacheProducao() {
 
 function assertCanWriteProducao(acao) {
   assertCanWrite(acao || 'Operacao de producao');
+}
+
+function isTipoEntradaMadeiraProducao(tipo) {
+  return String(tipo || '').trim().toUpperCase() === 'MADEIRA';
+}
+
+function getModoAtendimentoEntradaProducao(tipo) {
+  return isTipoEntradaMadeiraProducao(tipo) ? 'PECA_UNICA' : 'QUANTIDADE';
+}
+
+function ensureSheetComSchemaProducao(nomeAba, schema) {
+  const ss = getDataSpreadsheet();
+  let sheet = ss.getSheetByName(nomeAba);
+  if (!sheet) {
+    sheet = ss.insertSheet(nomeAba);
+  }
+  ensureSchema(sheet, schema);
+  return sheet;
+}
+
+function listarOrdensAtivasProducaoMap_(contextoLeitura) {
+  const sheet = getDataSpreadsheet().getSheetByName(ABA_PRODUCAO);
+  if (!sheet) return {};
+
+  const mapa = {};
+  rowsToObjects(sheet, { context: contextoLeitura })
+    .filter(i => String(i.ativo).toLowerCase() === 'true')
+    .forEach(i => {
+      const id = String(i.producao_id || '').trim();
+      if (!id) return;
+      mapa[id] = i;
+    });
+  return mapa;
+}
+
+function listarNecessidadesEntradaRows_(producaoId, opcoes) {
+  const opts = opcoes || {};
+  const sheet = getDataSpreadsheet().getSheetByName(ABA_PRODUCAO_NECESSIDADES_ENTRADA);
+  if (!sheet) return [];
+
+  const alvo = String(producaoId || '').trim();
+  return rowsToObjects(sheet, { context: opts.context })
+    .filter(i => String(i.ativo).toLowerCase() === 'true')
+    .filter(i => !alvo || String(i.producao_id || '').trim() === alvo);
+}
+
+function listarReservasEntradaRows_(producaoId, opcoes) {
+  const opts = opcoes || {};
+  const sheet = getDataSpreadsheet().getSheetByName(ABA_PRODUCAO_RESERVAS_ENTRADA);
+  if (!sheet) return [];
+
+  const alvo = String(producaoId || '').trim();
+  return rowsToObjects(sheet, { context: opts.context })
+    .filter(i => String(i.ativo).toLowerCase() === 'true')
+    .filter(i => !alvo || String(i.producao_id || '').trim() === alvo);
+}
+
+function listarVinculosMateriaisRowsLegados_(producaoId, opcoes) {
+  const opts = opcoes || {};
+  const sheet = getDataSpreadsheet().getSheetByName(ABA_PRODUCAO_VINCULOS);
+  if (!sheet) return [];
+
+  const alvo = String(producaoId || '').trim();
+  return rowsToObjects(sheet, { context: opts.context })
+    .filter(i => String(i.ativo).toLowerCase() === 'true')
+    .filter(i => !alvo || String(i.producao_id || '').trim() === alvo);
+}
+
+function migrarVinculosLegadosProducaoPorId(producaoId, opcoes) {
+  assertCanWriteProducao('Migracao de vinculos legados da producao');
+  const opts = opcoes || {};
+  const contexto = opts.context || null;
+  const prodId = String(producaoId || '').trim();
+  if (!prodId) {
+    throw new Error('Producao invalida para migracao.');
+  }
+
+  const necessidadesAtuais = listarNecessidadesEntradaRows_(prodId, { context: contexto });
+  if (necessidadesAtuais.length > 0) {
+    return {
+      ok: true,
+      migrado: false,
+      producao_id: prodId,
+      motivo: 'A OP ja utiliza a nova estrutura de necessidades.'
+    };
+  }
+
+  const vinculosLegados = listarVinculosMateriaisRowsLegados_(prodId, { context: contexto });
+  if (vinculosLegados.length === 0) {
+    return {
+      ok: true,
+      migrado: false,
+      producao_id: prodId,
+      motivo: 'Nenhum vinculo legado encontrado.'
+    };
+  }
+
+  ensureSheetComSchemaProducao(
+    ABA_PRODUCAO_NECESSIDADES_ENTRADA,
+    PRODUCAO_NECESSIDADES_ENTRADA_SCHEMA
+  );
+  ensureSheetComSchemaProducao(
+    ABA_PRODUCAO_RESERVAS_ENTRADA,
+    PRODUCAO_RESERVAS_ENTRADA_SCHEMA
+  );
+
+  const sheetEntradas = getDataSpreadsheet().getSheetByName(ABA_PRODUTOS_RECEITAS_ENTRADAS);
+  const entradasModelo = sheetEntradas ? rowsToObjects(sheetEntradas, { context: contexto }) : [];
+  const entradasPorId = {};
+  entradasModelo
+    .filter(i => String(i.ativo).toLowerCase() === 'true')
+    .forEach(i => {
+      const id = String(i.id || '').trim();
+      if (!id) return;
+      entradasPorId[id] = i;
+    });
+
+  const sheetEstoque = getDataSpreadsheet().getSheetByName(ABA_ESTOQUE);
+  const estoqueRows = sheetEstoque ? rowsToObjects(sheetEstoque, { context: contexto }) : [];
+  const estoquePorId = {};
+  estoqueRows
+    .filter(i => String(i.ativo).toLowerCase() === 'true')
+    .forEach(i => {
+      const id = String(i.ID || '').trim();
+      if (!id) return;
+      estoquePorId[id] = i;
+    });
+
+  const seriePorEntrada = {};
+  let reservasCriadas = 0;
+
+  vinculosLegados.forEach((v, idx) => {
+    const receitaEntradaId = String(v.receita_entrada_id || '').trim();
+    const entradaModelo = entradasPorId[receitaEntradaId] || {};
+    const tipoItem = String(
+      entradaModelo.tipo_item || v.tipo_item || ''
+    ).trim().toUpperCase();
+    const modoAtendimento = getModoAtendimentoEntradaProducao(tipoItem);
+    const nomeItem = String(
+      entradaModelo.nome_item ||
+      v.item_snapshot ||
+      v.origem_item ||
+      v.estoque_id ||
+      `Entrada ${idx + 1}`
+    ).trim();
+    const unidade = String(
+      entradaModelo.unidade || v.unidade || (modoAtendimento === 'PECA_UNICA' ? 'M3' : '')
+    ).trim();
+    const quantidadePrevista = parseNumeroBR(v.quantidade_prevista);
+    const quantidadeConsumida = parseNumeroBR(v.quantidade_consumida);
+    const serieItem = modoAtendimento === 'PECA_UNICA'
+      ? (seriePorEntrada[receitaEntradaId || `MANUAL_${idx}`] = (seriePorEntrada[receitaEntradaId || `MANUAL_${idx}`] || 0) + 1)
+      : '';
+    const necessidadeId = gerarId('PNE');
+
+    insert(ABA_PRODUCAO_NECESSIDADES_ENTRADA, {
+      id: necessidadeId,
+      producao_id: prodId,
+      receita_id: String(v.receita_id || '').trim(),
+      receita_entrada_id: receitaEntradaId,
+      tipo_item: tipoItem,
+      categoria: String(entradaModelo.categoria || '').trim(),
+      nome_item: nomeItem,
+      unidade,
+      modo_atendimento: modoAtendimento,
+      quantidade_prevista: quantidadePrevista,
+      quantidade_baixada: quantidadeConsumida,
+      valor_unit_referencia: parseNumeroBR(
+        entradaModelo.custo_manual || v.valor_unit_snapshot
+      ),
+      comprimento_min_cm: parseNumeroBR(entradaModelo.comprimento_cm),
+      largura_min_cm: parseNumeroBR(entradaModelo.largura_cm),
+      espessura_min_cm: parseNumeroBR(entradaModelo.espessura_cm),
+      serie_item: serieItem,
+      origem_manual: !receitaEntradaId,
+      criado_em: v.criado_em || new Date(),
+      ativo: true
+    }, PRODUCAO_NECESSIDADES_ENTRADA_SCHEMA);
+
+    const estoqueId = String(v.estoque_id || '').trim();
+    if (!estoqueId) return;
+
+    const itemEstoque = estoquePorId[estoqueId] || {};
+    const quantidadeReservadaBase = Math.max(quantidadePrevista, quantidadeConsumida);
+    const quantidadeReservada = modoAtendimento === 'PECA_UNICA'
+      ? Math.max(parseNumeroBR(itemEstoque.quantidade), quantidadeReservadaBase)
+      : quantidadeReservadaBase;
+
+    insert(ABA_PRODUCAO_RESERVAS_ENTRADA, {
+      id: gerarId('PRE'),
+      producao_id: prodId,
+      necessidade_id: necessidadeId,
+      estoque_id: estoqueId,
+      quantidade_reservada: quantidadeReservada,
+      quantidade_consumida: quantidadeConsumida,
+      reserva_exclusiva: modoAtendimento === 'PECA_UNICA',
+      item_snapshot: String(
+        v.item_snapshot || itemEstoque.item || nomeItem || estoqueId
+      ).trim(),
+      unidade_snapshot: String(itemEstoque.unidade || unidade || '').trim(),
+      valor_unit_snapshot: parseNumeroBR(
+        v.valor_unit_snapshot || itemEstoque.custo_unitario || itemEstoque.valor_unit
+      ),
+      criado_em: v.criado_em || new Date(),
+      ativo: true
+    }, PRODUCAO_RESERVAS_ENTRADA_SCHEMA);
+    reservasCriadas += 1;
+  });
+
+  const materiais = recalcularMateriaisPrevistosFromVinculos(prodId);
+  return {
+    ok: true,
+    migrado: true,
+    producao_id: prodId,
+    necessidades_criadas: vinculosLegados.length,
+    reservas_criadas: reservasCriadas,
+    materiaisPrevistos: materiais.itens || [],
+    custoPrevisto: parseNumeroBR(materiais.custoPrevisto)
+  };
+}
+
+function migrarVinculosLegadosProducao() {
+  assertCanWriteProducao('Migracao de vinculos legados de producao');
+  const sheet = getDataSpreadsheet().getSheetByName(ABA_PRODUCAO);
+  if (!sheet) {
+    return { ok: true, total_ops: 0, migradas: 0, ignoradas: 0, detalhes: [] };
+  }
+
+  const ordens = rowsToObjects(sheet)
+    .filter(i => String(i.ativo).toLowerCase() === 'true')
+    .map(i => String(i.producao_id || '').trim())
+    .filter(i => i);
+
+  const detalhes = [];
+  let migradas = 0;
+  let ignoradas = 0;
+
+  ordens.forEach(producaoId => {
+    const resultado = migrarVinculosLegadosProducaoPorId(producaoId);
+    detalhes.push(resultado);
+    if (resultado?.migrado) {
+      migradas += 1;
+    } else {
+      ignoradas += 1;
+    }
+  });
+
+  return {
+    ok: true,
+    total_ops: ordens.length,
+    migradas,
+    ignoradas,
+    detalhes
+  };
+}
+
+function limparNecessidadesEntradaProducao(producaoId, opcoes) {
+  assertCanWriteProducao('Limpeza de necessidades da producao');
+  const cfg = opcoes || {};
+  const preservarManuais = !!cfg.preservarManuais;
+
+  const sheet = ensureSheetComSchemaProducao(
+    ABA_PRODUCAO_NECESSIDADES_ENTRADA,
+    PRODUCAO_NECESSIDADES_ENTRADA_SCHEMA
+  );
+
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0] || [];
+  const idxProducao = headers.indexOf('producao_id');
+  const idxOrigemManual = headers.indexOf('origem_manual');
+  const idxAtivo = headers.indexOf('ativo');
+
+  if (idxProducao === -1 || idxAtivo === -1 || data.length <= 1) return;
+
+  const producaoIdAlvo = String(producaoId || '').trim();
+  const linhasAlvo = [];
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][idxProducao] || '').trim() !== producaoIdAlvo) continue;
+    if (String(data[i][idxAtivo]).toLowerCase() === 'false') continue;
+    if (preservarManuais && idxOrigemManual !== -1 && String(data[i][idxOrigemManual]).toLowerCase() === 'true') {
+      continue;
+    }
+    linhasAlvo.push(i + 1);
+  }
+
+  if (linhasAlvo.length === 0) return;
+  linhasAlvo.forEach(rowNumber => {
+    sheet.getRange(rowNumber, idxAtivo + 1).setValue(false);
+  });
+}
+
+function limparReservasEntradaProducao(producaoId, opcoes) {
+  assertCanWriteProducao('Limpeza de reservas da producao');
+  const cfg = opcoes || {};
+  const preservarConsumidas = !!cfg.preservarConsumidas;
+
+  const sheet = ensureSheetComSchemaProducao(
+    ABA_PRODUCAO_RESERVAS_ENTRADA,
+    PRODUCAO_RESERVAS_ENTRADA_SCHEMA
+  );
+
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0] || [];
+  const idxProducao = headers.indexOf('producao_id');
+  const idxQtdConsumida = headers.indexOf('quantidade_consumida');
+  const idxAtivo = headers.indexOf('ativo');
+
+  if (idxProducao === -1 || idxAtivo === -1 || data.length <= 1) return;
+
+  const producaoIdAlvo = String(producaoId || '').trim();
+  const linhasAlvo = [];
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][idxProducao] || '').trim() !== producaoIdAlvo) continue;
+    if (String(data[i][idxAtivo]).toLowerCase() === 'false') continue;
+    if (preservarConsumidas && idxQtdConsumida !== -1 && parseNumeroBR(data[i][idxQtdConsumida]) > 0) {
+      continue;
+    }
+    linhasAlvo.push(i + 1);
+  }
+
+  if (linhasAlvo.length === 0) return;
+  linhasAlvo.forEach(rowNumber => {
+    sheet.getRange(rowNumber, idxAtivo + 1).setValue(false);
+  });
+}
+
+function gerarNecessidadesEntradaProducao(produtoId, receitaId, qtdPlanejada) {
+  const prodId = String(produtoId || '').trim();
+  const recId = String(receitaId || '').trim();
+  const qtdPlanejadaInt = normalizarQuantidadeInteiraProducao(qtdPlanejada);
+
+  if (!prodId || !recId || qtdPlanejadaInt <= 0) return [];
+
+  const sheetEntradas = getDataSpreadsheet().getSheetByName(ABA_PRODUTOS_RECEITAS_ENTRADAS);
+  const entradas = sheetEntradas ? rowsToObjects(sheetEntradas) : [];
+  const entradasAtivas = entradas
+    .filter(i => String(i.ativo).toLowerCase() === 'true')
+    .filter(i => String(i.receita_id || '').trim() === recId);
+
+  const necessidades = [];
+  entradasAtivas.forEach((entrada, idx) => {
+    const tipoItem = String(entrada.tipo_item || '').trim().toUpperCase();
+    const categoria = String(entrada.categoria || '').trim();
+    const nomeItem = String(entrada.nome_item || '').trim();
+    const unidade = String(entrada.unidade || '').trim() || (isTipoEntradaMadeiraProducao(tipoItem) ? 'M3' : '');
+    const quantidadeBase = parseNumeroBR(entrada.qtd_pecas);
+    const valorUnitRef = parseNumeroBR(entrada.custo_manual);
+    const comprimentoMin = parseNumeroBR(entrada.comprimento_cm);
+    const larguraMin = parseNumeroBR(entrada.largura_cm);
+    const espessuraMin = parseNumeroBR(entrada.espessura_cm);
+    const modoAtendimento = getModoAtendimentoEntradaProducao(tipoItem);
+
+    if (!tipoItem || !nomeItem) return;
+
+    if (modoAtendimento === 'PECA_UNICA') {
+      for (let serie = 1; serie <= qtdPlanejadaInt; serie++) {
+        necessidades.push({
+          id: gerarId('PNE'),
+          producao_id: '',
+          receita_id: recId,
+          receita_entrada_id: String(entrada.id || '').trim(),
+          tipo_item: tipoItem,
+          categoria,
+          nome_item: nomeItem,
+          unidade: unidade || 'M3',
+          modo_atendimento: modoAtendimento,
+          quantidade_prevista: quantidadeBase > 0 ? quantidadeBase : 0,
+          quantidade_baixada: 0,
+          valor_unit_referencia: valorUnitRef,
+          comprimento_min_cm: comprimentoMin,
+          largura_min_cm: larguraMin,
+          espessura_min_cm: espessuraMin,
+          serie_item: serie,
+          origem_manual: false,
+          criado_em: new Date(),
+          ativo: true,
+          _ordem_base: idx
+        });
+      }
+      return;
+    }
+
+    const quantidadePrevista = quantidadeBase * qtdPlanejadaInt;
+    if (quantidadePrevista <= 0) return;
+
+    necessidades.push({
+      id: gerarId('PNE'),
+      producao_id: '',
+      receita_id: recId,
+      receita_entrada_id: String(entrada.id || '').trim(),
+      tipo_item: tipoItem,
+      categoria,
+      nome_item: nomeItem,
+      unidade,
+      modo_atendimento: modoAtendimento,
+      quantidade_prevista: quantidadePrevista,
+      quantidade_baixada: 0,
+      valor_unit_referencia: valorUnitRef,
+      comprimento_min_cm: 0,
+      largura_min_cm: 0,
+      espessura_min_cm: 0,
+      serie_item: '',
+      origem_manual: false,
+      criado_em: new Date(),
+      ativo: true,
+      _ordem_base: idx
+    });
+  });
+
+  return necessidades;
+}
+
+function salvarNecessidadesEntradaProducao(producaoId, receitaId, necessidades, opcoes) {
+  assertCanWriteProducao('Salvamento de necessidades da producao');
+  const cfg = opcoes || {};
+  const preservarManuais = !!cfg.preservarManuais;
+  const prodId = String(producaoId || '').trim();
+  if (!prodId) return true;
+
+  ensureSheetComSchemaProducao(
+    ABA_PRODUCAO_NECESSIDADES_ENTRADA,
+    PRODUCAO_NECESSIDADES_ENTRADA_SCHEMA
+  );
+  limparNecessidadesEntradaProducao(prodId, { preservarManuais });
+
+  const linhas = Array.isArray(necessidades) ? necessidades : [];
+  linhas.forEach(n => {
+    const quantidadePrevista = parseNumeroBR(n.quantidade_prevista);
+    if (quantidadePrevista <= 0 && String(n.modo_atendimento || '').trim().toUpperCase() !== 'PECA_UNICA') return;
+
+    insert(ABA_PRODUCAO_NECESSIDADES_ENTRADA, {
+      id: String(n.id || gerarId('PNE')).trim(),
+      producao_id: prodId,
+      receita_id: String(receitaId || n.receita_id || '').trim(),
+      receita_entrada_id: String(n.receita_entrada_id || '').trim(),
+      tipo_item: String(n.tipo_item || '').trim().toUpperCase(),
+      categoria: String(n.categoria || '').trim(),
+      nome_item: String(n.nome_item || '').trim(),
+      unidade: String(n.unidade || '').trim(),
+      modo_atendimento: String(n.modo_atendimento || '').trim().toUpperCase() || 'QUANTIDADE',
+      quantidade_prevista: quantidadePrevista,
+      quantidade_baixada: parseNumeroBR(n.quantidade_baixada),
+      valor_unit_referencia: parseNumeroBR(n.valor_unit_referencia),
+      comprimento_min_cm: parseNumeroBR(n.comprimento_min_cm),
+      largura_min_cm: parseNumeroBR(n.largura_min_cm),
+      espessura_min_cm: parseNumeroBR(n.espessura_min_cm),
+      serie_item: String(n.serie_item || '').trim(),
+      origem_manual: String(n.origem_manual).toLowerCase() === 'true' || n.origem_manual === true,
+      criado_em: n.criado_em || new Date(),
+      ativo: true
+    }, PRODUCAO_NECESSIDADES_ENTRADA_SCHEMA);
+  });
+
+  invalidarCachesRelacionadosAba(ABA_PRODUCAO);
+  return true;
+}
+
+function listarResumoReservasEstoqueProducao(opcoes) {
+  const opts = opcoes || {};
+  const contexto = opts.context || null;
+  const excluirReservaId = String(opts.excluirReservaId || '').trim();
+  const producoesAtivas = listarOrdensAtivasProducaoMap_(contexto);
+  const reservas = listarReservasEntradaRows_('', { context: contexto });
+  const resumo = {};
+
+  reservas.forEach(r => {
+    const producaoId = String(r.producao_id || '').trim();
+    if (!producoesAtivas[producaoId]) return;
+    const reservaId = String(r.id || '').trim();
+    if (excluirReservaId && reservaId === excluirReservaId) return;
+
+    const estoqueId = String(r.estoque_id || '').trim();
+    if (!estoqueId) return;
+
+    const reservado = Math.max(
+      parseNumeroBR(r.quantidade_reservada) - parseNumeroBR(r.quantidade_consumida),
+      0
+    );
+    if (reservado <= 0) return;
+
+    if (!resumo[estoqueId]) {
+      resumo[estoqueId] = {
+        quantidade_reservada: 0,
+        producoes: {}
+      };
+    }
+    resumo[estoqueId].quantidade_reservada += reservado;
+    resumo[estoqueId].producoes[producaoId] = true;
+  });
+
+  return resumo;
+}
+
+function listarEstoqueAtivoComReservaProducao(opcoes) {
+  const opts = opcoes || {};
+  const contexto = opts.context || null;
+  const resumoReservas = listarResumoReservasEstoqueProducao({
+    context: contexto,
+    excluirReservaId: opts.excluirReservaId
+  });
+
+  return (typeof listarEstoque === 'function' ? listarEstoque(!!opts.forcarRecarregar) : [])
+    .map(item => {
+      const estoqueId = String(item?.ID || '').trim();
+      const reservado = parseNumeroBR(resumoReservas[estoqueId]?.quantidade_reservada);
+      const quantidade = parseNumeroBR(item?.quantidade);
+      return {
+        ...item,
+        reservado_quantidade: reservado,
+        quantidade_disponivel: Math.max(quantidade - reservado, 0),
+        reservado_em_op_total: Object.keys(resumoReservas[estoqueId]?.producoes || {}).length
+      };
+    });
+}
+
+function obterNecessidadeEntradaProducao_(producaoId, necessidadeId, contexto) {
+  const prodId = String(producaoId || '').trim();
+  const necId = String(necessidadeId || '').trim();
+  if (!prodId || !necId) return null;
+
+  const necessidade = listarNecessidadesEntradaRows_(prodId, { context: contexto })
+    .find(i => String(i.id || '').trim() === necId);
+  return necessidade || null;
+}
+
+function obterReservaEntradaProducao_(producaoId, reservaId, contexto) {
+  const prodId = String(producaoId || '').trim();
+  const resId = String(reservaId || '').trim();
+  if (!prodId || !resId) return null;
+
+  const reserva = listarReservasEntradaRows_(prodId, { context: contexto })
+    .find(i => String(i.id || '').trim() === resId);
+  return reserva || null;
+}
+
+function itemEstoqueCompativelComNecessidade_(necessidade, itemEstoque) {
+  const necessidadeTipo = String(necessidade?.tipo_item || '').trim().toUpperCase();
+  const necessidadeCategoria = String(necessidade?.categoria || '').trim().toUpperCase();
+  const necessidadeUnidade = String(necessidade?.unidade || '').trim().toUpperCase();
+  const estoqueTipo = String(itemEstoque?.tipo || '').trim().toUpperCase();
+  const estoqueCategoria = String(itemEstoque?.categoria || '').trim().toUpperCase();
+  const estoqueUnidade = String(itemEstoque?.unidade || '').trim().toUpperCase();
+
+  if (!necessidadeTipo || !estoqueTipo || necessidadeTipo !== estoqueTipo) return false;
+  if (necessidadeCategoria && estoqueCategoria !== necessidadeCategoria) return false;
+  if (necessidadeUnidade && estoqueUnidade !== necessidadeUnidade) return false;
+
+  const modo = String(necessidade?.modo_atendimento || '').trim().toUpperCase();
+  if (modo !== 'PECA_UNICA') return true;
+
+  const comprimentoMin = parseNumeroBR(necessidade?.comprimento_min_cm);
+  const larguraMin = parseNumeroBR(necessidade?.largura_min_cm);
+  const espessuraMin = parseNumeroBR(necessidade?.espessura_min_cm);
+  const comprimentoEstoque = parseNumeroBR(itemEstoque?.comprimento_cm);
+  const larguraEstoque = parseNumeroBR(itemEstoque?.largura_cm);
+  const espessuraEstoque = parseNumeroBR(itemEstoque?.espessura_cm);
+
+  return (
+    comprimentoEstoque >= comprimentoMin &&
+    larguraEstoque >= larguraMin &&
+    espessuraEstoque >= espessuraMin
+  );
+}
+
+function calcularResumoNecessidadeEntrada_(necessidade, reservas, estoqueMap) {
+  const modo = String(necessidade?.modo_atendimento || '').trim().toUpperCase() || 'QUANTIDADE';
+  const quantidadePrevista = parseNumeroBR(necessidade?.quantidade_prevista);
+  const quantidadeBaixadaAtual = parseNumeroBR(necessidade?.quantidade_baixada);
+
+  let quantidadeReservada = 0;
+  const reservasNormalizadas = (Array.isArray(reservas) ? reservas : []).map(reserva => {
+    const estoqueId = String(reserva?.estoque_id || '').trim();
+    const estoque = estoqueMap[estoqueId] || {};
+    const quantidadeReservadaLinha = parseNumeroBR(reserva?.quantidade_reservada);
+    const quantidadeConsumidaLinha = parseNumeroBR(reserva?.quantidade_consumida);
+    const quantidadeRestanteLinha = Math.max(quantidadeReservadaLinha - quantidadeConsumidaLinha, 0);
+    quantidadeReservada += quantidadeRestanteLinha;
+    return {
+      id: String(reserva?.id || '').trim(),
+      necessidade_id: String(reserva?.necessidade_id || '').trim(),
+      estoque_id: estoqueId,
+      item: String(estoque?.item || reserva?.item_snapshot || estoqueId).trim(),
+      unidade: String(estoque?.unidade || reserva?.unidade_snapshot || necessidade?.unidade || '').trim(),
+      tipo_item: String(estoque?.tipo || necessidade?.tipo_item || '').trim().toUpperCase(),
+      categoria: String(estoque?.categoria || necessidade?.categoria || '').trim(),
+      quantidade_reservada: quantidadeReservadaLinha,
+      quantidade_consumida: quantidadeConsumidaLinha,
+      quantidade_restante: quantidadeRestanteLinha,
+      valor_unit: parseNumeroBR(estoque?.custo_unitario || estoque?.valor_unit || reserva?.valor_unit_snapshot),
+      quantidade_disponivel_item: parseNumeroBR(estoque?.quantidade_disponivel),
+      quantidade_fisica_item: parseNumeroBR(estoque?.quantidade)
+    };
+  });
+
+  const quantidadePendente = modo === 'PECA_UNICA'
+    ? (reservasNormalizadas.length > 0 ? 0 : quantidadePrevista)
+    : Math.max(quantidadePrevista - quantidadeReservada, 0);
+  const quantidadeBaixada = modo === 'PECA_UNICA'
+    ? (quantidadeBaixadaAtual > 0 ? quantidadePrevista : 0)
+    : quantidadeBaixadaAtual;
+
+  let status = 'Nao reservado';
+  if (modo === 'PECA_UNICA') {
+    if (quantidadeBaixada > 0) {
+      status = 'Baixado';
+    } else if (reservasNormalizadas.length > 0) {
+      status = 'Reservado';
+    }
+  } else if (quantidadeBaixada >= quantidadePrevista && quantidadePrevista > 0) {
+    status = 'Baixado';
+  } else if (quantidadeReservada >= quantidadePrevista && quantidadePrevista > 0) {
+    status = 'Reservado';
+  } else if (quantidadeReservada > 0) {
+    status = 'Parcial';
+  }
+
+  return {
+    id: String(necessidade?.id || '').trim(),
+    producao_id: String(necessidade?.producao_id || '').trim(),
+    receita_id: String(necessidade?.receita_id || '').trim(),
+    receita_entrada_id: String(necessidade?.receita_entrada_id || '').trim(),
+    tipo_item: String(necessidade?.tipo_item || '').trim().toUpperCase(),
+    categoria: String(necessidade?.categoria || '').trim(),
+    origem_item: String(necessidade?.nome_item || '').trim(),
+    item: String(necessidade?.nome_item || '').trim(),
+    unidade: String(necessidade?.unidade || '').trim(),
+    modo_atendimento: modo,
+    quantidade_prevista: quantidadePrevista,
+    quantidade_reservada: quantidadeReservada,
+    quantidade_baixada: quantidadeBaixada,
+    quantidade_pendente: quantidadePendente,
+    valor_unit_referencia: parseNumeroBR(necessidade?.valor_unit_referencia),
+    comprimento_min_cm: parseNumeroBR(necessidade?.comprimento_min_cm),
+    largura_min_cm: parseNumeroBR(necessidade?.largura_min_cm),
+    espessura_min_cm: parseNumeroBR(necessidade?.espessura_min_cm),
+    serie_item: String(necessidade?.serie_item || '').trim(),
+    origem_manual: String(necessidade?.origem_manual).toLowerCase() === 'true',
+    status,
+    reservas: reservasNormalizadas
+  };
 }
 
 function listarProdutosAtivosIndicesProducao() {
@@ -509,14 +1188,20 @@ function criarProducao(payload) {
     criado_em: new Date()
   };
 
-  const detalhado = explodirReceitaDetalhada(
+  const necessidadesEntrada = gerarNecessidadesEntradaProducao(
+    novo.produto_id,
+    novo.receita_id,
+    novo.qtd_planejada
+  );
+  const saidasDetalhadas = explodirSaidasReceitaDetalhada(
     novo.produto_id,
     novo.receita_id,
     novo.qtd_planejada
   );
 
   insert(ABA_PRODUCAO, novo, PRODUCAO_SCHEMA);
-  salvarVinculosMateriaisProducao(novo.producao_id, novo.receita_id, detalhado.itens || []);
+  salvarNecessidadesEntradaProducao(novo.producao_id, novo.receita_id, necessidadesEntrada);
+  salvarDestinosProducao(novo.producao_id, novo.receita_id, saidasDetalhadas.itens || []);
   const materiaisCalculados = recalcularMateriaisPrevistosFromVinculos(novo.producao_id);
 
   let nomeProduto = '';
@@ -613,14 +1298,21 @@ function atualizarProducao(id, payload) {
   }
 
   let materiaisRegerados = null;
+  let saidasRegeradas = null;
   if (mudouReceita || mudouProduto || mudouQtd) {
-    const detalhado = explodirReceitaDetalhada(
+    materiaisRegerados = {
+      detalhado: gerarNecessidadesEntradaProducao(
         dadosAtualizados.produto_id,
         dadosAtualizados.receita_id,
         normalizarQuantidadeInteiraProducao(dadosAtualizados.qtd_planejada)
-      );
-    materiaisRegerados = {
-      detalhado: detalhado.itens || []
+      )
+    };
+    saidasRegeradas = {
+      detalhado: (explodirSaidasReceitaDetalhada(
+        dadosAtualizados.produto_id,
+        dadosAtualizados.receita_id,
+        normalizarQuantidadeInteiraProducao(dadosAtualizados.qtd_planejada)
+      )?.itens) || []
     };
   }
 
@@ -633,12 +1325,21 @@ function atualizarProducao(id, payload) {
   );
 
   if (ok && materiaisRegerados) {
-    salvarVinculosMateriaisProducao(
+    limparReservasEntradaProducao(id, { preservarConsumidas: false });
+    salvarNecessidadesEntradaProducao(
       id,
       dadosAtualizados.receita_id,
       materiaisRegerados.detalhado,
       { preservarManuais: true }
     );
+    if (saidasRegeradas) {
+      salvarDestinosProducao(
+        id,
+        dadosAtualizados.receita_id,
+        saidasRegeradas.detalhado,
+        { preservarManuais: true }
+      );
+    }
     recalcularMateriaisPrevistosFromVinculos(id);
   }
 
@@ -647,13 +1348,18 @@ function atualizarProducao(id, payload) {
 
 function deletarProducao(id) {
   assertCanWriteProducao('Exclusao de producao');
-  return updateById(
+  const ok = updateById(
     ABA_PRODUCAO,
     'producao_id',
     id,
     { ativo: false },
     PRODUCAO_SCHEMA
   );
+  if (ok) {
+    limparNecessidadesEntradaProducao(id, { preservarManuais: false });
+    limparReservasEntradaProducao(id, { preservarConsumidas: false });
+  }
+  return ok;
 }
 
 function listarEtapasProducao(producaoId) {
@@ -847,87 +1553,43 @@ function agruparMateriaisPorEstoque(itens) {
 }
 
 function limparVinculosMateriaisProducao(producaoId, opcoes) {
-  assertCanWriteProducao('Limpeza de vinculos de materiais da producao');
   const cfg = opcoes || {};
-  const preservarManuais = !!cfg.preservarManuais;
-
-  const ss = getDataSpreadsheet();
-  let sheet = ss.getSheetByName(ABA_PRODUCAO_VINCULOS);
-  if (!sheet) {
-    sheet = ss.insertSheet(ABA_PRODUCAO_VINCULOS);
-  }
-
-  ensureSchema(sheet, PRODUCAO_VINCULOS_SCHEMA);
-
-  const data = sheet.getDataRange().getValues();
-  const headers = data[0] || [];
-  const idCol = headers.indexOf('producao_id');
-  const receitaEntradaCol = headers.indexOf('receita_entrada_id');
-  const ativoCol = headers.indexOf('ativo');
-
-  if (idCol !== -1 && ativoCol !== -1 && data.length > 1) {
-    const producaoIdAlvo = String(producaoId || '').trim();
-    const linhasAlvo = [];
-    for (let i = 1; i < data.length; i++) {
-      if (String(data[i][idCol] || '').trim() !== producaoIdAlvo) continue;
-      if (String(data[i][ativoCol]).toLowerCase() === 'false') continue;
-
-      if (preservarManuais && receitaEntradaCol !== -1) {
-        const receitaEntradaId = String(data[i][receitaEntradaCol] || '').trim();
-        if (!receitaEntradaId) continue;
-      }
-
-      linhasAlvo.push(i + 1);
-    }
-    inativarLinhasEmBlocosProducao(sheet, ativoCol, linhasAlvo);
-  }
+  limparNecessidadesEntradaProducao(producaoId, {
+    preservarManuais: !!cfg.preservarManuais
+  });
+  limparReservasEntradaProducao(producaoId, {
+    preservarConsumidas: !!cfg.preservarManuais
+  });
 }
 
 function salvarVinculosMateriaisProducao(producaoId, receitaId, vinculos, opcoes) {
-  assertCanWriteProducao('Salvamento de vinculos de materiais da producao');
   const cfg = opcoes || {};
-  const preservarManuais = !!cfg.preservarManuais;
-
-  const ss = getDataSpreadsheet();
-  let sheet = ss.getSheetByName(ABA_PRODUCAO_VINCULOS);
-  if (!sheet) {
-    sheet = ss.insertSheet(ABA_PRODUCAO_VINCULOS);
-  }
-
-  ensureSchema(sheet, PRODUCAO_VINCULOS_SCHEMA);
-  limparVinculosMateriaisProducao(producaoId, { preservarManuais });
-
-  const linhasValidas = Array.isArray(vinculos) ? vinculos : [];
-  linhasValidas.forEach(v => {
-    const quantidadePrevista = parseNumeroBR(v.quantidade);
-    if (!quantidadePrevista || quantidadePrevista <= 0) return;
-
-    const estoqueId = String(v.estoque_id || '').trim();
-    const statusInicial = estoqueId ? 'Pendente' : 'Sem vinculo';
-
-    const novo = {
-      id: gerarId('PVM'),
+  return salvarNecessidadesEntradaProducao(
+    producaoId,
+    receitaId,
+    Array.isArray(vinculos) ? vinculos.map(v => ({
+      id: String(v.id || gerarId('PNE')).trim(),
       producao_id: producaoId,
       receita_id: receitaId || v.receita_id || '',
       receita_entrada_id: v.receita_entrada_id || '',
-      estoque_id: estoqueId,
       tipo_item: v.tipo_item || '',
-      origem_item: v.origem_item || '',
+      categoria: v.categoria || '',
+      nome_item: v.origem_item || v.item || '',
       unidade: v.unidade || '',
-      quantidade_prevista: quantidadePrevista,
-      quantidade_consumida: parseNumeroBR(v.quantidade_consumida),
-      item_snapshot: v.item || '',
-      valor_unit_snapshot: parseNumeroBR(v.valor_unit),
-      status: statusInicial,
+      modo_atendimento: getModoAtendimentoEntradaProducao(v.tipo_item),
+      quantidade_prevista: parseNumeroBR(v.quantidade),
+      quantidade_baixada: parseNumeroBR(v.quantidade_consumida),
+      valor_unit_referencia: parseNumeroBR(v.valor_unit),
+      comprimento_min_cm: parseNumeroBR(v.comprimento_min_cm),
+      largura_min_cm: parseNumeroBR(v.largura_min_cm),
+      espessura_min_cm: parseNumeroBR(v.espessura_min_cm),
+      serie_item: String(v.serie_item || '').trim(),
+      origem_manual: !String(v.receita_entrada_id || '').trim(),
       criado_em: new Date(),
       ativo: true
-    };
-
-    insert(ABA_PRODUCAO_VINCULOS, novo, PRODUCAO_VINCULOS_SCHEMA);
-  });
-
-  invalidarCachesRelacionadosAba(ABA_PRODUCAO);
-  return true;
+    })) : [],
+    { preservarManuais: !!cfg.preservarManuais }
+  );
 }
 
 function limparDestinosProducao(producaoId, opcoes) {
@@ -1291,24 +1953,23 @@ function concluirDestinosProducao(producaoId) {
 }
 
 function recalcularMateriaisPrevistosFromVinculos(producaoId) {
-  const sheet = getDataSpreadsheet().getSheetByName(ABA_PRODUCAO_VINCULOS);
-  if (!sheet) {
-    salvarMateriaisPrevistosSnapshot(producaoId, []);
-    return { itens: [], custoPrevisto: 0 };
-  }
+  const vinculos = listarVinculosMateriaisProducao(producaoId);
+  const itens = [];
 
-  const rows = rowsToObjects(sheet)
-    .filter(i => String(i.ativo).toLowerCase() === 'true')
-    .filter(i => i.producao_id === producaoId)
-    .filter(i => String(i.estoque_id || '').trim() !== '');
-
-  const itens = rows.map(r => ({
-    estoque_id: String(r.estoque_id || '').trim(),
-    item: r.item_snapshot || r.origem_item || r.estoque_id || '',
-    unidade: r.unidade || '',
-    quantidade: parseNumeroBR(r.quantidade_prevista),
-    valor_unit: parseNumeroBR(r.valor_unit_snapshot)
-  })).filter(i => i.estoque_id && i.quantidade > 0);
+  (Array.isArray(vinculos) ? vinculos : []).forEach(vinculo => {
+    const reservas = Array.isArray(vinculo?.reservas) ? vinculo.reservas : [];
+    reservas.forEach(reserva => {
+      const quantidade = parseNumeroBR(reserva?.quantidade_restante);
+      if (!reserva?.estoque_id || quantidade <= 0) return;
+      itens.push({
+        estoque_id: String(reserva.estoque_id || '').trim(),
+        item: String(reserva.item || vinculo.item || reserva.estoque_id).trim(),
+        unidade: String(reserva.unidade || vinculo.unidade || '').trim(),
+        quantidade,
+        valor_unit: parseNumeroBR(reserva.valor_unit)
+      });
+    });
+  });
 
   const agrupado = agruparMateriaisPorEstoque(itens);
   salvarMateriaisPrevistosSnapshot(producaoId, agrupado.itens || []);
@@ -1319,199 +1980,224 @@ function recalcularMateriaisPrevistosFromVinculos(producaoId) {
   };
 }
 
-function listarVinculosMateriaisProducao(producaoId) {
-  const sheet = getDataSpreadsheet().getSheetByName(ABA_PRODUCAO_VINCULOS);
-  if (!sheet) return [];
+function listarVinculosMateriaisProducao(producaoId, opcoes) {
+  const opts = opcoes || {};
+  const contexto = opts.context || null;
+  const prodId = String(producaoId || '').trim();
+  if (!prodId) return [];
 
-  const rows = rowsToObjects(sheet)
-    .filter(i => String(i.ativo).toLowerCase() === 'true')
-    .filter(i => i.producao_id === producaoId);
+  const necessidades = listarNecessidadesEntradaRows_(prodId, { context: contexto });
+  if (necessidades.length === 0) return [];
 
-  if (rows.length === 0) return [];
-
-  const sheetEstoque = getDataSpreadsheet().getSheetByName(ABA_ESTOQUE);
-  const estoqueRows = sheetEstoque ? rowsToObjects(sheetEstoque) : [];
-  const estoqueMap = {};
-  estoqueRows.forEach(i => {
-    estoqueMap[i.ID] = i;
-  });
-
-  const lista = rows.map(r => {
-    const estoqueId = String(r.estoque_id || '').trim();
-    const vinculado = !!estoqueId;
-    const estoqueItem = estoqueMap[r.estoque_id] || {};
-    const quantidadePrevista = parseNumeroBR(r.quantidade_prevista);
-    const quantidadeConsumida = parseNumeroBR(r.quantidade_consumida);
-    const quantidadePendente = Math.max(quantidadePrevista - quantidadeConsumida, 0);
-    const saldoEstoque = parseNumeroBR(estoqueItem.quantidade);
-
-    let status = String(r.status || '').trim();
-    if (!vinculado) {
-      status = 'Sem vinculo';
-    } else if (!status || status === 'Sem vinculo') {
-      status = quantidadeConsumida <= 0
-        ? 'Pendente'
-        : (quantidadePendente <= 0 ? 'Concluido' : 'Parcial');
+  const reservas = listarReservasEntradaRows_(prodId, { context: contexto });
+  const reservasPorNecessidade = {};
+  reservas.forEach(reserva => {
+    const necessidadeId = String(reserva.necessidade_id || '').trim();
+    if (!necessidadeId) return;
+    if (!Array.isArray(reservasPorNecessidade[necessidadeId])) {
+      reservasPorNecessidade[necessidadeId] = [];
     }
-
-    return {
-      id: r.id,
-      producao_id: r.producao_id,
-      receita_id: r.receita_id || '',
-      receita_entrada_id: r.receita_entrada_id || '',
-      estoque_id: estoqueId,
-      tipo_item: r.tipo_item || '',
-      origem_item: r.origem_item || '',
-      item: r.item_snapshot || estoqueItem.item || r.origem_item || r.estoque_id,
-      unidade: r.unidade || estoqueItem.unidade || '',
-      quantidade_prevista: quantidadePrevista,
-      quantidade_consumida: quantidadeConsumida,
-      quantidade_pendente: quantidadePendente,
-      valor_unit: parseNumeroBR(r.valor_unit_snapshot || estoqueItem.valor_unit),
-      saldo_estoque: saldoEstoque,
-      saldo_suficiente: vinculado ? (saldoEstoque >= quantidadePendente) : false,
-      vinculado,
-      status
-    };
+    reservasPorNecessidade[necessidadeId].push(reserva);
   });
 
-  return lista.sort((a, b) => {
-    const ta = `${a.tipo_item || ''} ${a.item || ''}`.toLowerCase();
-    const tb = `${b.tipo_item || ''} ${b.item || ''}`.toLowerCase();
-    return ta.localeCompare(tb);
+  const estoqueLista = listarEstoqueAtivoComReservaProducao({ context: contexto });
+  const estoqueMap = {};
+  estoqueLista.forEach(item => {
+    estoqueMap[String(item?.ID || '').trim()] = item;
   });
+
+  return necessidades
+    .map(necessidade => calcularResumoNecessidadeEntrada_(
+      necessidade,
+      reservasPorNecessidade[String(necessidade.id || '').trim()] || [],
+      estoqueMap
+    ))
+    .sort((a, b) => {
+      const serieA = parseNumeroBR(a?.serie_item);
+      const serieB = parseNumeroBR(b?.serie_item);
+      const ordemSerie = serieA - serieB;
+      if (ordemSerie !== 0) return ordemSerie;
+      const ta = `${a.tipo_item || ''} ${a.item || ''}`.toLowerCase();
+      const tb = `${b.tipo_item || ''} ${b.item || ''}`.toLowerCase();
+      return ta.localeCompare(tb);
+    });
 }
 
-function vincularItemProducaoAoEstoque(producaoId, vinculoId, estoqueId) {
-  assertCanWriteProducao('Vinculacao de item da producao ao estoque');
-  if (!producaoId || !vinculoId) {
-    throw new Error('Vinculo invalido');
+function salvarReservaEntradaProducao(producaoId, necessidadeId, payload) {
+  assertCanWriteProducao('Salvamento de reserva da producao');
+  const prodId = String(producaoId || '').trim();
+  const necessidade = obterNecessidadeEntradaProducao_(prodId, necessidadeId);
+  if (!prodId || !necessidade) {
+    throw new Error('Necessidade invalida');
   }
-  const estoqueIdNorm = String(estoqueId || '').trim();
-  if (!estoqueIdNorm) {
+
+  const dados = payload || {};
+  const reservaId = String(dados.reserva_id || '').trim();
+  const estoqueId = String(dados.estoque_id || '').trim();
+  if (!estoqueId) {
     throw new Error('Selecione um item do estoque');
   }
 
-  const sheetVinculos = getDataSpreadsheet().getSheetByName(ABA_PRODUCAO_VINCULOS);
-  if (!sheetVinculos) {
-    throw new Error('Aba de vinculos nao encontrada');
+  const reservaAtual = reservaId ? obterReservaEntradaProducao_(prodId, reservaId) : null;
+  if (reservaId && !reservaAtual) {
+    throw new Error('Reserva nao encontrada');
   }
 
-  const vinculo = rowsToObjects(sheetVinculos)
-    .filter(i => String(i.ativo).toLowerCase() === 'true')
-    .find(i => i.id === vinculoId && i.producao_id === producaoId);
-  if (!vinculo) {
-    throw new Error('Vinculo nao encontrado');
-  }
-
-  const sheetEstoque = getDataSpreadsheet().getSheetByName(ABA_ESTOQUE);
-  if (!sheetEstoque) {
-    throw new Error('Aba ESTOQUE nao encontrada');
-  }
-
-  const estoque = rowsToObjects(sheetEstoque)
-    .find(i => i.ID === estoqueIdNorm && String(i.ativo).toLowerCase() === 'true');
+  const estoqueLista = listarEstoqueAtivoComReservaProducao({
+    excluirReservaId: reservaId
+  });
+  const estoque = estoqueLista.find(i => String(i?.ID || '').trim() === estoqueId);
   if (!estoque) {
     throw new Error('Item de estoque nao encontrado');
   }
+  if (!itemEstoqueCompativelComNecessidade_(necessidade, estoque)) {
+    throw new Error('Item de estoque nao compativel com a necessidade selecionada.');
+  }
 
-  updateById(
-    ABA_PRODUCAO_VINCULOS,
-    'id',
-    vinculoId,
-    {
-      estoque_id: estoqueIdNorm,
-      item_snapshot: estoque.item || vinculo.item_snapshot || vinculo.origem_item || estoqueIdNorm,
-      unidade: estoque.unidade || vinculo.unidade || '',
-      valor_unit_snapshot: parseNumeroBR(estoque.valor_unit),
-      status: 'Pendente'
-    },
-    PRODUCAO_VINCULOS_SCHEMA
-  );
+  const modo = String(necessidade.modo_atendimento || '').trim().toUpperCase();
+  const quantidadeConsumidaAtual = parseNumeroBR(reservaAtual?.quantidade_consumida);
+  const quantidadeDisponivel = parseNumeroBR(estoque.quantidade_disponivel);
+  let quantidadeReservada = parseNumeroBR(dados.quantidade_reservada);
+  let reservaExclusiva = false;
 
-  const materiais = recalcularMateriaisPrevistosFromVinculos(producaoId);
+  const reservasNecessidade = listarReservasEntradaRows_(prodId)
+    .filter(i => String(i.necessidade_id || '').trim() === String(necessidade.id || '').trim())
+    .filter(i => String(i.id || '').trim() !== reservaId);
+
+  if (modo === 'PECA_UNICA') {
+    if (reservasNecessidade.length > 0) {
+      throw new Error('Esta necessidade de madeira aceita apenas uma peca vinculada.');
+    }
+    quantidadeReservada = parseNumeroBR(estoque.quantidade);
+    reservaExclusiva = true;
+    if (quantidadeDisponivel <= 0) {
+      throw new Error('A peca selecionada nao esta disponivel para reserva.');
+    }
+  } else {
+    if (!quantidadeReservada || quantidadeReservada <= 0) {
+      throw new Error('Quantidade reservada invalida.');
+    }
+    const limiteDisponivel = quantidadeDisponivel + Math.max(parseNumeroBR(reservaAtual?.quantidade_reservada) - quantidadeConsumidaAtual, 0);
+    if (quantidadeReservada > limiteDisponivel + 0.000001) {
+      throw new Error('Quantidade reservada maior que o saldo disponivel no estoque.');
+    }
+    const quantidadeMinima = quantidadeConsumidaAtual;
+    if (quantidadeReservada + 0.000001 < quantidadeMinima) {
+      throw new Error('Nao e permitido reservar menos do que ja foi baixado nesta reserva.');
+    }
+  }
+
+  const payloadPersistencia = {
+    producao_id: prodId,
+    necessidade_id: String(necessidade.id || '').trim(),
+    estoque_id: estoqueId,
+    quantidade_reservada: quantidadeReservada,
+    quantidade_consumida: quantidadeConsumidaAtual,
+    reserva_exclusiva: reservaExclusiva,
+    item_snapshot: String(estoque.item || necessidade.nome_item || estoqueId).trim(),
+    unidade_snapshot: String(estoque.unidade || necessidade.unidade || '').trim(),
+    valor_unit_snapshot: parseNumeroBR(estoque.custo_unitario || estoque.valor_unit),
+    criado_em: reservaAtual?.criado_em || new Date(),
+    ativo: true
+  };
+
+  if (reservaAtual) {
+    updateById(
+      ABA_PRODUCAO_RESERVAS_ENTRADA,
+      'id',
+      reservaId,
+      payloadPersistencia,
+      PRODUCAO_RESERVAS_ENTRADA_SCHEMA
+    );
+  } else {
+    insert(ABA_PRODUCAO_RESERVAS_ENTRADA, {
+      id: gerarId('PRE'),
+      ...payloadPersistencia
+    }, PRODUCAO_RESERVAS_ENTRADA_SCHEMA);
+  }
+
+  const materiais = recalcularMateriaisPrevistosFromVinculos(prodId);
   return {
-    vinculos: listarVinculosMateriaisProducao(producaoId),
+    vinculos: listarVinculosMateriaisProducao(prodId),
     materiaisPrevistos: materiais.itens || [],
     custoPrevisto: parseNumeroBR(materiais.custoPrevisto)
   };
 }
 
-function vincularPendenciasEntradaProducao(producaoId, vinculacoes) {
-  assertCanWriteProducao('Vinculacao de pendencias da producao');
-  if (!producaoId) {
-    throw new Error('Producao invalida');
+function removerReservaEntradaProducao(producaoId, necessidadeId, reservaId) {
+  assertCanWriteProducao('Remocao de reserva da producao');
+  const prodId = String(producaoId || '').trim();
+  const necessidade = obterNecessidadeEntradaProducao_(prodId, necessidadeId);
+  const reserva = obterReservaEntradaProducao_(prodId, reservaId);
+  if (!prodId || !necessidade || !reserva) {
+    throw new Error('Reserva invalida');
+  }
+  if (parseNumeroBR(reserva.quantidade_consumida) > 0) {
+    throw new Error('Nao e permitido remover reserva que ja possui baixa registrada.');
   }
 
+  updateById(
+    ABA_PRODUCAO_RESERVAS_ENTRADA,
+    'id',
+    String(reserva.id || '').trim(),
+    { ativo: false },
+    PRODUCAO_RESERVAS_ENTRADA_SCHEMA
+  );
+
+  const materiais = recalcularMateriaisPrevistosFromVinculos(prodId);
+  return {
+    vinculos: listarVinculosMateriaisProducao(prodId),
+    materiaisPrevistos: materiais.itens || [],
+    custoPrevisto: parseNumeroBR(materiais.custoPrevisto)
+  };
+}
+
+function vincularItemProducaoAoEstoque(producaoId, vinculoId, estoqueId, quantidadeReservada) {
+  const prodId = String(producaoId || '').trim();
+  const vinculoIdNorm = String(vinculoId || '').trim();
+  const estadoAtual = listarVinculosMateriaisProducao(prodId)
+    .find(i => String(i.id || '').trim() === vinculoIdNorm);
+  if (!estadoAtual) {
+    throw new Error('Necessidade nao encontrada');
+  }
+
+  const quantidade = String(estadoAtual.modo_atendimento || '').trim().toUpperCase() === 'PECA_UNICA'
+    ? ''
+    : (
+      Object.prototype.hasOwnProperty.call(arguments, 3)
+        ? quantidadeReservada
+        : estadoAtual.quantidade_pendente
+    );
+
+  return salvarReservaEntradaProducao(prodId, vinculoIdNorm, {
+    estoque_id: estoqueId,
+    quantidade_reservada: quantidade
+  });
+}
+
+function vincularPendenciasEntradaProducao(producaoId, vinculacoes) {
+  assertCanWriteProducao('Vinculacao de pendencias da producao');
+  const prodId = String(producaoId || '').trim();
   const itens = Array.isArray(vinculacoes) ? vinculacoes : [];
-  if (itens.length === 0) {
+  if (!prodId || itens.length === 0) {
     throw new Error('Nenhum vinculo informado');
   }
 
-  const sheetEstoque = getDataSpreadsheet().getSheetByName(ABA_ESTOQUE);
-  if (!sheetEstoque) {
-    throw new Error('Aba ESTOQUE nao encontrada');
-  }
-
-  const estoqueAtivos = rowsToObjects(sheetEstoque)
-    .filter(i => String(i.ativo).toLowerCase() === 'true');
-  const estoqueMap = {};
-  estoqueAtivos.forEach(i => {
-    estoqueMap[i.ID] = i;
-  });
-
-  const sheetVinculos = getDataSpreadsheet().getSheetByName(ABA_PRODUCAO_VINCULOS);
-  if (!sheetVinculos) {
-    throw new Error('Aba de vinculos nao encontrada');
-  }
-
-  const vinculosAtivos = rowsToObjects(sheetVinculos)
-    .filter(i => String(i.ativo).toLowerCase() === 'true')
-    .filter(i => i.producao_id === producaoId);
-  const vinculosMap = {};
-  vinculosAtivos.forEach(v => {
-    vinculosMap[v.id] = v;
-  });
-
   itens.forEach(v => {
-    const vinculoId = String(v?.vinculo_id || '').trim();
+    const necessidadeId = String(v?.necessidade_id || v?.vinculo_id || '').trim();
     const estoqueId = String(v?.estoque_id || '').trim();
-
-    if (!vinculoId) {
+    if (!necessidadeId || !estoqueId) {
       throw new Error('Vinculo invalido');
     }
-    if (!estoqueId) {
-      throw new Error('Selecione um item do estoque');
-    }
-
-    const vinculo = vinculosMap[vinculoId];
-    if (!vinculo) {
-      throw new Error(`Vinculo nao encontrado: ${vinculoId}`);
-    }
-
-    const estoque = estoqueMap[estoqueId];
-    if (!estoque) {
-      throw new Error(`Item de estoque nao encontrado: ${estoqueId}`);
-    }
-
-    updateById(
-      ABA_PRODUCAO_VINCULOS,
-      'id',
-      vinculoId,
-      {
-        estoque_id: estoqueId,
-        item_snapshot: estoque.item || vinculo.item_snapshot || vinculo.origem_item || estoqueId,
-        unidade: estoque.unidade || vinculo.unidade || '',
-        valor_unit_snapshot: parseNumeroBR(estoque.valor_unit),
-        status: 'Pendente'
-      },
-      PRODUCAO_VINCULOS_SCHEMA
-    );
+    salvarReservaEntradaProducao(prodId, necessidadeId, {
+      estoque_id: estoqueId,
+      quantidade_reservada: v?.quantidade_reservada
+    });
   });
 
-  const materiais = recalcularMateriaisPrevistosFromVinculos(producaoId);
+  const materiais = recalcularMateriaisPrevistosFromVinculos(prodId);
   return {
-    vinculos: listarVinculosMateriaisProducao(producaoId),
+    vinculos: listarVinculosMateriaisProducao(prodId),
     materiaisPrevistos: materiais.itens || [],
     custoPrevisto: parseNumeroBR(materiais.custoPrevisto)
   };
@@ -1536,45 +2222,38 @@ function adicionarItemManualProducao(producaoId, payload) {
     throw new Error('Quantidade invalida');
   }
 
-  let itemSnapshot = nomeItem;
-  let unidade = String(dados.unidade || '').trim();
-  let valorUnitSnapshot = parseNumeroBR(dados.valor_unit_snapshot);
-  let status = estoqueId ? 'Pendente' : 'Sem vinculo';
-
-  if (estoqueId) {
-    const sheetEstoque = getDataSpreadsheet().getSheetByName(ABA_ESTOQUE);
-    const estoque = sheetEstoque
-      ? rowsToObjects(sheetEstoque).find(i => i.ID === estoqueId && String(i.ativo).toLowerCase() === 'true')
-      : null;
-    if (!estoque) {
-      throw new Error('Item de estoque nao encontrado');
-    }
-    itemSnapshot = estoque.item || nomeItem;
-    unidade = estoque.unidade || unidade;
-    valorUnitSnapshot = parseNumeroBR(estoque.valor_unit);
-  }
-
+  const unidade = String(dados.unidade || '').trim();
   const novo = {
-    id: gerarId('PVM'),
+    id: gerarId('PNE'),
     producao_id: producaoId,
     receita_id: '',
     receita_entrada_id: '',
-    estoque_id: estoqueId,
     tipo_item: tipoItem,
-    origem_item: nomeItem,
-    unidade: unidade || '',
+    categoria: String(dados.categoria || '').trim(),
+    nome_item: nomeItem,
+    unidade,
+    modo_atendimento: 'QUANTIDADE',
     quantidade_prevista: quantidadePrevista,
-    quantidade_consumida: 0,
-    item_snapshot: itemSnapshot,
-    valor_unit_snapshot: valorUnitSnapshot,
-    status,
+    quantidade_baixada: 0,
+    valor_unit_referencia: parseNumeroBR(dados.valor_unit_snapshot),
+    comprimento_min_cm: 0,
+    largura_min_cm: 0,
+    espessura_min_cm: 0,
+    serie_item: '',
+    origem_manual: true,
     criado_em: new Date(),
     ativo: true
   };
 
-  insert(ABA_PRODUCAO_VINCULOS, novo, PRODUCAO_VINCULOS_SCHEMA);
-  const materiais = recalcularMateriaisPrevistosFromVinculos(producaoId);
+  insert(ABA_PRODUCAO_NECESSIDADES_ENTRADA, novo, PRODUCAO_NECESSIDADES_ENTRADA_SCHEMA);
+  if (estoqueId) {
+    salvarReservaEntradaProducao(producaoId, novo.id, {
+      estoque_id: estoqueId,
+      quantidade_reservada: quantidadePrevista
+    });
+  }
 
+  const materiais = recalcularMateriaisPrevistosFromVinculos(producaoId);
   return {
     item: novo,
     vinculos: listarVinculosMateriaisProducao(producaoId),
@@ -1584,8 +2263,7 @@ function adicionarItemManualProducao(producaoId, payload) {
 }
 
 function regerarMateriaisEObjetosDeVinculo(producaoId, produtoId, receitaId, qtdPlanejada) {
-  const detalhado = explodirReceitaDetalhada(produtoId, receitaId, qtdPlanejada);
-  const itensDetalhados = Array.isArray(detalhado && detalhado.itens) ? detalhado.itens : [];
+  const itensDetalhados = gerarNecessidadesEntradaProducao(produtoId, receitaId, qtdPlanejada);
 
   salvarVinculosMateriaisProducao(
     producaoId,
@@ -1637,7 +2315,7 @@ function regenerarVinculosProducaoExistentes() {
 
 function gerarMateriaisPrevistosReceita(produtoId, receitaId, qtdPlanejada) {
   if (!produtoId || !receitaId) {
-    throw new Error('Receita nao informada');
+    throw new Error('Modelo nao informado');
   }
 
   const resp = explodirReceita(produtoId, receitaId, qtdPlanejada);
@@ -1736,153 +2414,74 @@ function aplicarBaixaMateriaisExtras(producaoId, itensValidos) {
 
 function atualizarConsumoVinculosProducao(producaoId, itensConsumidos) {
   assertCanWriteProducao('Atualizacao de consumo dos vinculos da producao');
-  const ss = getDataSpreadsheet();
-  let sheet = ss.getSheetByName(ABA_PRODUCAO_VINCULOS);
-  if (!sheet) return;
+  const prodId = String(producaoId || '').trim();
+  const itens = Array.isArray(itensConsumidos) ? itensConsumidos : [];
+  if (!prodId || itens.length === 0) return;
 
-  ensureSchema(sheet, PRODUCAO_VINCULOS_SCHEMA);
-
-  const data = sheet.getDataRange().getValues();
-  const headers = data[0] || [];
-  const idxProducao = headers.indexOf('producao_id');
-  const idxEstoque = headers.indexOf('estoque_id');
-  const idxPrevista = headers.indexOf('quantidade_prevista');
-  const idxConsumida = headers.indexOf('quantidade_consumida');
-  const idxStatus = headers.indexOf('status');
-  const idxTipo = headers.indexOf('tipo_item');
-  const idxAtivo = headers.indexOf('ativo');
-
-  if (
-    idxProducao === -1 ||
-    idxEstoque === -1 ||
-    idxPrevista === -1 ||
-    idxConsumida === -1 ||
-    idxStatus === -1
-  ) {
-    return;
-  }
-
-  const consumoMap = {};
-  const consumoPorTipoMap = {};
-  const sheetEstoque = ss.getSheetByName(ABA_ESTOQUE);
-  const estoqueTipoMap = {};
-  if (sheetEstoque) {
-    rowsToObjects(sheetEstoque).forEach(item => {
-      const id = String(item?.ID || '').trim();
-      if (!id) return;
-      estoqueTipoMap[id] = String(item?.tipo || '').trim().toUpperCase();
-    });
-  }
-
-  (Array.isArray(itensConsumidos) ? itensConsumidos : []).forEach(i => {
-    const estoqueId = i && i.estoque_id ? String(i.estoque_id) : '';
-    const qtd = parseNumeroBR(i ? i.quantidade : 0);
-    if (!estoqueId || qtd <= 0) return;
-    consumoMap[estoqueId] = (consumoMap[estoqueId] || 0) + qtd;
-    const tipo = String(estoqueTipoMap[estoqueId] || '').trim().toUpperCase();
-    if (tipo) {
-      consumoPorTipoMap[tipo] = (consumoPorTipoMap[tipo] || 0) + qtd;
-    }
+  const reservas = listarReservasEntradaRows_(prodId);
+  const reservasMap = {};
+  reservas.forEach(reserva => {
+    reservasMap[String(reserva.id || '').trim()] = reserva;
   });
 
-  if (Object.keys(consumoMap).length === 0 && Object.keys(consumoPorTipoMap).length === 0) return;
-  const updatesByRow = {};
+  const necessidades = listarNecessidadesEntradaRows_(prodId);
+  const necessidadesMap = {};
+  necessidades.forEach(necessidade => {
+    necessidadesMap[String(necessidade.id || '').trim()] = necessidade;
+  });
 
-  for (let i = 1; i < data.length; i++) {
-    const row = data[i];
-    if (row[idxProducao] !== producaoId) continue;
-    if (idxAtivo !== -1 && String(row[idxAtivo]).toLowerCase() !== 'true') continue;
+  const consumoPorNecessidade = {};
 
-    const estoqueId = String(row[idxEstoque] || '');
-    let restante = consumoMap[estoqueId] || 0;
-    if (restante <= 0) continue;
+  itens.forEach(item => {
+    const reservaId = String(item?.reserva_id || '').trim();
+    const necessidadeId = String(item?.necessidade_id || '').trim();
+    const quantidade = parseNumeroBR(item?.quantidade);
+    if (quantidade <= 0) return;
 
-    const qtdPrevista = parseNumeroBR(row[idxPrevista]);
-    const qtdConsumidaAtual = parseNumeroBR(row[idxConsumida]);
-    const qtdPendente = Math.max(qtdPrevista - qtdConsumidaAtual, 0);
-    if (qtdPendente <= 0) continue;
+    const reserva = reservaId ? reservasMap[reservaId] : null;
+    const necessidade = necessidadesMap[necessidadeId] || (reserva ? necessidadesMap[String(reserva.necessidade_id || '').trim()] : null);
+    if (!necessidade) return;
 
-    const qtdAplicada = Math.min(qtdPendente, restante);
-    const novaConsumida = qtdConsumidaAtual + qtdAplicada;
-    consumoMap[estoqueId] = restante - qtdAplicada;
-    const tipoVinculo = String(idxTipo !== -1 ? row[idxTipo] : '').trim().toUpperCase();
-    if (tipoVinculo && qtdAplicada > 0) {
-      const saldoTipo = parseNumeroBR(consumoPorTipoMap[tipoVinculo]);
-      consumoPorTipoMap[tipoVinculo] = Math.max(0, saldoTipo - qtdAplicada);
+    if (reserva) {
+      const consumidaAtual = parseNumeroBR(reserva.quantidade_consumida);
+      updateById(
+        ABA_PRODUCAO_RESERVAS_ENTRADA,
+        'id',
+        String(reserva.id || '').trim(),
+        {
+          quantidade_consumida: consumidaAtual + quantidade
+        },
+        PRODUCAO_RESERVAS_ENTRADA_SCHEMA
+      );
+      reserva.quantidade_consumida = consumidaAtual + quantidade;
     }
 
-    const novoStatus = novaConsumida <= 0
-      ? 'Pendente'
-      : (novaConsumida >= qtdPrevista ? 'Concluido' : 'Parcial');
+    const necId = String(necessidade.id || '').trim();
+    consumoPorNecessidade[necId] = (consumoPorNecessidade[necId] || 0) + quantidade;
+  });
 
-    const rowNumber = i + 1;
-    updatesByRow[rowNumber] = [novaConsumida, novoStatus];
-    data[i][idxConsumida] = novaConsumida;
-    data[i][idxStatus] = novoStatus;
-  }
+  Object.keys(consumoPorNecessidade).forEach(necessidadeId => {
+    const necessidade = necessidadesMap[necessidadeId];
+    if (!necessidade) return;
 
-  if (idxTipo !== -1) {
-    for (let i = 1; i < data.length; i++) {
-      const row = data[i];
-      if (row[idxProducao] !== producaoId) continue;
-      if (idxAtivo !== -1 && String(row[idxAtivo]).toLowerCase() !== 'true') continue;
+    const modo = String(necessidade.modo_atendimento || '').trim().toUpperCase();
+    const baixadaAtual = parseNumeroBR(necessidade.quantidade_baixada);
+    const prevista = parseNumeroBR(necessidade.quantidade_prevista);
+    const acrescimo = parseNumeroBR(consumoPorNecessidade[necessidadeId]);
+    const novaBaixada = modo === 'PECA_UNICA'
+      ? prevista
+      : Math.min(prevista, baixadaAtual + acrescimo);
 
-      const tipoVinculo = String(row[idxTipo] || '').trim().toUpperCase();
-      if (!tipoVinculo) continue;
-      const restanteTipo = parseNumeroBR(consumoPorTipoMap[tipoVinculo]);
-      if (restanteTipo <= 0) continue;
-
-      const qtdPrevista = parseNumeroBR(row[idxPrevista]);
-      const qtdConsumidaAtual = parseNumeroBR(row[idxConsumida]);
-      const qtdPendente = Math.max(qtdPrevista - qtdConsumidaAtual, 0);
-      if (qtdPendente <= 0) continue;
-
-      const qtdAplicada = Math.min(qtdPendente, restanteTipo);
-      const novaConsumida = qtdConsumidaAtual + qtdAplicada;
-      consumoPorTipoMap[tipoVinculo] = restanteTipo - qtdAplicada;
-
-      const novoStatus = novaConsumida <= 0
-        ? 'Pendente'
-        : (novaConsumida >= qtdPrevista ? 'Concluido' : 'Parcial');
-
-      const rowNumber = i + 1;
-      updatesByRow[rowNumber] = [novaConsumida, novoStatus];
-      data[i][idxConsumida] = novaConsumida;
-      data[i][idxStatus] = novoStatus;
-    }
-  }
-
-  const linhasAtualizadas = Object.keys(updatesByRow)
-    .map(n => Number(n))
-    .filter(n => Number.isFinite(n) && n >= 2)
-    .sort((a, b) => a - b);
-
-  if (linhasAtualizadas.length > 0) {
-    let blocoInicio = linhasAtualizadas[0];
-    let blocoLinhas = [linhasAtualizadas[0]];
-
-    function flushBloco() {
-      if (blocoLinhas.length === 0) return;
-      const valoresConsumida = blocoLinhas.map(row => [updatesByRow[row][0]]);
-      const valoresStatus = blocoLinhas.map(row => [updatesByRow[row][1]]);
-      sheet.getRange(blocoInicio, idxConsumida + 1, blocoLinhas.length, 1).setValues(valoresConsumida);
-      sheet.getRange(blocoInicio, idxStatus + 1, blocoLinhas.length, 1).setValues(valoresStatus);
-    }
-
-    for (let i = 1; i < linhasAtualizadas.length; i++) {
-      const row = linhasAtualizadas[i];
-      const prev = linhasAtualizadas[i - 1];
-      if (row === prev + 1) {
-        blocoLinhas.push(row);
-        continue;
-      }
-
-      flushBloco();
-      blocoInicio = row;
-      blocoLinhas = [row];
-    }
-    flushBloco();
-  }
+    updateById(
+      ABA_PRODUCAO_NECESSIDADES_ENTRADA,
+      'id',
+      necessidadeId,
+      {
+        quantidade_baixada: novaBaixada
+      },
+      PRODUCAO_NECESSIDADES_ENTRADA_SCHEMA
+    );
+  });
 
   invalidarCachesRelacionadosAba(ABA_PRODUCAO);
 }
@@ -2047,16 +2646,21 @@ function listarPendenciasVinculoEntradaProducao(producaoId, estoqueAtivoMap) {
 
   return (Array.isArray(vinculos) ? vinculos : [])
     .filter(v => {
-      const estoqueId = String(v.estoque_id || '').trim();
-      if (!estoqueId) return true;
-      return !mapaAtivos[estoqueId];
+      const reservas = Array.isArray(v.reservas) ? v.reservas : [];
+      if (reservas.length === 0) return true;
+      return reservas.some(reserva => {
+        const estoqueId = String(reserva.estoque_id || '').trim();
+        return !estoqueId || !mapaAtivos[estoqueId];
+      });
     })
     .map(v => ({
       id: v.id,
       producao_id: v.producao_id,
       receita_entrada_id: v.receita_entrada_id || '',
-      estoque_id: String(v.estoque_id || '').trim(),
+      necessidade_id: v.id,
+      estoque_id: String(v.reservas?.[0]?.estoque_id || '').trim(),
       tipo_item: v.tipo_item || '',
+      categoria: v.categoria || '',
       origem_item: v.origem_item || '',
       item: v.item || v.origem_item || v.id,
       unidade: v.unidade || '',
@@ -2338,6 +2942,46 @@ function lancarSaidasProducaoNoEstoque(producaoId, saidasAgrupadas, estoqueRows,
   return { atualizados, lotesCriados };
 }
 
+function atualizarQuantidadeEstoqueComSoftDeleteProducao_(estoqueId, novoSaldo) {
+  const saldoFinal = Math.max(parseNumeroBR(novoSaldo), 0);
+  const payload = {
+    quantidade: saldoFinal
+  };
+  if (saldoFinal <= 0.000001) {
+    payload.quantidade = 0;
+    payload.ativo = false;
+  }
+  updateById(
+    ABA_ESTOQUE,
+    'ID',
+    estoqueId,
+    payload,
+    ESTOQUE_SCHEMA
+  );
+  return payload;
+}
+
+function normalizarSaidasOverrideConsumo_(saidas, qtdProduzidaLote) {
+  const qtdLote = normalizarQuantidadeInteiraProducao(qtdProduzidaLote);
+  const lista = (Array.isArray(saidas) ? saidas : [])
+    .map(s => ({
+      receita_saida_id: String(s?.receita_saida_id || '').trim(),
+      nome_saida: String(s?.nome_saida || '').trim(),
+      produto_ref_id: String(s?.produto_ref_id || '').trim(),
+      tipo_item: normalizarTipoSaidaProducao(s?.tipo_item),
+      categoria: normalizarCategoriaSaidaProducao(s?.tipo_item, s?.categoria),
+      unidade: String(s?.unidade || '').trim(),
+      quantidade: parseNumeroBR(s?.quantidade)
+    }))
+    .filter(s => s.nome_saida && s.quantidade > 0);
+
+  if (lista.length === 0 && qtdLote > 0) {
+    return null;
+  }
+
+  return agruparSaidasReceitaParaEstoque(lista);
+}
+
 function consumirEstoque(producaoId, itensParaBaixar, opcoes) {
   assertCanWriteProducao('Consumo de estoque da producao');
   const lock = LockService.getScriptLock();
@@ -2363,7 +3007,7 @@ function consumirEstoque(producaoId, itensParaBaixar, opcoes) {
     }
 
     if (!ordem.receita_id) {
-      throw new Error('Receita nao informada');
+      throw new Error('Modelo nao informado');
     }
 
     const qtdPlanejada = normalizarQuantidadeInteiraProducao(ordem.qtd_planejada);
@@ -2406,114 +3050,107 @@ function consumirEstoque(producaoId, itensParaBaixar, opcoes) {
     estoqueRows
       .filter(i => String(i.ativo).toLowerCase() === 'true')
       .forEach(i => {
-        estoqueMapAtivo[i.ID] = i;
+        estoqueMapAtivo[String(i.ID || '').trim()] = i;
       });
 
-    if (!bypassEntradas) {
-      const pendenciasVinculo = listarPendenciasVinculoEntradaProducao(producaoId, estoqueMapAtivo);
-      if (pendenciasVinculo.length > 0) {
-        const materiais = recalcularMateriaisPrevistosFromVinculos(producaoId);
-        return {
-          requer_vinculos: true,
-          pendencias_vinculo: pendenciasVinculo,
-          vinculos: listarVinculosMateriaisProducao(producaoId),
-          materiaisPrevistos: materiais.itens || [],
-          custoPrevisto: parseNumeroBR(materiais.custoPrevisto)
-        };
+    const vinculosMateriais = listarVinculosMateriaisProducao(producaoId);
+    const vinculosMap = {};
+    (Array.isArray(vinculosMateriais) ? vinculosMateriais : []).forEach(v => {
+      vinculosMap[String(v.id || '').trim()] = v;
+    });
+
+    const itensEntrada = bypassEntradas ? [] : (Array.isArray(itensParaBaixar) ? itensParaBaixar : []);
+    const itensValidos = [];
+
+    itensEntrada.forEach(item => {
+      const necessidadeId = String(item?.necessidade_id || '').trim();
+      const estoqueId = String(item?.estoque_id || '').trim();
+      const quantidade = parseNumeroBR(item?.quantidade);
+      const reservaId = String(item?.reserva_id || '').trim();
+
+      if (!necessidadeId || !estoqueId || quantidade <= 0) return;
+
+      let vinculo = vinculosMap[necessidadeId];
+      if (!vinculo) {
+        throw new Error(`Necessidade de entrada nao encontrada: ${necessidadeId}`);
       }
-    }
 
-    const itens = bypassEntradas ? [] : (Array.isArray(itensParaBaixar) ? itensParaBaixar : []);
-    const itensMap = {};
-    itens.forEach(i => {
-      const estoqueId = i && i.estoque_id ? String(i.estoque_id) : '';
-      const qtd = parseNumeroBR(i ? i.quantidade : 0);
-      if (!estoqueId || qtd <= 0) return;
-      itensMap[estoqueId] = (itensMap[estoqueId] || 0) + qtd;
-    });
+      let reserva = (Array.isArray(vinculo.reservas) ? vinculo.reservas : [])
+        .find(r => String(r.id || '').trim() === reservaId);
+      if (!reserva) {
+        salvarReservaEntradaProducao(producaoId, necessidadeId, {
+          estoque_id: estoqueId,
+          quantidade_reservada: quantidade
+        });
+        vinculo = (listarVinculosMateriaisProducao(producaoId) || [])
+          .find(v => String(v.id || '').trim() === necessidadeId) || vinculo;
+        reserva = (Array.isArray(vinculo.reservas) ? vinculo.reservas : [])
+          .find(r => String(r.estoque_id || '').trim() === estoqueId);
+      }
 
-    const itensValidos = Object.keys(itensMap).map(estoqueId => ({
-      estoque_id: estoqueId,
-      quantidade: Number(itensMap[estoqueId].toFixed(6))
-    }));
+      if (!reserva) {
+        throw new Error(`Reserva nao encontrada para a necessidade ${necessidadeId}`);
+      }
 
-    const previstosResp = obterMateriaisPrevistosProducao(producaoId);
-    const previstos = Array.isArray(previstosResp && previstosResp.itens)
-      ? previstosResp.itens
-      : [];
-    const previstosMap = {};
-    previstos.forEach(i => {
-      const estoqueId = i && i.estoque_id ? String(i.estoque_id) : '';
-      const qtd = parseNumeroBR(i ? i.quantidade : 0);
-      if (!estoqueId || qtd <= 0) return;
-      previstosMap[estoqueId] = (previstosMap[estoqueId] || 0) + qtd;
-    });
-    const tiposPrevistosMap = {};
-    if (!bypassEntradas) {
-      const vinculosMateriais = listarVinculosMateriaisProducao(producaoId);
-      (Array.isArray(vinculosMateriais) ? vinculosMateriais : []).forEach(v => {
-        const tipo = String(v?.tipo_item || '').trim().toUpperCase();
-        const pendente = parseNumeroBR(v?.quantidade_pendente);
-        if (!tipo || pendente <= 0.000001) return;
-        tiposPrevistosMap[tipo] = true;
+      const estoqueItem = estoqueMapAtivo[estoqueId];
+      if (!estoqueItem) {
+        throw new Error(`Item de estoque nao encontrado: ${estoqueId}`);
+      }
+
+      const quantidadeReservadaRestante = Math.max(
+        parseNumeroBR(reserva.quantidade_reservada) - parseNumeroBR(reserva.quantidade_consumida),
+        0
+      );
+      if (quantidade > quantidadeReservadaRestante + 0.000001) {
+        throw new Error(`Quantidade maior que a reserva disponivel para ${estoqueItem.item || estoqueId}`);
+      }
+
+      const saldoFisico = parseNumeroBR(estoqueItem.quantidade);
+      if ((saldoFisico + 0.000001) < quantidade) {
+        throw new Error(`Saldo insuficiente para ${estoqueItem.item || estoqueId}`);
+      }
+
+      itensValidos.push({
+        necessidade_id: necessidadeId,
+        reserva_id: String(reserva.id || '').trim(),
+        estoque_id: estoqueId,
+        quantidade: Number(quantidade.toFixed(6))
       });
-    }
+    });
 
-    if (!bypassEntradas && Object.keys(previstosMap).length > 0 && itensValidos.length === 0) {
+    if (!bypassEntradas && vinculosMateriais.length > 0 && itensValidos.length === 0) {
       throw new Error('Nenhum item de entrada informado para baixa.');
     }
-
-    if (!bypassEntradas) {
-      const naoPrevistos = Object.keys(itensMap).filter(estoqueId => {
-        if (previstosMap[estoqueId]) return false;
-        const estoqueItem = estoqueMapAtivo[estoqueId];
-        const tipoItem = String(estoqueItem?.tipo || '').trim().toUpperCase();
-        if (tipoItem && tiposPrevistosMap[tipoItem]) return false;
-        return true;
-      });
-      if (naoPrevistos.length > 0) {
-        const nomes = naoPrevistos.map(id => {
-          const it = estoqueMapAtivo[id];
-          return it ? (it.item || id) : id;
-        });
-        throw new Error(`Itens nao compativeis com os tipos previstos para baixa: ${nomes.join(', ')}`);
-      }
-    }
-
-    itensValidos.forEach(i => {
-      const estoqueItem = estoqueMapAtivo[i.estoque_id];
-      if (!estoqueItem) {
-        throw new Error(`Item de estoque nao encontrado: ${i.estoque_id}`);
-      }
-      const saldo = parseNumeroBR(estoqueItem.quantidade);
-      if ((saldo + 0.000001) < i.quantidade) {
-        throw new Error(`Saldo insuficiente para ${estoqueItem.item || i.estoque_id}`);
-      }
-    });
 
     const consumoRegistrado = [];
     const estoqueAtualizados = [];
 
     if (!bypassEntradas) {
+      const itensPorEstoque = {};
       itensValidos.forEach(i => {
-        const estoqueItem = estoqueMapAtivo[i.estoque_id];
+        itensPorEstoque[i.estoque_id] = (itensPorEstoque[i.estoque_id] || 0) + parseNumeroBR(i.quantidade);
+      });
+
+      Object.keys(itensPorEstoque).forEach(estoqueId => {
+        const quantidadeBaixada = parseNumeroBR(itensPorEstoque[estoqueId]);
+        const estoqueItem = estoqueMapAtivo[estoqueId];
         const saldo = parseNumeroBR(estoqueItem.quantidade);
-        const novoSaldo = Math.max(0, Number((saldo - i.quantidade).toFixed(6)));
+        const novoSaldo = Math.max(0, Number((saldo - quantidadeBaixada).toFixed(6)));
+        const payloadEstoque = atualizarQuantidadeEstoqueComSoftDeleteProducao_(estoqueId, novoSaldo);
 
-        updateById(
-          ABA_ESTOQUE,
-          'ID',
-          i.estoque_id,
-          { quantidade: novoSaldo },
-          ESTOQUE_SCHEMA
-        );
-
-        estoqueMapAtivo[i.estoque_id].quantidade = novoSaldo;
+        estoqueMapAtivo[estoqueId].quantidade = novoSaldo;
+        if (payloadEstoque.ativo === false) {
+          estoqueMapAtivo[estoqueId].ativo = false;
+        }
 
         estoqueAtualizados.push({
-          ID: i.estoque_id,
+          ID: estoqueId,
           quantidade: novoSaldo
         });
+      });
+
+      itensValidos.forEach(i => {
+        const estoqueItem = estoqueMapAtivo[i.estoque_id];
 
         const valorUnit = parseNumeroBR(estoqueItem.custo_unitario || estoqueItem.valor_unit);
         const total = Number((i.quantidade * valorUnit).toFixed(6));
@@ -2537,14 +3174,16 @@ function consumirEstoque(producaoId, itensParaBaixar, opcoes) {
       atualizarConsumoVinculosProducao(producaoId, itensValidos);
     }
 
-    const saidasExplodidas = explodirSaidasReceitaDetalhada(
-      ordem.produto_id,
-      ordem.receita_id,
-      qtdProduzidaLote
+    const saidasOverride = normalizarSaidasOverrideConsumo_(cfg.saidas || cfg.saidas_override, qtdProduzidaLote);
+    const saidasAgrupadas = saidasOverride || agruparSaidasReceitaParaEstoque(
+      (explodirSaidasReceitaDetalhada(
+        ordem.produto_id,
+        ordem.receita_id,
+        qtdProduzidaLote
+      )?.itens) || []
     );
-    const saidasAgrupadas = agruparSaidasReceitaParaEstoque(saidasExplodidas.itens || []);
     if (saidasAgrupadas.length === 0) {
-      throw new Error('Receita sem saidas configuradas para lancamento no estoque');
+      throw new Error('Modelo sem saidas configuradas para lancamento no estoque');
     }
     const custoTotalEntradas = consumoRegistrado
       .reduce((acc, c) => acc + parseNumeroBR(c?.total_snapshot), 0);

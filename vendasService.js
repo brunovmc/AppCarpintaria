@@ -112,7 +112,17 @@ function obterItemEstoqueVendavelPorId(estoqueId) {
   if (!item || !ehItemVendavelEstoqueComRegras(item, regras)) {
     throw new Error(getMensagemItemNaoVendavel());
   }
-  return item;
+  const resumoReservas = typeof listarResumoReservasEstoqueProducao === 'function'
+    ? listarResumoReservasEstoqueProducao()
+    : {};
+  const quantidade = round2Financeiro(parseNumeroBR(item.quantidade));
+  const reservado = round2Financeiro(parseNumeroBR(resumoReservas[id]?.quantidade_reservada));
+  return {
+    ...item,
+    quantidade,
+    quantidade_reservada: reservado,
+    quantidade_disponivel: round2Financeiro(Math.max(quantidade - reservado, 0))
+  };
 }
 
 function normalizarPayloadVenda(payload, vendaExistente) {
@@ -128,7 +138,7 @@ function normalizarPayloadVenda(payload, vendaExistente) {
     throw new Error('Quantidade da venda deve ser maior que zero.');
   }
 
-  const saldoAtual = round2Financeiro(parseNumeroBR(estoqueItem.quantidade));
+  const saldoAtual = round2Financeiro(parseNumeroBR(estoqueItem.quantidade_disponivel ?? estoqueItem.quantidade));
   const quantidadeAnterior = vendaExistente
     ? round2Financeiro(parseNumeroBR(vendaExistente.quantidade))
     : 0;
@@ -260,6 +270,9 @@ function listarItensEstoqueVendaveis() {
   const sheet = getSheet(ABA_ESTOQUE);
   if (!sheet) return [];
   const regras = obterConfigVendabilidadeVendas();
+  const resumoReservas = typeof listarResumoReservasEstoqueProducao === 'function'
+    ? listarResumoReservasEstoqueProducao()
+    : {};
   return rowsToObjects(sheet)
     .filter(i => ehItemVendavelEstoqueComRegras(i, regras))
     .map(i => ({
@@ -268,7 +281,10 @@ function listarItensEstoqueVendaveis() {
       item: i.item || '',
       unidade: i.unidade || 'UN',
       categoria: i.categoria || '',
-      quantidade: round2Financeiro(parseNumeroBR(i.quantidade)),
+      quantidade: round2Financeiro(Math.max(
+        parseNumeroBR(i.quantidade) - parseNumeroBR(resumoReservas[String(i.ID || '').trim()]?.quantidade_reservada),
+        0
+      )),
       preco_venda: round2Financeiro(parseNumeroBR(i.preco_venda || 0))
     }))
     .filter(i => i.quantidade > 0)
@@ -394,8 +410,15 @@ function aplicarBaixaEstoqueVendaNoPrimeiroRecebimento(vendaId) {
     }
 
     const quantidadeVenda = round2Financeiro(parseNumeroBR(venda.quantidade));
+    const resumoReservas = typeof listarResumoReservasEstoqueProducao === 'function'
+      ? listarResumoReservasEstoqueProducao()
+      : {};
     const saldoAtual = round2Financeiro(parseNumeroBR(item.quantidade));
-    if (saldoAtual + 0.009 < quantidadeVenda) {
+    const saldoDisponivel = round2Financeiro(Math.max(
+      saldoAtual - parseNumeroBR(resumoReservas[estoqueId]?.quantidade_reservada),
+      0
+    ));
+    if (saldoDisponivel + 0.009 < quantidadeVenda) {
       throw new Error('Saldo insuficiente para baixar estoque da venda.');
     }
 

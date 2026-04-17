@@ -299,7 +299,7 @@
           renderListaAtual();
         })
         .withFailureHandler(() => {
-          mostrarToast('Erro ao carregar receitas', 'erro');
+          mostrarToast('Erro ao carregar modelos', 'erro');
         })
         .listarReceitasProduto(produtoId);
     }
@@ -366,7 +366,7 @@
 
     function validarReceita(dados, entradas, saidas) {
       const nome = String(dados?.nome_receita || '').trim();
-      if (!nome) return 'Informe o nome da receita';
+      if (!nome) return 'Informe o nome do modelo';
 
       if (!Array.isArray(entradas) || entradas.length === 0) {
         return 'Adicione ao menos uma entrada';
@@ -454,17 +454,17 @@
 
       ProdutosStore.update(produtoId, { receitas });
       renderListaAtual();
-      mostrarToast('Salvando receita...');
+      mostrarToast('Salvando modelo...');
 
       window.AppRequest.runner()
         .withFailureHandler(() => {
           ProdutosStore.update(produtoId, snapshot);
           renderListaAtual();
-          mostrarToast('Erro ao salvar receita', 'erro');
+          mostrarToast('Erro ao salvar modelo', 'erro');
         })
         .withSuccessHandler(() => {
           carregarReceitas(produtoId, true);
-          mostrarToast('Receita salva');
+          mostrarToast('Modelo salvo');
         })
         .salvarReceitaCompleta(receitaId, dados || {}, entradas || [], saidas || []);
     }

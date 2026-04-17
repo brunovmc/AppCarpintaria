@@ -295,14 +295,14 @@
           const receitaPadrao = receitaSelecionada || (receitas[0]?.receita_id || '');
           ProducaoUI.renderReceitas(receitas, receitaPadrao);
           if (receitasBrutas.length > 1) {
-            mostrarToast('Produto com mais de uma receita ativa. Usando apenas o modelo principal.');
+            mostrarToast('Produto com mais de um modelo ativo. Usando apenas o modelo principal.');
           }
           if (receitas.length === 0) {
             mostrarToast('Produto sem modelo cadastrado. Cadastre o modelo na aba Produtos.', 'erro');
           }
         })
         .withFailureHandler(err => {
-          const msg = err?.message || 'Erro ao carregar receitas';
+          const msg = err?.message || 'Erro ao carregar modelos';
           mostrarToast(msg, 'erro');
           ProducaoUI.renderReceitas([]);
         })
@@ -791,14 +791,30 @@
         .atualizarPrecoVendaProdutoSaidaProducao(prodId, nome, preco, produtoRefId);
     }
 
-    function vincularItemEstoque(producaoId, vinculoId, estoqueId) {
+    function aplicarRespostaVinculos(prodId, resp) {
+      if (!prodId) return;
+      if (resp?.vinculos) {
+        ProducaoStore.update(prodId, { vinculosMateriais: resp.vinculos });
+      }
+      if (resp?.materiaisPrevistos) {
+        ProducaoStore.update(prodId, {
+          materiaisPrevistos: resp.materiaisPrevistos,
+          custo_previsto: resp.custoPrevisto || 0
+        });
+      }
+      renderListaAtual();
+      carregarEstoqueOpcoes(true);
+    }
+
+    function salvarReservaEntrada(producaoId, necessidadeId, payload) {
       if (!podeAlterarDados('Vinculo bloqueado em modo somente leitura')) return;
       const prodId = String(producaoId || '').trim();
-      const vinId = String(vinculoId || '').trim();
-      const estId = String(estoqueId || '').trim();
+      const needId = String(necessidadeId || '').trim();
+      const dados = payload || {};
+      const estId = String(dados.estoque_id || '').trim();
 
-      if (!prodId || !vinId) {
-        mostrarToast('Vinculo invalido', 'erro');
+      if (!prodId || !needId) {
+        mostrarToast('Reserva invalida', 'erro');
         return;
       }
       if (!estId) {
@@ -806,26 +822,41 @@
         return;
       }
 
-      mostrarToast('Vinculando item...');
+      mostrarToast('Salvando reserva...');
       window.AppRequest.runner()
         .withFailureHandler(err => {
-          const msg = err?.message || 'Erro ao vincular item';
+          const msg = err?.message || 'Erro ao salvar reserva';
           mostrarToast(msg, 'erro');
         })
         .withSuccessHandler(resp => {
-          if (resp?.vinculos) {
-            ProducaoStore.update(prodId, { vinculosMateriais: resp.vinculos });
-          }
-          if (resp?.materiaisPrevistos) {
-            ProducaoStore.update(prodId, {
-              materiaisPrevistos: resp.materiaisPrevistos,
-              custo_previsto: resp.custoPrevisto || 0
-            });
-          }
-          renderListaAtual();
-          mostrarToast('Vinculo atualizado');
+          aplicarRespostaVinculos(prodId, resp);
+          mostrarToast('Reserva atualizada');
         })
-        .vincularItemProducaoAoEstoque(prodId, vinId, estId);
+        .salvarReservaEntradaProducao(prodId, needId, dados);
+    }
+
+    function removerReservaEntrada(producaoId, necessidadeId, reservaId) {
+      if (!podeAlterarDados('Vinculo bloqueado em modo somente leitura')) return;
+      const prodId = String(producaoId || '').trim();
+      const needId = String(necessidadeId || '').trim();
+      const resId = String(reservaId || '').trim();
+
+      if (!prodId || !needId || !resId) {
+        mostrarToast('Reserva invalida', 'erro');
+        return;
+      }
+
+      mostrarToast('Removendo reserva...');
+      window.AppRequest.runner()
+        .withFailureHandler(err => {
+          const msg = err?.message || 'Erro ao remover reserva';
+          mostrarToast(msg, 'erro');
+        })
+        .withSuccessHandler(resp => {
+          aplicarRespostaVinculos(prodId, resp);
+          mostrarToast('Reserva removida');
+        })
+        .removerReservaEntradaProducao(prodId, needId, resId);
     }
 
     function adicionarItemManual(producaoId, payload) {
@@ -858,6 +889,17 @@
         .adicionarItemManualProducao(prodId, payload || {});
     }
 
+    function abrirModalConsumoComItem(item) {
+      if (!item) return;
+      ProducaoUI.abrirModalConsumo(
+        item.producao_id,
+        item.nome_ordem || item.nome_produto || item.producao_id,
+        item.vinculosMateriais || [],
+        item.saidas_previstas || [],
+        obterContextoConsumo(item)
+      );
+    }
+
     function abrirAtualizarEstoque(id) {
       if (!podeAlterarDados('Atualizacao bloqueada em modo somente leitura')) return;
       const item = ProducaoStore.getById(id);
@@ -874,41 +916,29 @@
         return;
       }
       if (!item.receita_id) {
-        mostrarToast('Receita nao informada', 'erro');
+        mostrarToast('Modelo nao informado', 'erro');
         return;
       }
 
-      if (!item.materiaisPrevistos) {
-        mostrarToast('Carregando materiais...');
-        window.AppRequest.runner()
-          .withSuccessHandler(resp => {
-            ProducaoStore.update(id, {
-              materiaisPrevistos: resp.itens || [],
-              custo_previsto: resp.custoPrevisto || 0
-            });
-            renderListaAtual();
-            const itemAtualizado = ProducaoStore.getById(id) || item;
-            ProducaoUI.abrirModalConsumo(
-              id,
-              itemAtualizado.nome_ordem || itemAtualizado.nome_produto || id,
-              itemAtualizado.materiaisPrevistos || [],
-              obterContextoConsumo(itemAtualizado)
-            );
-          })
-          .withFailureHandler(err => {
-            const msg = err?.message || 'Erro ao carregar materiais';
-            mostrarToast(msg, 'erro');
-          })
-          .obterMateriaisPrevistosProducao(id);
+      if (!item.materiaisPrevistos || !item.vinculosMateriais) {
+        mostrarToast('Carregando revisao da OP...');
+        let pendencias = 2;
+        let houveErro = false;
+        const concluir = () => {
+          pendencias -= 1;
+          if (pendencias > 0 || houveErro) return;
+          const itemAtualizado = ProducaoStore.getById(id) || item;
+          abrirModalConsumoComItem(itemAtualizado);
+        };
+
+        carregarMateriaisPrevistos(id, true, concluir);
+        carregarVinculosMateriais(id, true, () => {
+          concluir();
+        });
         return;
       }
 
-      ProducaoUI.abrirModalConsumo(
-        id,
-        item.nome_ordem || item.nome_produto || id,
-        item.materiaisPrevistos || [],
-        contextoConsumo
-      );
+      abrirModalConsumoComItem({ ...item, ...contextoConsumo });
     }
 
     function confirmarAtualizacaoEstoque() {
@@ -936,27 +966,6 @@
           mostrarToast(msg, 'erro');
         })
         .withSuccessHandler(resp => {
-          if (resp?.requer_vinculos) {
-            if (resp?.vinculos) {
-              ProducaoStore.update(payload.producaoId, { vinculosMateriais: resp.vinculos });
-            }
-            if (resp?.materiaisPrevistos) {
-              ProducaoStore.update(payload.producaoId, {
-                materiaisPrevistos: resp.materiaisPrevistos,
-                custo_previsto: resp.custoPrevisto || 0
-              });
-            }
-            renderListaAtual();
-            ProducaoUI.fecharModalConsumo();
-            ProducaoUI.abrirModalPendenciasVinculo?.(
-              payload.producaoId,
-              resp.pendencias_vinculo || [],
-              estoqueOpcoes
-            );
-            mostrarToast('Vincule os itens de entrada pendentes para continuar');
-            return;
-          }
-
           if (resp?.estoqueAtualizados && window.EstoqueStore) {
             resp.estoqueAtualizados.forEach(i => {
               EstoqueStore.update(i.ID, { quantidade: i.quantidade });
@@ -1016,7 +1025,8 @@
           payload.itens,
           {
             qtd_produzida: payload.qtdProduzida,
-            bypass_entradas: payload.bypassEntradas
+            bypass_entradas: payload.bypassEntradas,
+            saidas: payload.saidas
           }
         );
     }
@@ -1057,12 +1067,7 @@
           ProducaoUI.fecharModalPendenciasVinculo?.();
 
           const item = ProducaoStore.getById(payload.producaoId) || {};
-          ProducaoUI.abrirModalConsumo(
-            payload.producaoId,
-            item.nome_ordem || item.nome_produto || payload.producaoId,
-            item.materiaisPrevistos || [],
-            obterContextoConsumo(item)
-          );
+          abrirModalConsumoComItem(item);
           mostrarToast('Vinculos atualizados. Confirme a baixa do estoque.');
         })
         .vincularPendenciasEntradaProducao(payload.producaoId, payload.vinculacoes);
@@ -1317,7 +1322,8 @@
       abrirAtualizarEstoque,
       adicionarEtapa,
       adicionarItemManual,
-      vincularItemEstoque,
+      salvarReservaEntrada,
+      removerReservaEntrada,
       marcarEtapa,
       carregarMateriaisPrevistos,
       carregarVinculosMateriais,
