@@ -586,37 +586,40 @@
       const statusClasse = obterClasseStatus(statusVisual);
 
       const card = document.createElement('div');
-      card.className = `card despesa-card despesa-card-${statusClasse}`;
+      card.className = `card card-ficha despesa-card despesa-card-${statusClasse}`;
       card.innerHTML = `
-        <div class="despesa-card-header">
-          <strong class="despesa-card-nome">${escapeHtml(d?.descricao || '-')}</strong>
-          <span class="despesa-status-badge despesa-status-${statusClasse}">${escapeHtml(statusVisual)}</span>
-        </div>
-
-        <div class="despesa-card-meta-area">
-          <div class="despesa-card-meta">
-            <span class="despesa-meta-item"><strong>Categoria:</strong> ${escapeHtml(d?.categoria || 'SEM_CATEGORIA')}</span>
-            <span class="despesa-meta-item"><strong>Fornecedor:</strong> ${escapeHtml(d?.fornecedor || 'SEM_FORNECEDOR')}</span>
-            <span class="despesa-meta-item"><strong>Pago por:</strong> ${escapeHtml(d?.pago_por || '-')}</span>
+        <div class="card-ficha-topo">${escapeHtml(d?.descricao || '-')}</div>
+        <div class="card-ficha-corpo">
+          <div class="despesa-card-header despesa-card-header-compact">
+            <span class="despesa-card-resumo-label">Despesa geral</span>
+            <span class="despesa-status-badge despesa-status-${statusClasse}">${escapeHtml(statusVisual)}</span>
           </div>
 
-          <div class="despesa-acoes-laterais">
-            <button class="despesa-btn-acao" onclick="DespesasController.editarDespesa('${escapeHtml(d?.ID)}')">Editar</button>
-            <button class="despesa-btn-acao" onclick="DespesasController.excluirDespesa('${escapeHtml(d?.ID)}')">Excluir</button>
-          </div>
-        </div>
-
-        <div class="despesa-card-valores">
-          <div class="despesa-valor-box despesa-valor-pendente">
-            <div class="despesa-valor-topo">
-              <span>Pendente</span>
-              ${podePagar ? `<button class="despesa-btn-inline" onclick="DespesasController.registrarPagamentoDespesa('${escapeHtml(d?.ID)}')">Registrar pagamento</button>` : ''}
+          <div class="despesa-card-meta-area">
+            <div class="despesa-card-meta">
+              <span class="despesa-meta-item"><strong>Categoria:</strong> ${escapeHtml(d?.categoria || 'SEM_CATEGORIA')}</span>
+              <span class="despesa-meta-item"><strong>Fornecedor:</strong> ${escapeHtml(d?.fornecedor || 'SEM_FORNECEDOR')}</span>
+              <span class="despesa-meta-item"><strong>Pago por:</strong> ${escapeHtml(d?.pago_por || '-')}</span>
             </div>
-            <strong>${formatarMoeda(pendente)}</strong>
+
+            <div class="despesa-acoes-laterais">
+              <button class="despesa-btn-acao" onclick="DespesasController.editarDespesa('${escapeHtml(d?.ID)}')">Editar</button>
+              <button class="despesa-btn-acao" onclick="DespesasController.excluirDespesa('${escapeHtml(d?.ID)}')">Excluir</button>
+            </div>
           </div>
-          <div class="despesa-valor-box despesa-valor-pago">
-            <span>Pago</span>
-            <strong>${formatarMoeda(pago)}</strong>
+
+          <div class="despesa-card-valores">
+            <div class="despesa-valor-box despesa-valor-pendente">
+              <div class="despesa-valor-topo">
+                <span>Pendente</span>
+                ${podePagar ? `<button class="despesa-btn-inline" onclick="DespesasController.registrarPagamentoDespesa('${escapeHtml(d?.ID)}')">Registrar pagamento</button>` : ''}
+              </div>
+              <strong>${formatarMoeda(pendente)}</strong>
+            </div>
+            <div class="despesa-valor-box despesa-valor-pago">
+              <span>Pago</span>
+              <strong>${formatarMoeda(pago)}</strong>
+            </div>
           </div>
         </div>
       `;

@@ -13,6 +13,7 @@
       body.app-booting .navbar,
       body.app-booting #appDbEnvBanner,
       body.app-booting #appSyncBanner,
+      body.app-booting .app-workspace-header,
       body.app-booting .top-bar,
       body.app-booting .painel-filtro-inline,
       body.app-booting .aba,
@@ -28,7 +29,6 @@
   </head>
 
   <body class="app-booting">
-    <!-- 🔔 TOAST -->
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
     <section id="appAccessDenied" class="app-access-denied hidden" role="alert" aria-live="assertive">
@@ -44,161 +44,191 @@
       </p>
     </section>
 
-    <!-- NAVBAR -->
-    <div class="navbar">
-      <button type="button" data-aba="dashboard" onclick="trocarAba('dashboard')">Inicio</button>
-
-      <div id="navbarMenuWrap" class="navbar-menu-wrap">
-        <button
-          id="btnNavHamburger"
-          type="button"
-          class="navbar-hamburger"
-          aria-expanded="false"
-          aria-controls="navbarMenu"
-          aria-label="Abrir menu de abas"
-        >
-          <span class="navbar-hamburger-icon" aria-hidden="true">&#9776;</span>
-          <span class="navbar-hamburger-label">Menu</span>
-        </button>
-
-        <div id="navbarMenu" class="navbar-menu hidden">
-          <button type="button" data-aba="despesas" onclick="trocarAba('despesas')">Despesas</button>
-          <button type="button" data-aba="estoque" onclick="trocarAba('estoque')">Estoque</button>
-          <button type="button" data-aba="compras" onclick="trocarAba('compras')">Compras</button>
-          <button type="button" data-aba="vendas" onclick="trocarAba('vendas')">Vendas</button>
-          <button type="button" data-aba="produtos" onclick="trocarAba('produtos')">Produtos</button>
-          <button type="button" data-aba="producao" onclick="trocarAba('producao')">Producao</button>
-
-          <div id="dbEnvMenuSection" class="db-env-menu hidden">
-            <div class="db-env-menu-title">Banco de dados (admin)</div>
-            <div class="db-env-menu-actions">
-              <button id="btnDbEnvProd" type="button" class="db-env-btn" data-db-env="prod">Usar PROD</button>
-              <button id="btnDbEnvDev" type="button" class="db-env-btn" data-db-env="dev">Usar DEV</button>
-            </div>
+    <div class="app-shell">
+      <div class="navbar">
+        <div class="navbar-brand-block">
+          <div class="navbar-brand-copy">
+            <span class="navbar-brand-eyebrow">Gestao integrada</span>
+            <strong class="navbar-brand-title">App Carpintaria</strong>
           </div>
+        </div>
+
+        <div class="navbar-actions">
+          <div id="navCurrentSectionBadge" class="navbar-section-badge">Inicio</div>
+
+          <div id="navbarMenuWrap" class="navbar-menu-wrap">
+            <button
+              id="btnNavHamburger"
+              type="button"
+              class="navbar-hamburger"
+              aria-expanded="false"
+              aria-controls="navbarMenu"
+              aria-label="Abrir menu de abas"
+            >
+              <span class="navbar-hamburger-icon" aria-hidden="true">&#9776;</span>
+              <span class="navbar-hamburger-label">Menu</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div class="app-status-stack">
+        <div id="appDbEnvBanner" class="app-db-env-banner hidden" role="status" aria-live="polite">
+          <span class="app-db-env-dot" aria-hidden="true"></span>
+          <span id="appDbEnvBannerText">MODO DEV ativo - voce esta trabalhando no banco de testes</span>
+        </div>
+
+        <div id="appSyncBanner" class="app-sync-banner hidden" role="status" aria-live="polite">
+          <span class="app-sync-dot" aria-hidden="true"></span>
+          <span id="appSyncBannerText">Sincronizando dados...</span>
+        </div>
+      </div>
+
+      <section class="app-workspace-header" aria-labelledby="appWorkspaceTitle">
+        <div class="app-workspace-copy">
+          <span id="appWorkspaceEyebrow" class="app-workspace-eyebrow">Painel operacional</span>
+          <h1 id="appWorkspaceTitle" class="app-workspace-title">Visao consolidada</h1>
+          <p id="appWorkspaceSubtitle" class="app-workspace-subtitle">
+            Acompanhe operacao, caixa e estoque em um layout mais claro e orientado a decisao.
+          </p>
+        </div>
+
+        <div class="app-workspace-chips">
+          <div class="app-workspace-chip">
+            <span>Area ativa</span>
+            <strong id="appWorkspaceTabBadge">Inicio</strong>
+          </div>
+          <div class="app-workspace-chip">
+            <span>Ambiente</span>
+            <strong id="appWorkspaceEnvBadge">PROD</strong>
+          </div>
+        </div>
+      </section>
+
+      <div id="topBarEstoque" class="top-bar hidden">
+        <input id="buscaEstoque" type="text" placeholder="Buscar...">
+        <button id="btnFiltro" type="button">Filtrar</button>
+      </div>
+
+      <div id="painelFiltroEstoque" class="hidden painel-filtro-inline">
+        <select id="filtroTipo">
+          <option value="">Tipo (todos)</option>
+        </select>
+
+        <select id="filtroUnidade">
+          <option value="">Unidade (todas)</option>
+        </select>
+
+        <select id="filtroCategoria">
+          <option value="">Categoria (todas)</option>
+        </select>
+
+        <button id="btnLimparFiltros" type="button">Limpar filtros</button>
+      </div>
+
+      <div id="topBarCompras" class="top-bar hidden">
+        <input id="buscaCompras" type="text" placeholder="Buscar...">
+        <button id="btnFiltroCompras" type="button">Filtrar</button>
+      </div>
+
+      <div id="topBarVendas" class="top-bar hidden">
+        <input id="buscaVendas" type="text" placeholder="Buscar...">
+        <button id="btnFiltroVendas" type="button">Filtrar</button>
+      </div>
+
+      <div id="topBarDespesas" class="top-bar hidden">
+        <input id="buscaDespesas" type="text" placeholder="Buscar...">
+        <button id="btnFiltroDespesas" type="button">Filtrar</button>
+      </div>
+
+      <div id="painelFiltroCompras" class="hidden painel-filtro-inline">
+        <select id="filtroTipoCompras">
+          <option value="">Tipo (todos)</option>
+        </select>
+
+        <select id="filtroUnidadeCompras">
+          <option value="">Unidade (todas)</option>
+        </select>
+
+        <select id="filtroCategoriaCompras">
+          <option value="">Categoria (todas)</option>
+        </select>
+
+        <button id="btnLimparFiltrosCompras" type="button">Limpar filtros</button>
+      </div>
+
+      <div id="topBarProdutos" class="top-bar hidden">
+        <input id="buscaProdutos" type="text" placeholder="Buscar...">
+        <button id="btnFiltroProdutos" type="button">Filtrar</button>
+      </div>
+
+      <div id="topBarProducao" class="top-bar hidden">
+        <input id="buscaProducao" type="text" placeholder="Buscar...">
+        <button id="btnFiltroProducao" type="button">Filtrar</button>
+      </div>
+
+      <div id="aba-dashboard" class="aba">
+        <?!= include('dashboard'); ?>
+      </div>
+
+      <div id="aba-despesas" class="aba hidden">
+        <?!= include('despesas'); ?>
+      </div>
+
+      <div id="aba-estoque" class="aba hidden">
+        <?!= include('estoque'); ?>
+      </div>
+
+      <div id="aba-compras" class="aba hidden">
+        <?!= include('compras'); ?>
+      </div>
+
+      <div id="aba-vendas" class="aba hidden">
+        <?!= include('vendas'); ?>
+      </div>
+
+      <div id="aba-produtos" class="aba hidden">
+        <?!= include('produtos'); ?>
+      </div>
+
+      <div id="aba-producao" class="aba hidden">
+        <?!= include('producao'); ?>
+      </div>
+    </div>
+
+    <div id="navbarMenuBackdrop" class="navbar-menu-backdrop hidden" aria-hidden="true"></div>
+
+    <div id="navbarMenu" class="navbar-menu hidden">
+      <div class="navbar-menu-head">
+        <span class="navbar-menu-kicker">Navegacao</span>
+        <strong class="navbar-menu-title">Areas do app</strong>
+      </div>
+
+      <button type="button" data-aba="dashboard" onclick="trocarAba('dashboard')">Inicio</button>
+      <button type="button" data-aba="despesas" onclick="trocarAba('despesas')">Despesas</button>
+      <button type="button" data-aba="estoque" onclick="trocarAba('estoque')">Estoque</button>
+      <button type="button" data-aba="compras" onclick="trocarAba('compras')">Compras</button>
+      <button type="button" data-aba="vendas" onclick="trocarAba('vendas')">Vendas</button>
+      <button type="button" data-aba="produtos" onclick="trocarAba('produtos')">Produtos</button>
+      <button type="button" data-aba="producao" onclick="trocarAba('producao')">Producao</button>
+
+      <div id="dbEnvMenuSection" class="db-env-menu hidden">
+        <div class="db-env-menu-title">Banco de dados (admin)</div>
+        <div class="db-env-menu-actions">
+          <button id="btnDbEnvProd" type="button" class="db-env-btn" data-db-env="prod">Usar PROD</button>
+          <button id="btnDbEnvDev" type="button" class="db-env-btn" data-db-env="dev">Usar DEV</button>
         </div>
       </div>
     </div>
 
-    <div id="appDbEnvBanner" class="app-db-env-banner hidden" role="status" aria-live="polite">
-      <span class="app-db-env-dot" aria-hidden="true"></span>
-      <span id="appDbEnvBannerText">MODO DEV ativo - voce esta trabalhando no banco de testes</span>
-    </div>
-
-    <div id="appSyncBanner" class="app-sync-banner hidden" role="status" aria-live="polite">
-      <span class="app-sync-dot" aria-hidden="true"></span>
-      <span id="appSyncBannerText">Sincronizando dados...</span>
-    </div>
-
-    <!-- BUSCA + FILTRO (ESTOQUE) -->
-    <div id="topBarEstoque" class="top-bar hidden">
-      <input id="buscaEstoque" type="text" placeholder="Buscar...">
-      <button id="btnFiltro" type="button">Filtrar</button>
-    </div>
-
-    <!-- ✅ PAINEL INLINE DE FILTRO (passo 1: só markup) -->
-    <div id="painelFiltroEstoque" class="hidden painel-filtro-inline">
-      <select id="filtroTipo">
-        <option value="">Tipo (todos)</option>
-      </select>
-
-      <select id="filtroUnidade">
-        <option value="">Unidade (todas)</option>
-      </select>
-
-      <select id="filtroCategoria">
-        <option value="">Categoria (todas)</option>
-      </select>
-
-      <button id="btnLimparFiltros" type="button">Limpar filtros</button>
-    </div>
-
-    <!-- BUSCA + FILTRO (COMPRAS) -->
-    <div id="topBarCompras" class="top-bar hidden">
-      <input id="buscaCompras" type="text" placeholder="Buscar...">
-      <button id="btnFiltroCompras" type="button">Filtrar</button>
-    </div>
-
-    <!-- BUSCA (VENDAS) -->
-    <div id="topBarVendas" class="top-bar hidden">
-      <input id="buscaVendas" type="text" placeholder="Buscar...">
-      <button id="btnFiltroVendas" type="button">Filtrar</button>
-    </div>
-
-    <!-- BUSCA (DESPESAS) -->
-    <div id="topBarDespesas" class="top-bar hidden">
-      <input id="buscaDespesas" type="text" placeholder="Buscar...">
-      <button id="btnFiltroDespesas" type="button">Filtrar</button>
-    </div>
-
-    <div id="painelFiltroCompras" class="hidden painel-filtro-inline">
-      <select id="filtroTipoCompras">
-        <option value="">Tipo (todos)</option>
-      </select>
-
-      <select id="filtroUnidadeCompras">
-        <option value="">Unidade (todas)</option>
-      </select>
-
-      <select id="filtroCategoriaCompras">
-        <option value="">Categoria (todas)</option>
-      </select>
-
-      <button id="btnLimparFiltrosCompras" type="button">Limpar filtros</button>
-    </div>
-
-    <!-- BUSCA (PRODUTOS) -->
-    <div id="topBarProdutos" class="top-bar hidden">
-      <input id="buscaProdutos" type="text" placeholder="Buscar...">
-      <button id="btnFiltroProdutos" type="button">Filtrar</button>
-    </div>
-
-    <!-- BUSCA (PRODUCAO) -->
-    <div id="topBarProducao" class="top-bar hidden">
-      <input id="buscaProducao" type="text" placeholder="Buscar...">
-      <button id="btnFiltroProducao" type="button">Filtrar</button>
-    </div>
-
-    <!-- ABAS -->
-    <div id="aba-dashboard" class="aba">
-      <?!= include('dashboard'); ?>
-    </div>
-
-    <div id="aba-despesas" class="aba hidden">
-      <?!= include('despesas'); ?>
-    </div>
-
-    <div id="aba-estoque" class="aba hidden">
-      <?!= include('estoque'); ?>
-    </div>
-
-    <div id="aba-compras" class="aba hidden">
-      <?!= include('compras'); ?>
-    </div>
-
-    <div id="aba-vendas" class="aba hidden">
-      <?!= include('vendas'); ?>
-    </div>
-
-    <div id="aba-produtos" class="aba hidden">
-      <?!= include('produtos'); ?>
-    </div>
-
-    <div id="aba-producao" class="aba hidden">
-      <?!= include('producao'); ?>
-    </div>
-
-    <!-- BARRA INFERIOR -->
     <div class="bottom-bar">
       <button onclick="acaoPrimaria()">+ Adicionar</button>
     </div>
 
-    <!-- SCRIPTS -->
     <?!= include('appCore'); ?>
     <?!= include('scripts'); ?>
     <?!= include('appDomainUtils'); ?>
 
-    <!-- ✅ ordem correta: Store → UI → Controller -->
     <?!= include('estoqueStore'); ?>
     <?!= include('estoqueUI'); ?>
     <?!= include('estoqueController'); ?>
@@ -220,6 +250,5 @@
     <?!= include('producaoController'); ?>
     <?!= include('despesasController'); ?>
     <?!= include('dashboardController'); ?>
-
   </body>
 </html>

@@ -203,6 +203,12 @@
       return `<span class="tipo-tag-card tipo-tag-card-colorida" style="--tipo-tag-bg:${escapeHtml(cor)}">${tipoLabel}</span>`;
     }
 
+    function montarEstiloTopoCard(tipo) {
+      const cor = obterCorTipo(tipo);
+      if (!cor) return '';
+      return ` style="--card-top-bg:${escapeHtml(cor)}"`;
+    }
+
     function escapeAttr(valor) {
       return escapeHtml(valor);
     }
@@ -833,9 +839,10 @@
       const espessuraLabel = escapeHtml(i.espessura_cm || '-');
       const statusLabel = escapeHtml(status);
       const tipoTag = montarTipoTag(i.tipo);
+      const topoStyle = montarEstiloTopoCard(i.tipo);
 
       div.innerHTML = `
-        <div class="card-ficha-topo">${itemLabel}</div>
+        <div class="card-ficha-topo"${topoStyle}>${itemLabel}</div>
         <div class="card-ficha-corpo">
           <div class="card-resumo">
             ${tipoTag} > ${categoriaLabel}<br>

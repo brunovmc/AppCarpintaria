@@ -2,14 +2,15 @@
   /* =========================
      NAV / ABAS
   ========================== */
-  const ABAS_MENU_HAMBURGER = ['despesas', 'estoque', 'compras', 'vendas', 'produtos', 'producao'];
-  const ABAS_APP = ['dashboard', ...ABAS_MENU_HAMBURGER];
+  const ABAS_MENU_HAMBURGER = ['dashboard', 'despesas', 'estoque', 'compras', 'vendas', 'produtos', 'producao'];
+  const ABAS_APP = [...ABAS_MENU_HAMBURGER];
   const ABA_INICIAL_PADRAO = 'dashboard';
   const LAST_TAB_STORAGE_KEY = 'app:lasttab:v1';
   const QUICK_FILTER_STOCK_TYPE_KEY = 'app:quickfilter:v1:estoque:tipo';
   const QUICK_FILTER_PURCHASE_TYPE_KEY = 'app:quickfilter:v1:compras:tipo';
   const DB_ENV_SESSION_STORAGE_KEY = 'app:db_env_session:v1';
   let listenerFecharMenuNavbarAtivo = false;
+  let listenerBloqueioDrawerAtivo = false;
 
   function normalizarDbEnvFront(valor) {
     const env = String(valor || '').trim().toLowerCase();
@@ -298,9 +299,94 @@
 
   window.AppDbEnv = window.AppDbEnv || createDbEnvironmentHelper();
 
+  const APP_TAB_PRESENTATION = {
+    dashboard: {
+      label: 'Inicio',
+      eyebrow: 'Painel operacional',
+      title: 'Visao consolidada',
+      subtitle: 'Acompanhe caixa, estoque, gastos e producao em uma leitura unica e mais executiva.'
+    },
+    despesas: {
+      label: 'Despesas',
+      eyebrow: 'Controle financeiro',
+      title: 'Saidas e obrigacoes',
+      subtitle: 'Organize pagamentos, categorias e acompanhamento de despesas em um fluxo mais claro.'
+    },
+    estoque: {
+      label: 'Estoque',
+      eyebrow: 'Posicao operacional',
+      title: 'Saldo, reserva e disponibilidade',
+      subtitle: 'Visualize itens em estoque com uma leitura mais proxima de carteira e posicao.'
+    },
+    compras: {
+      label: 'Compras',
+      eyebrow: 'Entradas e aquisicoes',
+      title: 'Abastecimento da operacao',
+      subtitle: 'Acompanhe pedidos, fornecedores e entradas de estoque em um fluxo mais limpo.'
+    },
+    vendas: {
+      label: 'Vendas',
+      eyebrow: 'Receita e recebimento',
+      title: 'Faturamento acompanhado de perto',
+      subtitle: 'Consulte vendas, recebimentos e pendencias em uma tela mais objetiva.'
+    },
+    produtos: {
+      label: 'Produtos',
+      eyebrow: 'Catalogo de producao',
+      title: 'Modelos e composicao do portfolio',
+      subtitle: 'Gerencie produtos e modelos com uma organizacao mais forte de cadastro.'
+    },
+    producao: {
+      label: 'Producao',
+      eyebrow: 'Ordens e execucao',
+      title: 'Planejamento e baixa de materiais',
+      subtitle: 'Acompanhe ordens de producao, reservas e consumo em um layout mais controlado.'
+    }
+  };
+
   function normalizarNomeAba(valor) {
     const aba = String(valor || '').trim().toLowerCase();
     return ABAS_APP.includes(aba) ? aba : '';
+  }
+
+  function obterApresentacaoAba(valor) {
+    const aba = normalizarNomeAba(valor) || ABA_INICIAL_PADRAO;
+    return APP_TAB_PRESENTATION[aba] || APP_TAB_PRESENTATION.dashboard;
+  }
+
+  function obterAmbienteAtualVisual() {
+    const contexto = window.AppDbEnv?.getContext?.() || {};
+    return normalizarDbEnvFront(contexto.effective_env || contexto.selected_env || lerDbEnvSessaoFront());
+  }
+
+  function atualizarResumoWorkspace(abaValor) {
+    const aba = normalizarNomeAba(abaValor) || normalizarNomeAba(obterNomeAbaAtiva()) || ABA_INICIAL_PADRAO;
+    const apresentacao = obterApresentacaoAba(aba);
+    const envAtual = obterAmbienteAtualVisual();
+    const badgeNav = document.getElementById('navCurrentSectionBadge');
+    const eyebrow = document.getElementById('appWorkspaceEyebrow');
+    const title = document.getElementById('appWorkspaceTitle');
+    const subtitle = document.getElementById('appWorkspaceSubtitle');
+    const tabBadge = document.getElementById('appWorkspaceTabBadge');
+    const envBadge = document.getElementById('appWorkspaceEnvBadge');
+
+    if (badgeNav) badgeNav.textContent = apresentacao.label;
+    if (eyebrow) eyebrow.textContent = apresentacao.eyebrow;
+    if (title) title.textContent = apresentacao.title;
+    if (subtitle) subtitle.textContent = apresentacao.subtitle;
+    if (tabBadge) tabBadge.textContent = apresentacao.label;
+    if (envBadge) envBadge.textContent = String(envAtual || 'prod').toUpperCase();
+
+    if (document?.body) {
+      document.body.dataset.activeTab = aba;
+      document.body.dataset.activeEnv = envAtual;
+    }
+  }
+
+  if (typeof window !== 'undefined') {
+    window.addEventListener('app:db-env:changed', () => {
+      atualizarResumoWorkspace();
+    });
   }
 
   function salvarUltimaAba(valor) {
@@ -327,8 +413,72 @@
     return {
       wrap: document.getElementById('navbarMenuWrap'),
       btn: document.getElementById('btnNavHamburger'),
-      menu: document.getElementById('navbarMenu')
+      menu: document.getElementById('navbarMenu'),
+      backdrop: document.getElementById('navbarMenuBackdrop')
     };
+  }
+
+  function setInteracaoPlanoDeFundoDrawer(bloqueado) {
+    const alvo = bloqueado === true;
+    const shell = document.querySelector('.app-shell');
+    const bottomBar = document.querySelector('.bottom-bar');
+    [shell, bottomBar].forEach(el => {
+      if (!el) return;
+      if (alvo) {
+        el.setAttribute('inert', '');
+        el.setAttribute('aria-hidden', 'true');
+      } else {
+        el.removeAttribute('inert');
+        el.removeAttribute('aria-hidden');
+      }
+    });
+  }
+
+  function alvoPertenceAoDrawer(target) {
+    const { wrap, menu, backdrop } = getNavbarHamburgerEls();
+    if (!target) return false;
+    if (wrap?.contains?.(target)) return true;
+    if (menu?.contains?.(target)) return true;
+    if (backdrop?.contains?.(target)) return true;
+    return false;
+  }
+
+  function bloquearInteracaoForaDrawer(evento) {
+    if (!menuNavbarAberto()) return;
+    if (alvoPertenceAoDrawer(evento?.target)) return;
+    if (typeof evento?.preventDefault === 'function') evento.preventDefault();
+    if (typeof evento?.stopImmediatePropagation === 'function') {
+      evento.stopImmediatePropagation();
+    } else if (typeof evento?.stopPropagation === 'function') {
+      evento.stopPropagation();
+    }
+    if (String(evento?.type || '').toLowerCase() === 'focusin' && typeof evento?.target?.blur === 'function') {
+      try {
+        evento.target.blur();
+      } catch (error) {
+        // sem acao
+      }
+    }
+  }
+
+  function ativarBloqueioInteracaoDrawer() {
+    if (listenerBloqueioDrawerAtivo) return;
+    listenerBloqueioDrawerAtivo = true;
+    document.addEventListener('click', bloquearInteracaoForaDrawer, true);
+    document.addEventListener('focusin', bloquearInteracaoForaDrawer, true);
+    document.addEventListener('touchstart', bloquearInteracaoForaDrawer, { capture: true, passive: false });
+    document.addEventListener('touchmove', bloquearInteracaoForaDrawer, { capture: true, passive: false });
+    document.addEventListener('touchend', bloquearInteracaoForaDrawer, { capture: true, passive: false });
+  }
+
+  function desativarBloqueioInteracaoDrawer() {
+    if (!listenerBloqueioDrawerAtivo) return;
+    listenerBloqueioDrawerAtivo = false;
+    document.removeEventListener('click', bloquearInteracaoForaDrawer, true);
+    document.removeEventListener('focusin', bloquearInteracaoForaDrawer, true);
+    document.removeEventListener('touchstart', bloquearInteracaoForaDrawer, true);
+    document.removeEventListener('touchmove', bloquearInteracaoForaDrawer, true);
+    document.removeEventListener('touchend', bloquearInteracaoForaDrawer, true);
   }
 
   function menuNavbarAberto() {
@@ -354,7 +504,7 @@
   }
 
   function atualizarEstadoNavbar(abaAtiva) {
-    const botoes = document.querySelectorAll('.navbar button[data-aba]');
+    const botoes = document.querySelectorAll('.navbar button[data-aba], #navbarMenu button[data-aba]');
     const alvo = String(abaAtiva || '').trim();
     botoes.forEach(btn => {
       const ehAtivo = String(btn.dataset.aba || '').trim() === alvo;
@@ -373,6 +523,7 @@
       btn.setAttribute('aria-expanded', menuNavbarAberto() ? 'true' : 'false');
     }
     atualizarRotuloBotaoHamburger(alvo);
+    atualizarResumoWorkspace(alvo);
   }
 
   function salvarFiltroRapidoNoCache(chave, valor) {
@@ -408,9 +559,13 @@
   }
 
   function fecharMenuNavbar() {
-    const { menu, btn } = getNavbarHamburgerEls();
+    const { menu, btn, backdrop } = getNavbarHamburgerEls();
     if (menu) menu.classList.add('hidden');
+    if (backdrop) backdrop.classList.add('hidden');
     if (btn) btn.setAttribute('aria-expanded', 'false');
+    if (document?.body) document.body.classList.remove('nav-drawer-open');
+    setInteracaoPlanoDeFundoDrawer(false);
+    desativarBloqueioInteracaoDrawer();
 
     if (listenerFecharMenuNavbarAtivo) {
       listenerFecharMenuNavbarAtivo = false;
@@ -420,10 +575,14 @@
   }
 
   function abrirMenuNavbar() {
-    const { menu, btn } = getNavbarHamburgerEls();
+    const { menu, btn, backdrop } = getNavbarHamburgerEls();
     if (!menu || !btn) return;
     menu.classList.remove('hidden');
+    if (backdrop) backdrop.classList.remove('hidden');
     btn.setAttribute('aria-expanded', 'true');
+    if (document?.body) document.body.classList.add('nav-drawer-open');
+    setInteracaoPlanoDeFundoDrawer(true);
+    ativarBloqueioInteracaoDrawer();
 
     if (!listenerFecharMenuNavbarAtivo) {
       listenerFecharMenuNavbarAtivo = true;
@@ -441,10 +600,15 @@
   }
 
   function fecharMenuNavbarAoClicarFora(evento) {
-    const { wrap } = getNavbarHamburgerEls();
-    if (!wrap) return;
-    if (wrap.contains(evento.target)) return;
-    fecharMenuNavbar();
+    const { backdrop } = getNavbarHamburgerEls();
+    if (alvoPertenceAoDrawer(evento?.target)) return;
+    if (backdrop && evento?.target === backdrop) return;
+    if (typeof evento?.preventDefault === 'function') evento.preventDefault();
+    if (typeof evento?.stopImmediatePropagation === 'function') {
+      evento.stopImmediatePropagation();
+    } else if (typeof evento?.stopPropagation === 'function') {
+      evento.stopPropagation();
+    }
   }
 
   function fecharMenuNavbarPorTeclado(evento) {
@@ -455,11 +619,20 @@
   }
 
   function initNavbarHamburger() {
-    const { btn } = getNavbarHamburgerEls();
+    const { btn, backdrop } = getNavbarHamburgerEls();
     if (!btn) return;
     btn.addEventListener('click', () => {
       toggleMenuNavbar();
     });
+    if (backdrop) {
+      backdrop.addEventListener('pointerdown', evento => {
+        evento.preventDefault();
+        evento.stopPropagation();
+      });
+      backdrop.addEventListener('click', () => {
+        fecharMenuNavbar();
+      });
+    }
   }
 
   /* =========================

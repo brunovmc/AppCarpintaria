@@ -881,14 +881,16 @@
 
       f.cards.innerHTML = definicoes.map(def => `
         <div
-          class="dash-card dash-card-click"
+          class="dash-card dash-card-click card-ficha"
           role="button"
           tabindex="0"
           onclick="DashboardController.handleCardClick('${escapeHtml(def.key)}')"
           onkeydown="DashboardController.handleCardKeydown(event, '${escapeHtml(def.key)}')"
         >
-          <div class="dash-card-label">${escapeHtml(def.label)}</div>
-          <div class="dash-card-valor">${def.moeda ? formatarMoeda(def.valor) : formatarNumeroInteiro(def.valor)}</div>
+          <div class="card-ficha-topo dash-card-topo">${escapeHtml(def.label)}</div>
+          <div class="card-ficha-corpo dash-card-corpo">
+            <div class="dash-card-valor">${def.moeda ? formatarMoeda(def.valor) : formatarNumeroInteiro(def.valor)}</div>
+          </div>
         </div>
       `).join('');
     }
@@ -1041,9 +1043,14 @@
 
       f.obsCardTitulo.textContent = cardLabel;
       f.obsCardResumo.innerHTML = `
-        <div><strong>Total:</strong> ${escapeHtml(totalFmt)}</div>
-        <div><strong>Itens:</strong> ${formatarNumeroInteiro(totalItens)}</div>
-        <div><strong>Referencia:</strong> ${escapeHtml(referencia || '-')}</div>
+        <div class="card card-ficha dash-obs-summary-card">
+          <div class="card-ficha-topo dash-obs-item-topo">Resumo do card</div>
+          <div class="card-ficha-corpo dash-obs-summary-body">
+            <div class="dash-obs-summary-line"><strong>Total:</strong> ${escapeHtml(totalFmt)}</div>
+            <div class="dash-obs-summary-line"><strong>Itens:</strong> ${formatarNumeroInteiro(totalItens)}</div>
+            <div class="dash-obs-summary-line"><strong>Referencia:</strong> ${escapeHtml(referencia || '-')}</div>
+          </div>
+        </div>
       `;
 
       cardObservabilidadeItens = Array.isArray(p.itens) ? p.itens : [];
@@ -1066,17 +1073,19 @@
         const podeRemoverPagamento = !!item.pode_remover_pagamento && !!item.pagamento_id;
 
         return `
-          <div class="dash-obs-item">
-            <div class="dash-obs-item-main">
-              <div class="dash-obs-item-titulo">${escapeHtml(String(item.titulo || '-'))}</div>
-              <div class="dash-obs-item-detalhe">${escapeHtml(detalhes || '-')}</div>
-            </div>
-            <div class="dash-obs-item-right">
-              <div class="dash-obs-item-valor">${escapeHtml(valorFmt)}</div>
-              <div class="dash-obs-item-acoes">
-                ${podeEditar ? `<button onclick="DashboardController.editarOrigemObservabilidade(${idx})">Editar</button>` : ''}
-                ${podeExcluir ? `<button onclick="DashboardController.excluirOrigemObservabilidade(${idx})">Excluir</button>` : ''}
-                ${podeRemoverPagamento ? `<button onclick="DashboardController.removerPagamentoObservabilidade(${idx})">Remover pagamento</button>` : ''}
+          <div class="card card-ficha dash-obs-item">
+            <div class="card-ficha-topo dash-obs-item-topo">${escapeHtml(String(item.titulo || '-'))}</div>
+            <div class="card-ficha-corpo dash-obs-item-corpo">
+              <div class="dash-obs-item-main">
+                <div class="dash-obs-item-detalhe">${escapeHtml(detalhes || '-')}</div>
+              </div>
+              <div class="dash-obs-item-right">
+                <div class="dash-obs-item-valor">${escapeHtml(valorFmt)}</div>
+                <div class="dash-obs-item-acoes">
+                  ${podeEditar ? `<button onclick="DashboardController.editarOrigemObservabilidade(${idx})">Editar</button>` : ''}
+                  ${podeExcluir ? `<button onclick="DashboardController.excluirOrigemObservabilidade(${idx})">Excluir</button>` : ''}
+                  ${podeRemoverPagamento ? `<button onclick="DashboardController.removerPagamentoObservabilidade(${idx})">Remover pagamento</button>` : ''}
+                </div>
               </div>
             </div>
           </div>

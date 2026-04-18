@@ -981,7 +981,7 @@
 
     function montarCardProducao(i) {
       const div = document.createElement('div');
-      div.className = 'card';
+      div.className = 'card card-ficha';
       div.dataset.id = i.producao_id;
 
       const nome = i.nome_ordem || i.nome_produto || i.producao_id;
@@ -1027,17 +1027,19 @@
       const etapaAtualLabel = escapeHtml(`Etapa atual: ${etapaAtual}`);
 
       div.innerHTML = `
-        <div class="card-resumo">
-          <strong>${nomeLabel}</strong><br>
-          ${statusLabel}<br>
-          ${qtdPlanejada} ${unidadeLabel}<br>
-          Produzido: ${qtdProduzida} | Restante: ${qtdRestante}<br>
-          ${etapasConcluidasLabel}<br>
-          ${etapaAtualLabel}<br>
-          ${resumoSaidasLabel}
-        </div>
+        <div class="card-ficha-topo">${nomeLabel}</div>
+        <div class="card-ficha-corpo">
+          <div class="card-resumo">
+            ${statusLabel}<br>
+            ${qtdPlanejada} ${unidadeLabel}<br>
+            Produzido: ${qtdProduzida} | Restante: ${qtdRestante}<br>
+            ${etapasConcluidasLabel}<br>
+            ${etapaAtualLabel}<br>
+            ${resumoSaidasLabel}
+          </div>
 
-        <button class="ver-mais">Ver mais</button>
+          <button class="ver-mais">Ver mais</button>
+        </div>
       `;
 
       return div;
