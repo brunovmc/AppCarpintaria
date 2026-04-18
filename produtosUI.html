@@ -1139,7 +1139,7 @@
           const cardReceita = e.target.closest('.receita-card');
           if (cardReceita && window.ProdutosController) {
             const payload = coletarDadosReceita(cardReceita);
-            ProdutosController.salvarReceita(produtoId, receitaId, payload.dados, payload.entradas, payload.saidas);
+            ProdutosController.salvarReceita(produtoId, receitaId, payload.dados, payload.entradas, payload.saidas, e.target);
           }
           return;
         }

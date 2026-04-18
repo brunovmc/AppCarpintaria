@@ -1710,7 +1710,7 @@
           const input = document.getElementById(`novaEtapa_${producaoId}`);
           const nome = input ? input.value.trim() : '';
           if (nome && window.ProducaoController) {
-            ProducaoController.adicionarEtapa(producaoId, nome);
+            ProducaoController.adicionarEtapa(producaoId, nome, e.target);
             if (input) input.value = '';
           }
           return;
@@ -1729,7 +1729,7 @@
               reserva_id: reservaId,
               estoque_id: estoqueId,
               quantidade_reservada: quantidade
-            });
+            }, e.target);
           }
           return;
         }
@@ -1771,7 +1771,7 @@
               nome_item: nome.trim(),
               quantidade_prevista: qtd,
               estoque_id: estoqueId
-            });
+            }, e.target);
           }
           return;
         }
@@ -1782,7 +1782,7 @@
           const input = document.getElementById(`custoLote_${loteId}`);
           const custo = input ? input.value : '';
           if (window.ProducaoController) {
-            ProducaoController.atualizarCustoLoteSaida(producaoId, loteId, custo);
+            ProducaoController.atualizarCustoLoteSaida(producaoId, loteId, custo, e.target);
           }
           return;
         }
@@ -1795,7 +1795,7 @@
           const input = precoInputId ? document.getElementById(precoInputId) : null;
           const preco = input ? input.value : '';
           if (window.ProducaoController) {
-            ProducaoController.atualizarPrecoVendaProdutoSaida(producaoId, nomeSaida, preco, produtoId);
+            ProducaoController.atualizarPrecoVendaProdutoSaida(producaoId, nomeSaida, preco, produtoId, e.target);
           }
           return;
         }
@@ -1833,7 +1833,7 @@
           const input = document.getElementById(`editEtapa_${producaoId}_${etapaId}`);
           const nome = input ? input.value.trim() : '';
           if (window.ProducaoController) {
-            ProducaoController.salvarEdicaoEtapa(producaoId, etapaId, nome);
+            ProducaoController.salvarEdicaoEtapa(producaoId, etapaId, nome, e.target);
           }
           return;
         }

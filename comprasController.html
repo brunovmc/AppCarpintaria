@@ -395,12 +395,13 @@
             setSalvando(false);
             reabrirFormularioAposErro(dadosFormulario, { editando: true, id: idAtual });
           })
-          .withSuccessHandler(() => {
-            mostrarToast('Salvo com sucesso');
-            invalidarCacheDashboardPorImpacto(snapshot, dados);
-            setSalvando(false);
-          })
-          .atualizarItemCompra(idAtual, dados);
+        .withSuccessHandler(() => {
+          mostrarToast('Salvo com sucesso');
+          invalidarCacheDashboardPorImpacto(snapshot, dados);
+          setSalvando(false);
+          window.AppModalUI?.closeAll?.();
+        })
+        .atualizarItemCompra(idAtual, dados);
 
         editandoId = null;
         origemRefazerId = null;
@@ -464,6 +465,7 @@
           mostrarToast('Salvo com sucesso');
           invalidarCacheDashboardPorImpacto(dados, itemSalvo);
           setSalvando(false);
+          window.AppModalUI?.closeAll?.();
         })
         .criarItemCompra(dados);
     }
@@ -686,6 +688,7 @@
         .withSuccessHandler(resp => {
           salvandoPagamento = false;
           setBloqueioMutacaoPagamento(false);
+          window.AppModalUI?.closeAll?.();
 
           if (resp?.compraAtualizada?.ID) {
             ComprasStore.update(resp.compraAtualizada.ID, resp.compraAtualizada);

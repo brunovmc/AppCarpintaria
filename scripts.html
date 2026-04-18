@@ -891,6 +891,84 @@
 
   window.AppMutationUI = window.AppMutationUI || createMutationUiLock();
 
+  function createActionButtonHelper() {
+    function resolverBotao(alvo) {
+      if (!alvo) return null;
+      if (alvo instanceof HTMLButtonElement) return alvo;
+      return alvo?.closest?.('button') || null;
+    }
+
+    function textoPadraoBotao(btn, fallback = 'Salvar') {
+      const texto = String(btn?.dataset?.idleLabel || btn?.textContent || '').trim();
+      return texto || String(fallback || '').trim() || 'Salvar';
+    }
+
+    function begin(options = {}) {
+      const btn = resolverBotao(options.button);
+      const idleLabel = String(options.idleLabel || textoPadraoBotao(btn, 'Salvar')).trim() || 'Salvar';
+      const loadingLabel = String(options.loadingLabel || 'Salvando').trim() || 'Salvando';
+      const usarLock = options.lock !== false;
+      const estado = {
+        button: btn,
+        idleLabel,
+        loadingLabel,
+        originalHtml: btn ? btn.innerHTML : '',
+        originalDisabled: btn ? !!btn.disabled : false,
+        token: null
+      };
+
+      if (usarLock && window.AppMutationUI?.lock) {
+        estado.token = window.AppMutationUI.lock();
+      }
+
+      if (btn) {
+        btn.disabled = true;
+        btn.setAttribute('aria-busy', 'true');
+        if (window.AppLoading?.setButtonLoading) {
+          window.AppLoading.setButtonLoading(btn, true, idleLabel, loadingLabel);
+        } else {
+          btn.textContent = `${loadingLabel}...`;
+        }
+      }
+
+      return estado;
+    }
+
+    function end(estado) {
+      if (!estado || typeof estado !== 'object') return;
+      const btn = estado.button;
+      if (btn) {
+        btn.disabled = !!estado.originalDisabled;
+        btn.removeAttribute('aria-busy');
+        if (typeof estado.originalHtml === 'string' && estado.originalHtml !== '') {
+          btn.innerHTML = estado.originalHtml;
+        } else if (window.AppLoading?.setButtonLoading) {
+          window.AppLoading.setButtonLoading(btn, false, estado.idleLabel || 'Salvar');
+        } else {
+          btn.textContent = estado.idleLabel || 'Salvar';
+        }
+      }
+      if (estado.token && window.AppMutationUI?.unlock) {
+        window.AppMutationUI.unlock(estado.token);
+      }
+    }
+
+    function finishSuccess(estado, options = {}) {
+      end(estado);
+      if (options.closeModals !== false) {
+        window.AppModalUI?.closeAll?.();
+      }
+    }
+
+    return {
+      begin,
+      end,
+      finishSuccess
+    };
+  }
+
+  window.AppActionButtons = window.AppActionButtons || createActionButtonHelper();
+
   function createUserAccessHelper() {
     let contexto = null;
     let inFlight = null;
@@ -3075,6 +3153,23 @@
       }
     });
   }
+
+  window.AppModalUI = window.AppModalUI || {
+    listOpen: listarModaisAbertos,
+    close(modal) {
+      return fecharModalPorInteracao(modal);
+    },
+    closeClosest(elemento) {
+      const modal = elemento?.closest?.('.modal') || null;
+      if (!modal || modal.classList.contains('hidden')) return false;
+      return fecharModalPorInteracao(modal);
+    },
+    closeAll() {
+      const abertos = listarModaisAbertos().reverse();
+      abertos.forEach(modal => fecharModalPorInteracao(modal));
+      return abertos.length;
+    }
+  };
 
   function initCampoAjudaA11y() {
     let seq = 0;

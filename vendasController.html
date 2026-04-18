@@ -243,12 +243,13 @@
             setSalvando(false);
             reabrirFormularioAposErro(dadosFormulario, { editando: true, id: idAtual });
           })
-          .withSuccessHandler(() => {
-            mostrarToast('Venda atualizada');
-            invalidarCacheDashboardPorImpacto(snapshot, dados);
-            setSalvando(false);
-          })
-          .atualizarVenda(idAtual, dados);
+        .withSuccessHandler(() => {
+          mostrarToast('Venda atualizada');
+          invalidarCacheDashboardPorImpacto(snapshot, dados);
+          setSalvando(false);
+          window.AppModalUI?.closeAll?.();
+        })
+        .atualizarVenda(idAtual, dados);
 
         editandoId = null;
         return;
@@ -303,6 +304,7 @@
           invalidarCacheDashboardPorImpacto(dados, itemSalvo);
           mostrarToast('Venda salva');
           setSalvando(false);
+          window.AppModalUI?.closeAll?.();
         })
         .criarVenda(dados);
     }
@@ -421,6 +423,7 @@
         .withSuccessHandler(resp => {
           salvandoRecebimento = false;
           setBloqueioMutacaoRecebimento(false);
+          window.AppModalUI?.closeAll?.();
           const concluirSync = window.AppSyncFeedback?.iniciar
             ? window.AppSyncFeedback.iniciar('Recebimento registrado. Atualizando dados...')
             : null;

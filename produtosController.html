@@ -28,6 +28,27 @@
       return String(Number(n.toFixed(2)));
     }
 
+    function iniciarAcaoBotao(button, idleLabel, loadingLabel) {
+      return window.AppActionButtons?.begin
+        ? window.AppActionButtons.begin({
+          button,
+          idleLabel,
+          loadingLabel
+        })
+        : null;
+    }
+
+    function finalizarAcaoBotao(estado, opcoes = {}) {
+      if (!estado) return;
+      if (opcoes?.sucesso && window.AppActionButtons?.finishSuccess) {
+        window.AppActionButtons.finishSuccess(estado, {
+          closeModals: opcoes.closeModals !== false
+        });
+        return;
+      }
+      window.AppActionButtons?.end?.(estado);
+    }
+
     function setSalvando(ativo) {
       salvando = !!ativo;
       if (window.AppMutationUI?.lock && window.AppMutationUI?.unlock) {
@@ -429,7 +450,7 @@
       return '';
     }
 
-    function salvarReceita(produtoId, receitaId, dados, entradas, saidas) {
+    function salvarReceita(produtoId, receitaId, dados, entradas, saidas, buttonEl) {
       if (!podeAlterarDados('Salvamento bloqueado em modo somente leitura')) return;
       const item = ProdutosStore.getById(produtoId);
       if (!item) return;
@@ -452,17 +473,21 @@
         };
       });
 
+      const acaoBotao = iniciarAcaoBotao(buttonEl, 'Salvar', 'Salvando');
+      window.AppModalUI?.closeAll?.();
       ProdutosStore.update(produtoId, { receitas });
       renderListaAtual();
       mostrarToast('Salvando modelo...');
 
       window.AppRequest.runner()
         .withFailureHandler(() => {
+          finalizarAcaoBotao(acaoBotao);
           ProdutosStore.update(produtoId, snapshot);
           renderListaAtual();
           mostrarToast('Erro ao salvar modelo', 'erro');
         })
         .withSuccessHandler(() => {
+          finalizarAcaoBotao(acaoBotao, { sucesso: true, closeModals: true });
           carregarReceitas(produtoId, true);
           mostrarToast('Modelo salvo');
         })
@@ -562,6 +587,7 @@
             ? window.AppSyncFeedback.iniciar('Salvo com sucesso. Atualizando dados...')
             : null;
           setSalvando(false);
+          window.AppModalUI?.closeAll?.();
           if (window.AppTabRefresh?.requestSync) {
             window.AppTabRefresh.requestSync('produtos', {
               delayMs: 280,

@@ -139,6 +139,27 @@
       }
     }
 
+    function iniciarAcaoBotao(button, idleLabel, loadingLabel) {
+      return window.AppActionButtons?.begin
+        ? window.AppActionButtons.begin({
+          button,
+          idleLabel,
+          loadingLabel
+        })
+        : null;
+    }
+
+    function finalizarAcaoBotao(estado, opcoes = {}) {
+      if (!estado) return;
+      if (opcoes?.sucesso && window.AppActionButtons?.finishSuccess) {
+        window.AppActionButtons.finishSuccess(estado, {
+          closeModals: opcoes.closeModals !== false
+        });
+        return;
+      }
+      window.AppActionButtons?.end?.(estado);
+    }
+
     function reabrirFormularioAposErro(dados, opcoes = {}) {
       const payload = dados ? { ...dados } : {};
       const editando = !!opcoes.editando;
@@ -434,6 +455,7 @@
             });
           }
           setSalvando(false);
+          window.AppModalUI?.closeAll?.();
         })
         .atualizarProducao(idAtual, dados);
 
@@ -511,6 +533,7 @@
             });
           }
           setSalvando(false);
+          window.AppModalUI?.closeAll?.();
         })
         .criarProducao(dados);
     }
@@ -650,7 +673,7 @@
         .listarSaidasLotesProducao(id);
     }
 
-    function atualizarCustoLoteSaida(producaoId, loteId, custoUnitarioInput) {
+    function atualizarCustoLoteSaida(producaoId, loteId, custoUnitarioInput, buttonEl) {
       if (!podeAlterarDados('Atualizacao bloqueada em modo somente leitura')) return;
       const prodId = String(producaoId || '').trim();
       const lotId = String(loteId || '').trim();
@@ -666,12 +689,15 @@
       }
 
       mostrarToast('Atualizando custo da saida...');
+      const acaoBotao = iniciarAcaoBotao(buttonEl, 'Salvar', 'Salvando');
       window.AppRequest.runner()
         .withFailureHandler(err => {
+          finalizarAcaoBotao(acaoBotao);
           const msg = err?.message || 'Erro ao atualizar custo da saida';
           mostrarToast(msg, 'erro');
         })
         .withSuccessHandler(resp => {
+          finalizarAcaoBotao(acaoBotao, { sucesso: true, closeModals: true });
           if (resp?.saidasLotes) {
             ProducaoStore.update(prodId, { saidasLotes: resp.saidasLotes });
           } else if (resp?.loteAtualizado) {
@@ -708,7 +734,7 @@
         .atualizarCustoLoteSaidaProducao(prodId, lotId, custo);
     }
 
-    function atualizarPrecoVendaProdutoSaida(producaoId, nomeSaida, precoVendaInput, produtoRefIdInput) {
+    function atualizarPrecoVendaProdutoSaida(producaoId, nomeSaida, precoVendaInput, produtoRefIdInput, buttonEl) {
       if (!podeAlterarDados('Atualizacao bloqueada em modo somente leitura')) return;
       const prodId = String(producaoId || '').trim();
       const nome = String(nomeSaida || '').trim();
@@ -733,12 +759,15 @@
       }
 
       mostrarToast('Atualizando preco de venda...');
+      const acaoBotao = iniciarAcaoBotao(buttonEl, 'Salvar', 'Salvando');
       window.AppRequest.runner()
         .withFailureHandler(err => {
+          finalizarAcaoBotao(acaoBotao);
           const msg = err?.message || 'Erro ao atualizar preco de venda';
           mostrarToast(msg, 'erro');
         })
         .withSuccessHandler(resp => {
+          finalizarAcaoBotao(acaoBotao, { sucesso: true, closeModals: true });
           const msgBase = 'Preco de venda atualizado';
           const concluirSync = window.AppSyncFeedback?.iniciar
             ? window.AppSyncFeedback.iniciar(`${msgBase}. Atualizando dados...`)
@@ -806,7 +835,7 @@
       carregarEstoqueOpcoes(true);
     }
 
-    function salvarReservaEntrada(producaoId, necessidadeId, payload) {
+    function salvarReservaEntrada(producaoId, necessidadeId, payload, buttonEl) {
       if (!podeAlterarDados('Vinculo bloqueado em modo somente leitura')) return;
       const prodId = String(producaoId || '').trim();
       const needId = String(necessidadeId || '').trim();
@@ -823,12 +852,15 @@
       }
 
       mostrarToast('Salvando reserva...');
+      const acaoBotao = iniciarAcaoBotao(buttonEl, 'Salvar', 'Salvando');
       window.AppRequest.runner()
         .withFailureHandler(err => {
+          finalizarAcaoBotao(acaoBotao);
           const msg = err?.message || 'Erro ao salvar reserva';
           mostrarToast(msg, 'erro');
         })
         .withSuccessHandler(resp => {
+          finalizarAcaoBotao(acaoBotao, { sucesso: true, closeModals: true });
           aplicarRespostaVinculos(prodId, resp);
           mostrarToast('Reserva atualizada');
         })
@@ -859,7 +891,7 @@
         .removerReservaEntradaProducao(prodId, needId, resId);
     }
 
-    function adicionarItemManual(producaoId, payload) {
+    function adicionarItemManual(producaoId, payload, buttonEl) {
       if (!podeAlterarDados('Adicao bloqueada em modo somente leitura')) return;
       const prodId = String(producaoId || '').trim();
       if (!prodId) {
@@ -868,12 +900,15 @@
       }
 
       mostrarToast('Adicionando item...');
+      const acaoBotao = iniciarAcaoBotao(buttonEl, 'Adicionar item', 'Salvando');
       window.AppRequest.runner()
         .withFailureHandler(err => {
+          finalizarAcaoBotao(acaoBotao);
           const msg = err?.message || 'Erro ao adicionar item';
           mostrarToast(msg, 'erro');
         })
         .withSuccessHandler(resp => {
+          finalizarAcaoBotao(acaoBotao, { sucesso: true, closeModals: true });
           if (resp?.vinculos) {
             ProducaoStore.update(prodId, { vinculosMateriais: resp.vinculos });
           }
@@ -959,13 +994,16 @@
       payload.qtdProduzida = normalizarQuantidadeInteira(payload.qtdProduzida);
 
       mostrarToast('Atualizando estoque...');
+      const acaoBotao = iniciarAcaoBotao(document.getElementById('btnConfirmarConsumo'), 'Confirmar baixa', 'Salvando');
 
       window.AppRequest.runner()
         .withFailureHandler(err => {
+          finalizarAcaoBotao(acaoBotao);
           const msg = err?.message || 'Erro ao atualizar estoque';
           mostrarToast(msg, 'erro');
         })
         .withSuccessHandler(resp => {
+          finalizarAcaoBotao(acaoBotao, { sucesso: true, closeModals: true });
           if (resp?.estoqueAtualizados && window.EstoqueStore) {
             resp.estoqueAtualizados.forEach(i => {
               EstoqueStore.update(i.ID, { quantidade: i.quantidade });
@@ -1048,12 +1086,15 @@
       }
 
       mostrarToast('Salvando vinculos...');
+      const acaoBotao = iniciarAcaoBotao(document.getElementById('btnConfirmarPendenciasVinculo'), 'Salvar vinculos', 'Salvando');
       window.AppRequest.runner()
         .withFailureHandler(err => {
+          finalizarAcaoBotao(acaoBotao);
           const msg = err?.message || 'Erro ao salvar vinculos';
           mostrarToast(msg, 'erro');
         })
         .withSuccessHandler(resp => {
+          finalizarAcaoBotao(acaoBotao, { sucesso: true, closeModals: true });
           if (resp?.vinculos) {
             ProducaoStore.update(payload.producaoId, { vinculosMateriais: resp.vinculos });
           }
@@ -1065,15 +1106,12 @@
           }
           renderListaAtual();
           ProducaoUI.fecharModalPendenciasVinculo?.();
-
-          const item = ProducaoStore.getById(payload.producaoId) || {};
-          abrirModalConsumoComItem(item);
-          mostrarToast('Vinculos atualizados. Confirme a baixa do estoque.');
+          mostrarToast('Vinculos atualizados');
         })
         .vincularPendenciasEntradaProducao(payload.producaoId, payload.vinculacoes);
     }
 
-    function adicionarEtapa(producaoId, nome) {
+    function adicionarEtapa(producaoId, nome, buttonEl) {
       if (!podeAlterarDados('Adicao bloqueada em modo somente leitura')) return;
       const item = ProducaoStore.getById(producaoId);
       if (!item) return;
@@ -1089,15 +1127,19 @@
         ordem
       });
 
+      const acaoBotao = iniciarAcaoBotao(buttonEl, 'Adicionar etapa', 'Salvando');
+      window.AppModalUI?.closeAll?.();
       ProducaoStore.update(producaoId, { etapas });
 
       window.AppRequest.runner()
         .withFailureHandler(() => {
+          finalizarAcaoBotao(acaoBotao);
           ProducaoStore.update(producaoId, snapshot);
           renderListaAtual();
           mostrarToast('Erro ao adicionar etapa', 'erro');
         })
         .withSuccessHandler(() => {
+          finalizarAcaoBotao(acaoBotao, { sucesso: true, closeModals: true });
           refreshEtapas(producaoId);
         })
         .atualizarEtapasProducao(producaoId, [
@@ -1181,7 +1223,7 @@
       renderListaAtual();
     }
 
-    function salvarEdicaoEtapa(producaoId, etapaId, novoNome) {
+    function salvarEdicaoEtapa(producaoId, etapaId, novoNome, buttonEl) {
       if (!podeAlterarDados('Edicao bloqueada em modo somente leitura')) return;
       const item = ProducaoStore.getById(producaoId);
       if (!item) return;
@@ -1203,16 +1245,20 @@
         _editing: false
       };
 
+      const acaoBotao = iniciarAcaoBotao(buttonEl, 'Salvar', 'Salvando');
+      window.AppModalUI?.closeAll?.();
       ProducaoStore.update(producaoId, { etapas });
       renderListaAtual();
 
       window.AppRequest.runner()
         .withFailureHandler(() => {
+          finalizarAcaoBotao(acaoBotao);
           ProducaoStore.update(producaoId, snapshot);
           renderListaAtual();
           mostrarToast('Erro ao salvar etapa', 'erro');
         })
         .withSuccessHandler(() => {
+          finalizarAcaoBotao(acaoBotao, { sucesso: true, closeModals: true });
           mostrarToast('Etapa atualizada');
         })
         .atualizarEtapasProducao(producaoId, [

@@ -1062,6 +1062,7 @@
           const concluirSync = window.AppSyncFeedback?.iniciar
             ? window.AppSyncFeedback.iniciar('Despesa salva. Atualizando dados...')
             : null;
+          window.AppModalUI?.closeAll?.();
           if (window.AppTabRefresh?.requestSync) {
             window.AppTabRefresh.requestSync('despesas', {
               delayMs: 300,
@@ -1320,6 +1321,7 @@
         })
         .withSuccessHandler(() => {
           setSalvandoPagamentoDespesa(false);
+          window.AppModalUI?.closeAll?.();
           const concluirSync = window.AppSyncFeedback?.iniciar
             ? window.AppSyncFeedback.iniciar('Pagamento registrado. Atualizando dados...')
             : null;

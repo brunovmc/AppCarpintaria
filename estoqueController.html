@@ -316,12 +316,13 @@
             setSalvando(false);
             reabrirFormularioAposErro(dadosFormulario, { editando: true, id: idAtual });
           })
-          .withSuccessHandler(() => {
-            mostrarToast('Salvo com sucesso');
-            marcarDashboardComoSujo();
-            setSalvando(false);
-          })
-          .atualizarItemEstoque(idAtual, dados);
+        .withSuccessHandler(() => {
+          mostrarToast('Salvo com sucesso');
+          marcarDashboardComoSujo();
+          setSalvando(false);
+          window.AppModalUI?.closeAll?.();
+        })
+        .atualizarItemEstoque(idAtual, dados);
 
         editandoId = null;
         return;
@@ -384,6 +385,7 @@
           mostrarToast('Salvo com sucesso');
           marcarDashboardComoSujo();
           setSalvando(false);
+          window.AppModalUI?.closeAll?.();
         })
         .criarItemEstoque(dados);
     }

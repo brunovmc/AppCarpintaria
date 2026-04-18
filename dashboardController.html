@@ -1573,6 +1573,7 @@
         .withSuccessHandler(() => {
           setSalvandoDespesa(false);
           cancelarFormularioDespesa();
+          window.AppModalUI?.closeAll?.();
           const concluirSync = window.AppSyncFeedback?.iniciar
             ? window.AppSyncFeedback.iniciar('Despesa salva. Atualizando dados...')
             : null;
@@ -1838,6 +1839,7 @@
         .withSuccessHandler(() => {
           setSalvandoPagamentoDespesa(false);
           cancelarPagamentoDespesa();
+          window.AppModalUI?.closeAll?.();
           const concluirSync = window.AppSyncFeedback?.iniciar
             ? window.AppSyncFeedback.iniciar('Pagamento registrado. Atualizando dados...')
             : null;
