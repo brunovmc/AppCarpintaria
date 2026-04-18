@@ -1,4 +1,5 @@
 const REGRESSION_SPRINT3_VERSION = 'v3';
+const REGRESSION_PURGE_MARKER = '__REGTEST';
 
 function listarCasosRegressaoSprint3_() {
   return [
@@ -219,6 +220,314 @@ function executarSuiteRegressaoSprint3Parte3ComLogProd() {
 
 function executarSuiteRegressaoSprint3Parte4ComLogProd() {
   return executarRegressaoComLogNoAmbiente_('prod', () => executarSuiteRegressaoSprint3ParteComLog('parte4'));
+}
+
+function normalizarCampoPurgeRegressao_(campo) {
+  return String(campo || '').trim();
+}
+
+function normalizarValorPurgeRegressao_(valor) {
+  if (valor === null || valor === undefined) return '';
+  return String(valor).trim();
+}
+
+function contemMarcadorPurgeRegressao_(valor) {
+  const texto = normalizarValorPurgeRegressao_(valor).toUpperCase();
+  return !!texto && texto.indexOf(REGRESSION_PURGE_MARKER) !== -1;
+}
+
+function listarAliasesCampoPurgeRegressao_(campo) {
+  const chave = normalizarCampoPurgeRegressao_(campo);
+  switch (chave) {
+    case 'ID':
+    case 'estoque_id':
+      return ['ID', 'estoque_id'];
+    case 'produto_id':
+    case 'produto_ref_id':
+      return ['produto_id', 'produto_ref_id'];
+    case 'receita_id':
+    case 'receita_ref_id':
+    case 'parent_receita_id':
+      return ['receita_id', 'receita_ref_id', 'parent_receita_id'];
+    case 'producao_id':
+    case 'op_id':
+    case 'origem_id':
+      return ['producao_id', 'op_id', 'origem_id'];
+    default:
+      return [chave];
+  }
+}
+
+function adicionarValorRelacionadoPurgeRegressao_(mapa, campo, valor) {
+  const valorNorm = normalizarValorPurgeRegressao_(valor);
+  if (!valorNorm) return false;
+
+  let alterou = false;
+  listarAliasesCampoPurgeRegressao_(campo).forEach((alias) => {
+    const chave = normalizarCampoPurgeRegressao_(alias);
+    if (!chave) return;
+    if (!mapa[chave]) {
+      mapa[chave] = {};
+    }
+    if (!mapa[chave][valorNorm]) {
+      mapa[chave][valorNorm] = true;
+      alterou = true;
+    }
+  });
+  return alterou;
+}
+
+function coletarRelacionamentosLinhaPurgeRegressao_(headers, rowValues, relacionados) {
+  let alterou = false;
+  (Array.isArray(headers) ? headers : []).forEach((header, idx) => {
+    const campo = normalizarCampoPurgeRegressao_(header);
+    if (!campo) return;
+    if (campo === 'id' || campo === 'ativo' || campo === 'criado_em' || campo === 'data') return;
+    if (campo === 'ID' || campo.endsWith('_id')) {
+      alterou = adicionarValorRelacionadoPurgeRegressao_(relacionados, campo, rowValues[idx]) || alterou;
+    }
+  });
+  return alterou;
+}
+
+function linhaTemRelacionamentoPurgeRegressao_(headers, rowValues, relacionados) {
+  return (Array.isArray(headers) ? headers : []).some((header, idx) => {
+    const campo = normalizarCampoPurgeRegressao_(header);
+    if (!campo) return false;
+    const valor = normalizarValorPurgeRegressao_(rowValues[idx]);
+    if (!valor) return false;
+    const conjunto = relacionados[campo];
+    return !!(conjunto && conjunto[valor]);
+  });
+}
+
+function agruparLinhasContiguasPurgeRegressao_(linhas) {
+  const ordenadas = Array.from(new Set((Array.isArray(linhas) ? linhas : []).filter((n) => Number(n) > 1)))
+    .map((n) => Number(n))
+    .sort((a, b) => a - b);
+
+  if (ordenadas.length === 0) return [];
+
+  const grupos = [];
+  let inicio = ordenadas[0];
+  let anterior = ordenadas[0];
+
+  for (let i = 1; i < ordenadas.length; i++) {
+    const atual = ordenadas[i];
+    if (atual === anterior + 1) {
+      anterior = atual;
+      continue;
+    }
+    grupos.push({ inicio, quantidade: anterior - inicio + 1 });
+    inicio = atual;
+    anterior = atual;
+  }
+  grupos.push({ inicio, quantidade: anterior - inicio + 1 });
+  return grupos;
+}
+
+function limparCachesPosPurgeRegressao_() {
+  const funcoes = [
+    'limparCacheValidacoes',
+    'limparCacheEstoque',
+    'limparCacheCompras',
+    'limparCacheVendas',
+    'limparCacheProdutos',
+    'limparCacheProducao',
+    'limparCacheDespesasGerais',
+    'limparCachePagamentos',
+    'limparCacheUsuariosAcesso',
+    'limparCacheDashboardFinanceiro'
+  ];
+
+  const caches = {};
+  funcoes.forEach((nome) => {
+    if (typeof globalThis?.[nome] === 'function') {
+      try {
+        globalThis[nome]();
+        caches[nome] = { ok: true };
+      } catch (error) {
+        caches[nome] = { ok: false, erro: String(error?.message || error || 'Falha ao limpar cache') };
+      }
+    }
+  });
+  return caches;
+}
+
+function purgarResiduosRegtestAmbienteAtual_() {
+  assertCanWrite('Purge de residuos __REGTEST_');
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+
+  try {
+    const ss = getDataSpreadsheet({ skipAccessCheck: true });
+    const sheets = ss.getSheets();
+    const relacionados = {};
+    const deletarPorAba = {};
+    const analise = [];
+    const abasTemporarias = [];
+
+    sheets.forEach((sheet) => {
+      const nomeAba = sheet.getName();
+      if (contemMarcadorPurgeRegressao_(nomeAba)) {
+        abasTemporarias.push(nomeAba);
+      }
+
+      const lastRow = sheet.getLastRow();
+      const lastCol = sheet.getLastColumn();
+      if (lastRow <= 1 || lastCol <= 0) {
+        analise.push({
+          sheet,
+          nomeAba,
+          headers: [],
+          linhas: []
+        });
+        return;
+      }
+
+      const values = sheet.getRange(1, 1, lastRow, lastCol).getValues();
+      const headers = values[0] || [];
+      const linhas = [];
+
+      for (let i = 1; i < values.length; i++) {
+        const rowValues = values[i];
+        const rowNumber = i + 1;
+        const temMarcador = rowValues.some((cell) => contemMarcadorPurgeRegressao_(cell));
+        linhas.push({
+          rowNumber,
+          values: rowValues,
+          temMarcador,
+          deletar: false
+        });
+        if (temMarcador) {
+          coletarRelacionamentosLinhaPurgeRegressao_(headers, rowValues, relacionados);
+        }
+      }
+
+      analise.push({
+        sheet,
+        nomeAba,
+        headers,
+        linhas
+      });
+    });
+
+    let alterou = true;
+    while (alterou) {
+      alterou = false;
+      analise.forEach((item) => {
+        item.linhas.forEach((linha) => {
+          if (linha.deletar) return;
+          if (!linha.temMarcador && !linhaTemRelacionamentoPurgeRegressao_(item.headers, linha.values, relacionados)) {
+            return;
+          }
+          linha.deletar = true;
+          deletarPorAba[item.nomeAba] = deletarPorAba[item.nomeAba] || [];
+          deletarPorAba[item.nomeAba].push(linha.rowNumber);
+          alterou = coletarRelacionamentosLinhaPurgeRegressao_(item.headers, linha.values, relacionados) || alterou;
+        });
+      });
+    }
+
+    const resumoAbas = {};
+    Object.keys(deletarPorAba).forEach((nomeAba) => {
+      const linhas = deletarPorAba[nomeAba];
+      const item = analise.find((entry) => entry.nomeAba === nomeAba);
+      if (!item || !Array.isArray(linhas) || linhas.length === 0) return;
+
+      const grupos = agruparLinhasContiguasPurgeRegressao_(linhas);
+      for (let i = grupos.length - 1; i >= 0; i--) {
+        const grupo = grupos[i];
+        item.sheet.deleteRows(grupo.inicio, grupo.quantidade);
+      }
+
+      resumoAbas[nomeAba] = {
+        linhas_removidas: Array.from(new Set(linhas)).length
+      };
+    });
+
+    const abasRemovidas = [];
+    abasTemporarias.forEach((nomeAba) => {
+      const sheet = ss.getSheetByName(nomeAba);
+      if (!sheet) return;
+      if (ss.getSheets().length <= 1) return;
+      ss.deleteSheet(sheet);
+      abasRemovidas.push(nomeAba);
+    });
+
+    SpreadsheetApp.flush();
+
+    return {
+      ok: true,
+      ambiente: (typeof obterContextoBancoDados === 'function'
+        ? (obterContextoBancoDados()?.effective_env || obterContextoBancoDados()?.selected_env || '')
+        : ''),
+      marker: REGRESSION_PURGE_MARKER,
+      spreadsheet_id: ss.getId(),
+      spreadsheet_nome: ss.getName(),
+      abas_analisadas: sheets.length,
+      abas_com_linhas_removidas: Object.keys(resumoAbas).length,
+      abas_removidas: abasRemovidas,
+      total_linhas_removidas: Object.values(resumoAbas).reduce((acc, item) => acc + Number(item?.linhas_removidas || 0), 0),
+      detalhes_abas: resumoAbas,
+      caches_limpos: limparCachesPosPurgeRegressao_()
+    };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function purgarResiduosRegtestAtualComLog() {
+  const resultado = purgarResiduosRegtestAmbienteAtual_();
+  const json = JSON.stringify(resultado, null, 2);
+  try {
+    console.log(json);
+  } catch (error) {
+    // sem acao
+  }
+  try {
+    Logger.log(json);
+  } catch (error) {
+    // sem acao
+  }
+  return resultado;
+}
+
+function purgarResiduosRegtestDevComLog() {
+  return executarRegressaoComLogNoAmbiente_('dev', purgarResiduosRegtestAtualComLog);
+}
+
+function purgarResiduosRegtestProdComLog() {
+  return executarRegressaoComLogNoAmbiente_('prod', purgarResiduosRegtestAtualComLog);
+}
+
+function purgarResiduosRegtestDevEProdComLog() {
+  const inicio = Date.now();
+  const dev = purgarResiduosRegtestDevComLog();
+  const prod = purgarResiduosRegtestProdComLog();
+  const resultado = {
+    ok: dev?.ok !== false && prod?.ok !== false,
+    operacao: 'purge_regtest_dev_prod',
+    marker: REGRESSION_PURGE_MARKER,
+    executado_em: new Date(),
+    duracao_ms: Date.now() - inicio,
+    ambientes: {
+      dev,
+      prod
+    }
+  };
+  const json = JSON.stringify(resultado, null, 2);
+  try {
+    console.log(json);
+  } catch (error) {
+    // sem acao
+  }
+  try {
+    Logger.log(json);
+  } catch (error) {
+    // sem acao
+  }
+  return resultado;
 }
 
 function executarCasoRegressao(nome, fn) {
