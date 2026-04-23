@@ -934,6 +934,24 @@
       const div = document.createElement('div');
       div.className = 'card card-ficha';
       div.dataset.id = i.produto_id;
+      const localState = window.AppEntityMutations?.getUiState
+        ? window.AppEntityMutations.getUiState(i, {
+          pendingLabels: {
+            delete: 'Exclusao pendente'
+          },
+          errorLabels: {
+            delete: 'Falha ao excluir'
+          }
+        })
+        : {
+          status: '',
+          label: '',
+          message: '',
+          canRetry: false,
+          blockActions: false
+        };
+      if (localState.status) div.classList.add(`card-local-${localState.status}`);
+      if (i?._localDeleted) div.classList.add('card-local-delete');
 
       const receitas = Array.isArray(i.receitas) ? i.receitas : [];
       const receitasCarregadas = !!i.receitasCarregadas;
@@ -966,7 +984,13 @@
             ${resumo}<br>
             ${resumoPreco}
           </div>
-
+          ${localState.label ? `
+            <div class="optimistic-local-state-row">
+              <span class="optimistic-local-state optimistic-local-state-${escapeAttr(localState.status || 'pending')}">${escapeHtml(localState.label)}</span>
+              ${localState.canRetry ? `<button class="btn-retry-local" onclick='ProdutosController.retryProdutoMutation(${JSON.stringify(String(i.produto_id || ''))})'>Tentar novamente</button>` : ''}
+            </div>
+          ` : ''}
+          ${localState.message ? `<div class="optimistic-local-message">${escapeHtml(localState.message)}</div>` : ''}
           <button class="ver-mais">Ver mais</button>
         </div>
       `;
@@ -978,12 +1002,36 @@
       const receitas = Array.isArray(i.receitas) ? i.receitas : [];
       const receitasCarregadas = !!i.receitasCarregadas;
       const idJs = JSON.stringify(String(i.produto_id || ''));
+      const localState = window.AppEntityMutations?.getUiState
+        ? window.AppEntityMutations.getUiState(i, {
+          pendingLabels: {
+            delete: 'Exclusao pendente'
+          },
+          errorLabels: {
+            delete: 'Falha ao excluir'
+          }
+        })
+        : {
+          status: '',
+          label: '',
+          message: '',
+          canRetry: false,
+          blockActions: false
+        };
+      const bloquearAcoes = !!localState.blockActions;
       const precoVenda = parseNumero(i.preco_venda);
       const precoVendaLabel = precoVenda > 0
         ? `R$ ${formatNumero(precoVenda)}`
         : 'Nao informado';
       return `
         <p><b>Preco de venda:</b> ${escapeHtml(precoVendaLabel)}</p>
+        ${localState.label ? `
+          <div class="optimistic-local-state-row">
+            <span class="optimistic-local-state optimistic-local-state-${escapeAttr(localState.status || 'pending')}">${escapeHtml(localState.label)}</span>
+            ${localState.canRetry ? `<button class="btn-retry-local" onclick='ProdutosController.retryProdutoMutation(${idJs})'>Tentar novamente</button>` : ''}
+          </div>
+        ` : ''}
+        ${localState.message ? `<div class="optimistic-local-message">${escapeHtml(localState.message)}</div>` : ''}
 
         <div class="bloco">
           <p><b>Modelo</b></p>
@@ -991,8 +1039,8 @@
         </div>
 
         <div class="acoes">
-          <button onclick='ProdutosController.editar(${idJs})'>Editar</button>
-          <button onclick='ProdutosController.excluir(${idJs})'>Excluir</button>
+          <button onclick='ProdutosController.editar(${idJs})' ${bloquearAcoes ? 'disabled' : ''}>Editar</button>
+          <button onclick='ProdutosController.excluir(${idJs})' ${bloquearAcoes ? 'disabled' : ''}>Excluir</button>
         </div>
       `;
     }

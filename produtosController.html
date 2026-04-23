@@ -5,6 +5,7 @@
     let iniciado = false;
     let salvando = false;
     let mutationLockToken = null;
+    let listenerMutacoesRegistrado = false;
 
     let receitasCache = {};
     let tiposValidacao = [];
@@ -101,6 +102,178 @@
       ProdutosUI.mostrarFormulario();
     }
 
+    function getProdutoUiState(item) {
+      if (!window.AppEntityMutations?.getUiState) {
+        return {
+          status: '',
+          action: '',
+          label: '',
+          message: '',
+          canRetry: false,
+          blockActions: false
+        };
+      }
+      return window.AppEntityMutations.getUiState(item, {
+        pendingLabels: {
+          delete: 'Exclusao pendente'
+        },
+        errorLabels: {
+          delete: 'Falha ao excluir'
+        }
+      });
+    }
+
+    function limparProdutoMeta(item) {
+      return window.AppEntityMutations?.limparMeta
+        ? window.AppEntityMutations.limparMeta(item)
+        : { ...(item || {}) };
+    }
+
+    function buildProdutoOptimistic(payload, options = {}) {
+      const base = limparProdutoMeta(options.baseItem);
+      const id = String(options.id || base.produto_id || '').trim()
+        || (window.AppEntityMutations?.tempId?.('PRD_TMP') || `PRD_TMP_${Date.now()}`);
+      const dadosProduto = payload?.dadosProduto || {};
+      const modelo = payload?.modelo || {};
+      const modeloDados = modelo?.dados || {};
+      const entradas = Array.isArray(modelo?.entradas) ? window.AppEntityMutations?.clone?.(modelo.entradas) || [...modelo.entradas] : [];
+      const saidas = Array.isArray(modelo?.saidas) ? window.AppEntityMutations?.clone?.(modelo.saidas) || [...modelo.saidas] : [];
+      const etapas = Array.isArray(modelo?.etapas) ? window.AppEntityMutations?.clone?.(modelo.etapas) || [...modelo.etapas] : [];
+      const nomeModelo = String(modeloDados?.nome_receita || base?.modelo_nome || 'Modelo principal').trim() || 'Modelo principal';
+      const receitaBase = {
+        receita_id: String(base?.receitas?.[0]?.receita_id || `${id}_MODELO`).trim(),
+        nome_receita: nomeModelo,
+        descricao: String(modeloDados?.descricao || '').trim(),
+        entradas,
+        saidas,
+        etapas
+      };
+
+      return {
+        ...base,
+        produto_id: id,
+        nome_produto: String(dadosProduto?.nome_produto || base?.nome_produto || '').trim(),
+        unidade_produto: 'UN',
+        preco_venda: dadosProduto?.preco_venda === '' ? '' : Number((dadosProduto?.preco_venda ?? base?.preco_venda) || 0),
+        modelo_nome: nomeModelo,
+        modelo_entradas_total: entradas.length,
+        modelo_saidas_total: saidas.length,
+        modelo_etapas_total: etapas.length,
+        receitas: [receitaBase],
+        receitasCarregadas: true
+      };
+    }
+
+    function resolveProdutoSuccessItem(entry, detail, helpers = {}) {
+      const limparMeta = helpers?.limparMeta || (valor => valor);
+      const meta = entry?.meta || {};
+      const result = detail?.result || {};
+      const optimisticItem = limparMeta(meta.optimistic_item) || {};
+      const beforeItem = limparMeta(meta.before_item) || {};
+      if (result?.produto_id) {
+        return {
+          ...beforeItem,
+          ...optimisticItem,
+          ...limparMeta(result),
+          receitas: Array.isArray(result?.receitas) ? result.receitas : optimisticItem.receitas,
+          receitasCarregadas: result?.receitasCarregadas === undefined
+            ? !!optimisticItem.receitasCarregadas
+            : !!result.receitasCarregadas
+        };
+      }
+      return optimisticItem.produto_id ? optimisticItem : beforeItem;
+    }
+
+    function listarMutacoesProdutoAtivas() {
+      if (!window.AppOptimistic?.list) return [];
+      return window.AppOptimistic.list({
+        scope: 'produto',
+        domain: 'produto'
+      });
+    }
+
+    function reconciliarListaProdutosComMutacoes(listaBase) {
+      if (!window.AppEntityMutations?.mergeFetchedList) {
+        return Array.isArray(listaBase) ? [...listaBase] : [];
+      }
+      return window.AppEntityMutations.mergeFetchedList(listaBase, listarMutacoesProdutoAtivas(), {
+        domain: 'produto',
+        idKey: 'produto_id',
+        resolveSuccessItem: resolveProdutoSuccessItem
+      });
+    }
+
+    function persistirEReRenderizarProdutos(lista) {
+      if (Array.isArray(lista)) {
+        ProdutosStore.set(lista);
+      }
+      atualizarOpcoesReceitas();
+      renderListaAtual();
+    }
+
+    function agendarSyncSilenciosoProdutos() {
+      if (window.AppTabRefresh?.requestSync) {
+        window.AppTabRefresh.requestSync('produtos', {
+          delayMs: 900,
+          prefetch: true
+        });
+        window.AppTabRefresh.requestSync('producao', {
+          delayMs: 980,
+          prefetch: true
+        });
+        return;
+      }
+      setTimeout(() => carregarProdutos(true), 900);
+    }
+
+    function tratarEventoMutacaoProduto(detail) {
+      const entry = detail?.entry;
+      if (!entry || String(entry.scope || '').trim() !== 'produto') return;
+      if (String(entry?.meta?.domain || '').trim() !== 'produto') return;
+      if (!window.AppEntityMutations?.applyEntryToList) return;
+
+      const atualizada = window.AppEntityMutations.applyEntryToList(ProdutosStore.get(), detail, {
+        domain: 'produto',
+        idKey: 'produto_id',
+        resolveSuccessItem: resolveProdutoSuccessItem
+      });
+      persistirEReRenderizarProdutos(atualizada);
+      if (window.ProducaoUI?.renderProdutos) {
+        window.ProducaoUI.renderProdutos(ProdutosStore.get());
+      }
+
+      if (String(detail?.type || '').trim().toLowerCase() === 'success') {
+        marcarDashboardComoSujo();
+        agendarSyncSilenciosoProdutos();
+        return;
+      }
+
+      if (String(detail?.type || '').trim().toLowerCase() === 'error'
+        && String(entry?.meta?.source || '').trim() === 'produtos') {
+        mostrarToast(`${detail?.errorMessage || 'Falha ao sincronizar produto'}. Use "Tentar novamente".`, 'erro');
+      }
+    }
+
+    function registrarListenerMutacoesSeNecessario() {
+      if (listenerMutacoesRegistrado) return;
+      if (typeof window === 'undefined' || typeof window.addEventListener !== 'function') return;
+      window.addEventListener('app:optimistic-mutation', evento => {
+        tratarEventoMutacaoProduto(evento?.detail || {});
+      });
+      listenerMutacoesRegistrado = true;
+    }
+
+    function retryProdutoMutation(id) {
+      const item = ProdutosStore.getById(String(id || '').trim());
+      const mutationId = String(item?._localMutationId || '').trim();
+      if (!mutationId || !window.AppOptimistic?.retry) {
+        mostrarToast('Nao ha sincronizacao pendente para reenviar', 'erro');
+        return;
+      }
+      window.AppOptimistic.retry(mutationId);
+      mostrarToast('Tentando sincronizar novamente...');
+    }
+
     function podeAlterarDados(contexto = 'Operacao') {
       if (window.AppDomainUtils?.ensureWritable) {
         return window.AppDomainUtils.ensureWritable(contexto);
@@ -164,6 +337,8 @@
     function init() {
       if (iniciado) return;
 
+      registrarListenerMutacoesSeNecessario();
+      window.AppOptimistic?.process?.();
       carregarValidacoes();
       carregarProdutos();
 
@@ -216,9 +391,7 @@
     function hidratarProdutosDoCache() {
       const listaCache = window.AppTabCache?.ler?.('produtos');
       if (!Array.isArray(listaCache)) return false;
-      ProdutosStore.set(listaCache);
-      atualizarOpcoesReceitas();
-      renderListaAtual();
+      persistirEReRenderizarProdutos(reconciliarListaProdutosComMutacoes(listaCache));
       return true;
     }
 
@@ -246,9 +419,7 @@
             };
           });
 
-          ProdutosStore.set(normalizada);
-          atualizarOpcoesReceitas();
-          renderListaAtual();
+          persistirEReRenderizarProdutos(reconciliarListaProdutosComMutacoes(normalizada));
           if (typeof onDone === 'function') onDone();
         })
         .withFailureHandler(() => {
@@ -273,6 +444,7 @@
     function carregarReceitas(produtoId, forcar = false) {
       const item = ProdutosStore.getById(produtoId);
       if (!item) return;
+      if (getProdutoUiState(item).blockActions) return;
 
       if (item.receitasCarregadas && !forcar) return;
 
@@ -329,6 +501,10 @@
       if (!podeAlterarDados('Edicao bloqueada em modo somente leitura')) return;
       const item = ProdutosStore.getById(produtoId);
       if (!item) return;
+      if (getProdutoUiState(item).blockActions) {
+        mostrarToast('Este produto possui uma sincronizacao pendente.', 'erro');
+        return;
+      }
 
       mostrarToast('Carregando modelo...');
 
@@ -361,6 +537,10 @@
       if (!podeAlterarDados('Edicao bloqueada em modo somente leitura')) return;
       const item = ProdutosStore.getById(produtoId);
       if (!item) return;
+      if (getProdutoUiState(item).blockActions) {
+        mostrarToast('Este produto possui uma sincronizacao pendente.', 'erro');
+        return;
+      }
 
       if (!item.receitasCarregadas) {
         carregarReceitas(produtoId, true);
@@ -454,6 +634,10 @@
       if (!podeAlterarDados('Salvamento bloqueado em modo somente leitura')) return;
       const item = ProdutosStore.getById(produtoId);
       if (!item) return;
+      if (getProdutoUiState(item).blockActions) {
+        mostrarToast('Este produto possui uma sincronizacao pendente.', 'erro');
+        return;
+      }
 
       const erro = validarReceita(dados, entradas, saidas);
       if (erro) {
@@ -550,78 +734,55 @@
         dadosProduto: { ...dadosProduto },
         modelo: JSON.parse(JSON.stringify(modelo || {}))
       };
+      const payloadMutacao = {
+        dadosProduto: { ...dadosProduto },
+        modelo: JSON.parse(JSON.stringify(modelo || {}))
+      };
+      const optimisticId = eraEdicao
+        ? String(produtoId || '').trim()
+        : (window.AppEntityMutations?.tempId?.('PRD_TMP') || `PRD_TMP_${Date.now()}`);
+      const snapshot = eraEdicao ? ProdutosStore.getById(produtoId) : null;
+      const optimisticItem = buildProdutoOptimistic(payloadMutacao, {
+        baseItem: snapshot,
+        id: optimisticId
+      });
 
       setSalvando(true);
       finalizarUX();
       mostrarToast('Salvando produto e modelo...');
-
-      window.AppRequest.runner()
-        .withFailureHandler(() => {
-          setSalvando(false);
-          mostrarToast('Erro ao salvar produto/modelo', 'erro');
-          reabrirFormularioAposErro(payloadReabertura, {
-            editando: eraEdicao,
-            id: idEdicaoAtual
-          });
-        })
-        .withSuccessHandler(itemSalvo => {
-          editandoId = null;
-          if (itemSalvo && itemSalvo.produto_id) {
-            const atual = ProdutosStore.getById(itemSalvo.produto_id);
-            const payloadStore = {
-              ...(atual || {}),
-              ...itemSalvo,
-              receitas: Array.isArray(atual?.receitas) ? atual.receitas : [],
-              receitasCarregadas: !!atual?.receitasCarregadas
-            };
-            if (atual) {
-              ProdutosStore.update(itemSalvo.produto_id, payloadStore);
-            } else {
-              ProdutosStore.add(payloadStore);
-            }
-            renderListaAtual();
+      try {
+        if (!window.AppOptimistic?.enqueue) {
+          throw new Error('Fila de sincronizacao indisponivel');
+        }
+        window.AppOptimistic.enqueue({
+          scope: 'produto',
+          handler: 'produto.save',
+          entityKey: `produto:${optimisticId}`,
+          payload: payloadMutacao,
+          meta: {
+            domain: 'produto',
+            action: eraEdicao ? 'update' : 'create',
+            source: 'produtos',
+            target_id: eraEdicao ? String(produtoId || '').trim() : '',
+            temp_id: eraEdicao ? '' : optimisticId,
+            before_item: snapshot ? limparProdutoMeta(snapshot) : null,
+            optimistic_item: limparProdutoMeta(optimisticItem)
           }
-          atualizarOpcoesReceitas();
-          marcarDashboardComoSujo();
-          const concluirSync = window.AppSyncFeedback?.iniciar
-            ? window.AppSyncFeedback.iniciar('Salvo com sucesso. Atualizando dados...')
-            : null;
-          setSalvando(false);
-          window.AppModalUI?.closeAll?.();
-          if (window.AppTabRefresh?.requestSync) {
-            window.AppTabRefresh.requestSync('produtos', {
-              delayMs: 280,
-              prefetch: true,
-              onDone: () => {
-                if (concluirSync) {
-                  concluirSync('Dados atualizados');
-                } else {
-                  mostrarToast('Dados atualizados');
-                }
-              }
-            });
-            window.AppTabRefresh.requestSync('producao', {
-              delayMs: 520,
-              prefetch: true
-            });
-          } else {
-            carregarProdutos(true, () => {
-              if (concluirSync) {
-                concluirSync('Dados atualizados');
-              } else {
-                mostrarToast('Dados atualizados');
-              }
-            });
-          }
-        })
-        .salvarProdutoComModelo(
-          produtoId,
-          dadosProduto,
-          modelo?.dados || {},
-          modelo?.entradas || [],
-          modelo?.saidas || [],
-          modelo?.etapas || []
-        );
+        });
+        editandoId = null;
+        setSalvando(false);
+        window.AppModalUI?.closeAll?.();
+        mostrarToast(eraEdicao
+          ? 'Alteracao aplicada localmente. Sincronizando...'
+          : 'Produto criado localmente. Sincronizando...');
+      } catch (error) {
+        setSalvando(false);
+        mostrarToast(error?.message || 'Erro ao enfileirar produto/modelo', 'erro');
+        reabrirFormularioAposErro(payloadReabertura, {
+          editando: eraEdicao,
+          id: idEdicaoAtual
+        });
+      }
     }
 
     function finalizarUX() {
@@ -634,6 +795,10 @@
 
       if (!item) {
         mostrarToast('Produto nao encontrado', 'erro');
+        return;
+      }
+      if (getProdutoUiState(item).blockActions) {
+        mostrarToast('Este produto possui uma sincronizacao pendente.', 'erro');
         return;
       }
 
@@ -661,22 +826,39 @@
       if (!confirm('Deseja remover este produto?')) return;
 
       const snapshot = ProdutosStore.getById(id);
+      if (!snapshot) {
+        mostrarToast('Produto nao encontrado', 'erro');
+        return;
+      }
+      if (getProdutoUiState(snapshot).blockActions) {
+        mostrarToast('Este produto ja possui uma sincronizacao pendente.', 'erro');
+        return;
+      }
 
-      ProdutosStore.remove(id);
-      renderListaAtual();
-      mostrarToast('Produto removido');
-
-      window.AppRequest.runner()
-        .withFailureHandler(() => {
-          ProdutosStore.add(snapshot);
-          renderListaAtual();
-          mostrarToast('Erro ao remover', 'erro');
-        })
-        .withSuccessHandler(() => {
-          atualizarOpcoesReceitas();
-          marcarDashboardComoSujo();
-        })
-        .deletarProduto(id);
+      try {
+        if (!window.AppOptimistic?.enqueue) {
+          throw new Error('Fila de sincronizacao indisponivel');
+        }
+        window.AppOptimistic.enqueue({
+          scope: 'produto',
+          handler: 'produto.delete',
+          entityKey: `produto:${String(id || '').trim()}`,
+          payload: {
+            id: String(id || '').trim()
+          },
+          meta: {
+            domain: 'produto',
+            action: 'delete',
+            source: 'produtos',
+            target_id: String(id || '').trim(),
+            before_item: limparProdutoMeta(snapshot),
+            optimistic_item: limparProdutoMeta(snapshot)
+          }
+        });
+        mostrarToast('Exclusao aplicada localmente. Sincronizando...');
+      } catch (error) {
+        mostrarToast(error?.message || 'Erro ao enfileirar exclusao do produto', 'erro');
+      }
     }
 
     function limparEdicao() {
@@ -696,6 +878,7 @@
       salvarReceita,
       duplicarReceita,
       excluirReceita,
+      retryProdutoMutation,
 
       limparEdicao
     };

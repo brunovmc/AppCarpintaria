@@ -650,10 +650,33 @@
       });
     }
 
+    function obterEstadoLocalEstoque(item) {
+      if (!window.AppEntityMutations?.getUiState) {
+        return {
+          status: '',
+          label: '',
+          message: '',
+          canRetry: false,
+          blockActions: false
+        };
+      }
+      return window.AppEntityMutations.getUiState(item, {
+        pendingLabels: {
+          delete: 'Exclusao pendente'
+        },
+        errorLabels: {
+          delete: 'Falha ao excluir'
+        }
+      });
+    }
+
     function montarCardResumo(i) {
       const div = document.createElement('div');
       div.className = 'card card-ficha';
       div.dataset.id = i.ID;
+      const localState = obterEstadoLocalEstoque(i);
+      if (localState.status) div.classList.add(`card-local-${localState.status}`);
+      if (i?._localDeleted) div.classList.add('card-local-delete');
       const isMadeira = String(i.tipo || '').toUpperCase() === 'MADEIRA';
       const isProduto = ehTipoProduto(i.tipo);
       const quantidade = Number(i.quantidade || 0);
@@ -683,6 +706,13 @@
             ${isMadeira ? `<br><span>(${comprimentoLabel} x ${larguraLabel} x ${espessuraLabel}) cm</span>` : ''}
             <div class="card-resumo-valor">${resumoValor}</div>
           </div>
+          ${localState.label ? `
+            <div class="optimistic-local-state-row">
+              <span class="optimistic-local-state optimistic-local-state-${escapeAttr(localState.status || 'pending')}">${escapeHtml(localState.label)}</span>
+              ${localState.canRetry ? `<button class="btn-retry-local" onclick='EstoqueController.retryEstoqueMutation(${JSON.stringify(String(i.ID || ''))})'>Tentar novamente</button>` : ''}
+            </div>
+          ` : ''}
+          ${localState.message ? `<div class="optimistic-local-message">${escapeHtml(localState.message)}</div>` : ''}
           <button class="ver-mais">Ver mais</button>
         </div>
       `;
@@ -691,6 +721,8 @@
     }
 
     function montarDetalhesCard(i) {
+      const localState = obterEstadoLocalEstoque(i);
+      const bloquearAcoes = !!localState.blockActions;
       const isMadeira = String(i.tipo || '').toUpperCase() === 'MADEIRA';
       const isProduto = ehTipoProduto(i.tipo);
       const quantidade = Number(i.quantidade || 0);
@@ -715,6 +747,13 @@
         <p><b>Data de pagamento:</b> ${dataPagamento}</p>
         <p><b>Forma de pagamento:</b> ${formaPagamento}</p>
         <p><b>Parcelas:</b> ${Number(i.parcelas || 1)}</p>
+        ${localState.label ? `
+          <div class="optimistic-local-state-row">
+            <span class="optimistic-local-state optimistic-local-state-${escapeAttr(localState.status || 'pending')}">${escapeHtml(localState.label)}</span>
+            ${localState.canRetry ? `<button class="btn-retry-local" onclick='EstoqueController.retryEstoqueMutation(${idJs})'>Tentar novamente</button>` : ''}
+          </div>
+        ` : ''}
+        ${localState.message ? `<div class="optimistic-local-message">${escapeHtml(localState.message)}</div>` : ''}
         <p><b>Custo unitario:</b> ${formatarMoeda(custoUnit)}</p>
         <p><b>Custo total item:</b> ${formatarMoeda(custoTotal)}</p>
         <p><b>Preco de venda unitario:</b> ${precoVendaUnit === null ? '-' : formatarMoeda(precoVendaUnit)}</p>
@@ -731,8 +770,8 @@
         ` : ''}
 
         <div class="acoes">
-          <button onclick='EstoqueController.editar(${idJs})'>Editar</button>
-          <button onclick='EstoqueController.excluir(${idJs})'>Excluir</button>
+          <button onclick='EstoqueController.editar(${idJs})' ${bloquearAcoes ? 'disabled' : ''}>Editar</button>
+          <button onclick='EstoqueController.excluir(${idJs})' ${bloquearAcoes ? 'disabled' : ''}>Excluir</button>
         </div>
       `;
     }

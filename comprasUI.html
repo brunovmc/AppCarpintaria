@@ -821,12 +821,39 @@
       });
     }
 
+    function obterEstadoLocalCompra(item) {
+      if (!window.AppEntityMutations?.getUiState) {
+        return {
+          status: '',
+          label: '',
+          message: '',
+          canRetry: false,
+          blockActions: false
+        };
+      }
+      return window.AppEntityMutations.getUiState(item, {
+        pendingLabels: {
+          delete: 'Exclusao pendente',
+          payment: 'Pagamento pendente',
+          add_stock: 'Adicao ao estoque pendente'
+        },
+        errorLabels: {
+          delete: 'Falha ao excluir',
+          payment: 'Falha no pagamento',
+          add_stock: 'Falha ao adicionar ao estoque'
+        }
+      });
+    }
+
     function montarCardResumo(i) {
       const div = document.createElement('div');
       div.className = 'card card-ficha';
       const jaAdicionada = compraJaAdicionadaAoEstoque(i);
       if (jaAdicionada) div.classList.add('card-adicionado-estoque');
       div.dataset.id = i.ID;
+      const localState = obterEstadoLocalCompra(i);
+      if (localState.status) div.classList.add(`card-local-${localState.status}`);
+      if (i?._localDeleted) div.classList.add('card-local-delete');
       const isMadeira = String(i.tipo || '').toUpperCase() === 'MADEIRA';
       const status = jaAdicionada ? 'Ja adicionada ao estoque' : 'Pendente para estoque';
       const valorTotal = Number(i.total_previsto || (Number(i.quantidade || 0) * Number(i.valor_unit || 0)));
@@ -851,6 +878,13 @@
             <br><span>${statusLabel}</span>
             <div class="card-resumo-valor">Valor: ${formatarMoeda(valorTotal)}</div>
           </div>
+          ${localState.label ? `
+            <div class="optimistic-local-state-row">
+              <span class="optimistic-local-state optimistic-local-state-${escapeAttr(localState.status || 'pending')}">${escapeHtml(localState.label)}</span>
+              ${localState.canRetry ? `<button class="btn-retry-local" onclick='ComprasController.retryCompraMutation(${JSON.stringify(String(i.ID || ''))})'>Tentar novamente</button>` : ''}
+            </div>
+          ` : ''}
+          ${localState.message ? `<div class="optimistic-local-message">${escapeHtml(localState.message)}</div>` : ''}
           <button class="ver-mais">Ver mais</button>
         </div>
       `;
@@ -859,6 +893,8 @@
     }
 
     function montarDetalhesCard(i) {
+      const localState = obterEstadoLocalCompra(i);
+      const bloquearAcoes = !!localState.blockActions;
       const isMadeira = String(i.tipo || '').toUpperCase() === 'MADEIRA';
       const jaAdicionada = compraJaAdicionadaAoEstoque(i);
       const status = jaAdicionada
@@ -867,14 +903,14 @@
       const idJs = JSON.stringify(String(i.ID || ''));
       const botaoAdicionarAoEstoque = jaAdicionada
         ? ''
-        : `<button onclick='ComprasController.adicionarAoEstoque(${idJs})'>Adicionar ao estoque</button>`;
+        : `<button onclick='ComprasController.adicionarAoEstoque(${idJs})' ${bloquearAcoes ? 'disabled' : ''}>Adicionar ao estoque</button>`;
       const statusPagamento = String(i.status_pagamento || 'PENDENTE').toUpperCase();
       const totalPrevisto = Number(i.total_previsto || 0);
       const totalPago = Number(i.total_pago || 0);
       const totalPendente = Number(i.total_pendente || 0);
       const pagamentoResumo = `${statusPagamento} | Pago: ${formatarMoeda(totalPago)} | Pendente: ${formatarMoeda(totalPendente)} | Previsto: ${formatarMoeda(totalPrevisto)}`;
       const botaoPagamento = totalPendente > 0.009
-        ? `<button onclick='ComprasController.registrarPagamento(${idJs})'>Registrar pagamento</button>`
+        ? `<button onclick='ComprasController.registrarPagamento(${idJs})' ${bloquearAcoes ? 'disabled' : ''}>Registrar pagamento</button>`
         : '';
       const fornecedor = escapeHtml(i.fornecedor || '-');
       const pagoPor = escapeHtml(i.pago_por || '-');
@@ -897,6 +933,13 @@
         <p><b>Pago por:</b> ${pagoPor}</p>
         <p><b>Status:</b> ${statusLabel}</p>
         <p><b>Financeiro:</b> ${pagamentoResumoLabel}</p>
+        ${localState.label ? `
+          <div class="optimistic-local-state-row">
+            <span class="optimistic-local-state optimistic-local-state-${escapeAttr(localState.status || 'pending')}">${escapeHtml(localState.label)}</span>
+            ${localState.canRetry ? `<button class="btn-retry-local" onclick='ComprasController.retryCompraMutation(${idJs})'>Tentar novamente</button>` : ''}
+          </div>
+        ` : ''}
+        ${localState.message ? `<div class="optimistic-local-message">${escapeHtml(localState.message)}</div>` : ''}
         <p><b>Comprado em:</b> ${compradoEm}</p>
         <p><b>Data de pagamento:</b> ${dataPagamento}</p>
         <p><b>Vencimento:</b> ${dataVencimento}</p>
@@ -919,9 +962,9 @@
         <div class="acoes">
           ${botaoAdicionarAoEstoque}
           ${botaoPagamento}
-          <button onclick='ComprasController.refazer(${idJs})'>Refazer compra</button>
-          <button onclick='ComprasController.editar(${idJs})'>Editar</button>
-          <button onclick='ComprasController.excluir(${idJs})'>Excluir</button>
+          <button onclick='ComprasController.refazer(${idJs})' ${bloquearAcoes ? 'disabled' : ''}>Refazer compra</button>
+          <button onclick='ComprasController.editar(${idJs})' ${bloquearAcoes ? 'disabled' : ''}>Editar</button>
+          <button onclick='ComprasController.excluir(${idJs})' ${bloquearAcoes ? 'disabled' : ''}>Excluir</button>
         </div>
       `;
     }

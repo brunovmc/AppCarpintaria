@@ -1742,6 +1742,271 @@
 
   window.AppDespesaMutations = window.AppDespesaMutations || createDespesaMutationHelper();
 
+  function createEntityMutationHelper() {
+    const META_KEYS = [
+      '_localStatus',
+      '_localAction',
+      '_localMutationId',
+      '_localErrorMessage',
+      '_localRetryable',
+      '_localDeleted',
+      '_localSource'
+    ];
+
+    function clone(value) {
+      if (value == null) return value;
+      try {
+        return JSON.parse(JSON.stringify(value));
+      } catch (error) {
+        return value;
+      }
+    }
+
+    function parseNumero(valor) {
+      if (window.AppDomainUtils?.parseNumeroZero) {
+        return window.AppDomainUtils.parseNumeroZero(valor);
+      }
+      const raw = String(valor ?? '').trim();
+      if (!raw) return 0;
+      const num = Number(raw.replace(',', '.'));
+      return Number.isFinite(num) ? num : 0;
+    }
+
+    function round2(valor) {
+      return Math.round(parseNumero(valor) * 100) / 100;
+    }
+
+    function clampDate(valor) {
+      const raw = String(valor || '').trim();
+      return /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : '';
+    }
+
+    function getFinancialStatus(totalPrevisto, totalPago) {
+      const previsto = round2(totalPrevisto);
+      const pago = round2(totalPago);
+      const pendente = round2(Math.max(0, previsto - pago));
+      if (pendente <= 0.009) return 'PAGO';
+      if (pago > 0.009) return 'PARCIAL';
+      return 'PENDENTE';
+    }
+
+    function tempId(prefix = 'TMP') {
+      return `${prefix}_${Date.now()}_${Math.floor(Math.random() * 100000)}`;
+    }
+
+    function limparMeta(item) {
+      const base = clone(item) || {};
+      META_KEYS.forEach(key => {
+        delete base[key];
+      });
+      return base;
+    }
+
+    function aplicarMeta(item, opcoes = {}) {
+      const base = limparMeta(item);
+      const status = String(opcoes.status || '').trim().toLowerCase();
+      if (!status) return base;
+      base._localStatus = status === 'error' ? 'error' : 'pending';
+      base._localAction = String(opcoes.action || '').trim();
+      base._localMutationId = String(opcoes.mutationId || '').trim();
+      base._localErrorMessage = String(opcoes.errorMessage || '').trim();
+      base._localRetryable = opcoes.retryable !== false;
+      base._localDeleted = !!opcoes.localDeleted;
+      base._localSource = String(opcoes.source || '').trim();
+      return base;
+    }
+
+    function getUiState(item, options = {}) {
+      const status = String(item?._localStatus || '').trim().toLowerCase();
+      const action = String(item?._localAction || '').trim().toLowerCase();
+      if (!status) {
+        return {
+          status: '',
+          action: '',
+          label: '',
+          message: '',
+          canRetry: false,
+          blockActions: false
+        };
+      }
+
+      const pendingLabels = options.pendingLabels || {};
+      const errorLabels = options.errorLabels || {};
+      const pendingFallback = String(options.pendingFallback || 'Sincronizando').trim() || 'Sincronizando';
+      const errorFallback = String(options.errorFallback || 'Falha na sincronizacao').trim() || 'Falha na sincronizacao';
+
+      if (status === 'error') {
+        return {
+          status: 'error',
+          action,
+          label: String(errorLabels[action] || errorFallback).trim() || errorFallback,
+          message: String(item?._localErrorMessage || '').trim(),
+          canRetry: !!item?._localMutationId,
+          blockActions: options.blockActionsOnError !== false
+        };
+      }
+
+      return {
+        status: 'pending',
+        action,
+        label: String(pendingLabels[action] || pendingFallback).trim() || pendingFallback,
+        message: '',
+        canRetry: false,
+        blockActions: options.blockActionsOnPending !== false
+      };
+    }
+
+    function getId(item, idKey = 'ID') {
+      return String(item?.[idKey] || '').trim();
+    }
+
+    function localizarIndex(lista, idKey, ids = []) {
+      const chaves = ids
+        .map(valor => String(valor || '').trim())
+        .filter(Boolean);
+      if (chaves.length === 0) return -1;
+      return (Array.isArray(lista) ? lista : []).findIndex(item => {
+        const id = getId(item, idKey);
+        return !!id && chaves.includes(id);
+      });
+    }
+
+    function upsert(lista, item, options = {}) {
+      const arr = Array.isArray(lista) ? clone(lista) : [];
+      const base = clone(item);
+      if (!base) return arr;
+      const idKey = String(options.idKey || 'ID').trim() || 'ID';
+      const extraIds = Array.isArray(options.extraIds) ? options.extraIds : [];
+      const idx = localizarIndex(arr, idKey, [getId(base, idKey), ...extraIds]);
+      if (idx >= 0) {
+        arr[idx] = base;
+      } else {
+        arr.unshift(base);
+      }
+      return arr;
+    }
+
+    function remove(lista, idKey, ids = []) {
+      const chaves = ids
+        .map(valor => String(valor || '').trim())
+        .filter(Boolean);
+      if (chaves.length === 0) return Array.isArray(lista) ? clone(lista) : [];
+      return (Array.isArray(lista) ? clone(lista) : []).filter(item => {
+        const id = getId(item, idKey);
+        return !id || !chaves.includes(id);
+      });
+    }
+
+    function canonicalSuccessItem(entry, detail = {}, options = {}) {
+      if (typeof options.resolveSuccessItem === 'function') {
+        const resolved = options.resolveSuccessItem(entry, detail, {
+          clone,
+          limparMeta
+        });
+        if (resolved) {
+          return limparMeta(resolved);
+        }
+      }
+      return limparMeta(entry?.meta?.optimistic_item);
+    }
+
+    function applyEntryToList(lista, detail = {}, options = {}) {
+      const entry = detail.entry || {};
+      const meta = entry.meta || {};
+      const domain = String(options.domain || '').trim();
+      if (domain && String(meta.domain || '').trim() !== domain) {
+        return Array.isArray(lista) ? clone(lista) : [];
+      }
+
+      const type = String(detail.type || '').trim().toLowerCase();
+      const action = String(meta.action || '').trim().toLowerCase();
+      const idKey = String(options.idKey || meta.idKey || 'ID').trim() || 'ID';
+      const beforeItem = clone(meta.before_item);
+      const optimisticItem = clone(meta.optimistic_item);
+      const idsRelacionados = [
+        getId(optimisticItem, idKey),
+        getId(beforeItem, idKey),
+        meta.target_id,
+        meta.temp_id,
+        meta.optimistic_id
+      ];
+
+      if (type === 'success') {
+        if (action === 'delete') {
+          return remove(lista, idKey, idsRelacionados);
+        }
+        const canonical = canonicalSuccessItem(entry, detail, {
+          ...options,
+          idKey
+        });
+        return upsert(remove(lista, idKey, idsRelacionados), canonical, {
+          idKey,
+          extraIds: idsRelacionados
+        });
+      }
+
+      if (type === 'error') {
+        const withError = aplicarMeta(optimisticItem || beforeItem, {
+          status: 'error',
+          action,
+          mutationId: entry.id,
+          errorMessage: detail.errorMessage || entry.errorMessage,
+          retryable: true,
+          localDeleted: action === 'delete',
+          source: meta.source
+        });
+        return upsert(lista, withError, {
+          idKey,
+          extraIds: idsRelacionados
+        });
+      }
+
+      const withPending = aplicarMeta(optimisticItem || beforeItem, {
+        status: 'pending',
+        action,
+        mutationId: entry.id,
+        retryable: true,
+        localDeleted: action === 'delete',
+        source: meta.source
+      });
+      return upsert(lista, withPending, {
+        idKey,
+        extraIds: idsRelacionados
+      });
+    }
+
+    function mergeFetchedList(listaBase, entriesAtivas, options = {}) {
+      let atual = Array.isArray(listaBase) ? clone(listaBase).map(limparMeta) : [];
+      (Array.isArray(entriesAtivas) ? entriesAtivas : []).forEach(entry => {
+        if (!entry || !['pending', 'sending', 'error'].includes(String(entry.status || '').trim().toLowerCase())) {
+          return;
+        }
+        atual = applyEntryToList(atual, {
+          type: entry.status === 'error' ? 'error' : 'sending',
+          entry,
+          errorMessage: entry.errorMessage
+        }, options);
+      });
+      return atual;
+    }
+
+    return {
+      clone,
+      parseNumero,
+      round2,
+      clampDate,
+      getFinancialStatus,
+      tempId,
+      limparMeta,
+      aplicarMeta,
+      getUiState,
+      applyEntryToList,
+      mergeFetchedList
+    };
+  }
+
+  window.AppEntityMutations = window.AppEntityMutations || createEntityMutationHelper();
+
   if (window.AppOptimistic?.registerHandler) {
     window.AppOptimistic.registerHandler('despesa.create', entry => {
       if (!window.AppRequest?.call) {
@@ -1780,6 +2045,183 @@
       return window.AppRequest.call('registrarPagamentoDespesaGeral', [entry.meta?.target_id, entry.payload], {
         context: 'optimistic.despesa.payment',
         errorMessage: 'Erro ao sincronizar pagamento da despesa'
+      });
+    });
+
+    window.AppOptimistic.registerHandler('compra.create', entry => {
+      if (!window.AppRequest?.call) {
+        return Promise.reject(new Error('google.script.run indisponivel'));
+      }
+      return window.AppRequest.call('criarItemCompra', [entry.payload], {
+        context: 'optimistic.compra.create',
+        errorMessage: 'Erro ao sincronizar nova compra'
+      });
+    });
+
+    window.AppOptimistic.registerHandler('compra.update', entry => {
+      if (!window.AppRequest?.call) {
+        return Promise.reject(new Error('google.script.run indisponivel'));
+      }
+      return window.AppRequest.call('atualizarItemCompra', [entry.meta?.target_id, entry.payload], {
+        context: 'optimistic.compra.update',
+        errorMessage: 'Erro ao sincronizar alteracoes da compra'
+      });
+    });
+
+    window.AppOptimistic.registerHandler('compra.delete', entry => {
+      if (!window.AppRequest?.call) {
+        return Promise.reject(new Error('google.script.run indisponivel'));
+      }
+      return window.AppRequest.call('deletarItemCompra', [entry.meta?.target_id], {
+        context: 'optimistic.compra.delete',
+        errorMessage: 'Erro ao sincronizar exclusao da compra'
+      });
+    });
+
+    window.AppOptimistic.registerHandler('compra.payment', entry => {
+      if (!window.AppRequest?.call) {
+        return Promise.reject(new Error('google.script.run indisponivel'));
+      }
+      return window.AppRequest.call('registrarPagamentoCompra', [entry.meta?.target_id, entry.payload], {
+        context: 'optimistic.compra.payment',
+        errorMessage: 'Erro ao sincronizar pagamento da compra'
+      });
+    });
+
+    window.AppOptimistic.registerHandler('compra.add_stock', entry => {
+      if (!window.AppRequest?.call) {
+        return Promise.reject(new Error('google.script.run indisponivel'));
+      }
+      return window.AppRequest.call('adicionarCompraAoEstoque', [entry.meta?.target_id], {
+        context: 'optimistic.compra.add_stock',
+        errorMessage: 'Erro ao sincronizar adicao da compra ao estoque'
+      });
+    });
+
+    window.AppOptimistic.registerHandler('venda.create', entry => {
+      if (!window.AppRequest?.call) {
+        return Promise.reject(new Error('google.script.run indisponivel'));
+      }
+      return window.AppRequest.call('criarVenda', [entry.payload], {
+        context: 'optimistic.venda.create',
+        errorMessage: 'Erro ao sincronizar nova venda'
+      });
+    });
+
+    window.AppOptimistic.registerHandler('venda.update', entry => {
+      if (!window.AppRequest?.call) {
+        return Promise.reject(new Error('google.script.run indisponivel'));
+      }
+      return window.AppRequest.call('atualizarVenda', [entry.meta?.target_id, entry.payload], {
+        context: 'optimistic.venda.update',
+        errorMessage: 'Erro ao sincronizar alteracoes da venda'
+      });
+    });
+
+    window.AppOptimistic.registerHandler('venda.delete', entry => {
+      if (!window.AppRequest?.call) {
+        return Promise.reject(new Error('google.script.run indisponivel'));
+      }
+      return window.AppRequest.call('deletarVenda', [entry.meta?.target_id], {
+        context: 'optimistic.venda.delete',
+        errorMessage: 'Erro ao sincronizar exclusao da venda'
+      });
+    });
+
+    window.AppOptimistic.registerHandler('venda.receive', entry => {
+      if (!window.AppRequest?.call) {
+        return Promise.reject(new Error('google.script.run indisponivel'));
+      }
+      return window.AppRequest.call('registrarRecebimentoVenda', [entry.meta?.target_id, entry.payload], {
+        context: 'optimistic.venda.receive',
+        errorMessage: 'Erro ao sincronizar recebimento da venda'
+      });
+    });
+
+    window.AppOptimistic.registerHandler('estoque.create', entry => {
+      if (!window.AppRequest?.call) {
+        return Promise.reject(new Error('google.script.run indisponivel'));
+      }
+      return window.AppRequest.call('criarItemEstoque', [entry.payload], {
+        context: 'optimistic.estoque.create',
+        errorMessage: 'Erro ao sincronizar novo item de estoque'
+      });
+    });
+
+    window.AppOptimistic.registerHandler('estoque.update', entry => {
+      if (!window.AppRequest?.call) {
+        return Promise.reject(new Error('google.script.run indisponivel'));
+      }
+      return window.AppRequest.call('atualizarItemEstoque', [entry.meta?.target_id, entry.payload], {
+        context: 'optimistic.estoque.update',
+        errorMessage: 'Erro ao sincronizar alteracoes do estoque'
+      });
+    });
+
+    window.AppOptimistic.registerHandler('estoque.delete', entry => {
+      if (!window.AppRequest?.call) {
+        return Promise.reject(new Error('google.script.run indisponivel'));
+      }
+      return window.AppRequest.call('deletarItemEstoque', [entry.meta?.target_id], {
+        context: 'optimistic.estoque.delete',
+        errorMessage: 'Erro ao sincronizar exclusao do estoque'
+      });
+    });
+
+    window.AppOptimistic.registerHandler('produto.save', entry => {
+      if (!window.AppRequest?.call) {
+        return Promise.reject(new Error('google.script.run indisponivel'));
+      }
+      return window.AppRequest.call('salvarProdutoComModelo', [
+        entry.meta?.target_id || '',
+        entry.payload?.dadosProduto || {},
+        entry.payload?.modelo?.dados || {},
+        entry.payload?.modelo?.entradas || [],
+        entry.payload?.modelo?.saidas || [],
+        entry.payload?.modelo?.etapas || []
+      ], {
+        context: 'optimistic.produto.save',
+        errorMessage: 'Erro ao sincronizar produto/modelo'
+      });
+    });
+
+    window.AppOptimistic.registerHandler('produto.delete', entry => {
+      if (!window.AppRequest?.call) {
+        return Promise.reject(new Error('google.script.run indisponivel'));
+      }
+      return window.AppRequest.call('deletarProduto', [entry.meta?.target_id], {
+        context: 'optimistic.produto.delete',
+        errorMessage: 'Erro ao sincronizar exclusao do produto'
+      });
+    });
+
+    window.AppOptimistic.registerHandler('producao.create', entry => {
+      if (!window.AppRequest?.call) {
+        return Promise.reject(new Error('google.script.run indisponivel'));
+      }
+      return window.AppRequest.call('criarProducao', [entry.payload], {
+        context: 'optimistic.producao.create',
+        errorMessage: 'Erro ao sincronizar nova producao'
+      });
+    });
+
+    window.AppOptimistic.registerHandler('producao.update', entry => {
+      if (!window.AppRequest?.call) {
+        return Promise.reject(new Error('google.script.run indisponivel'));
+      }
+      return window.AppRequest.call('atualizarProducao', [entry.meta?.target_id, entry.payload], {
+        context: 'optimistic.producao.update',
+        errorMessage: 'Erro ao sincronizar alteracoes da producao'
+      });
+    });
+
+    window.AppOptimistic.registerHandler('producao.delete', entry => {
+      if (!window.AppRequest?.call) {
+        return Promise.reject(new Error('google.script.run indisponivel'));
+      }
+      return window.AppRequest.call('deletarProducao', [entry.meta?.target_id], {
+        context: 'optimistic.producao.delete',
+        errorMessage: 'Erro ao sincronizar exclusao da producao'
       });
     });
   }

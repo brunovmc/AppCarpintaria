@@ -983,6 +983,24 @@
       const div = document.createElement('div');
       div.className = 'card card-ficha';
       div.dataset.id = i.producao_id;
+      const localState = window.AppEntityMutations?.getUiState
+        ? window.AppEntityMutations.getUiState(i, {
+          pendingLabels: {
+            delete: 'Exclusao pendente'
+          },
+          errorLabels: {
+            delete: 'Falha ao excluir'
+          }
+        })
+        : {
+          status: '',
+          label: '',
+          message: '',
+          canRetry: false,
+          blockActions: false
+        };
+      if (localState.status) div.classList.add(`card-local-${localState.status}`);
+      if (i?._localDeleted) div.classList.add('card-local-delete');
 
       const nome = i.nome_ordem || i.nome_produto || i.producao_id;
       const unidade = i.unidade_produto || '';
@@ -1037,7 +1055,13 @@
             ${etapaAtualLabel}<br>
             ${resumoSaidasLabel}
           </div>
-
+          ${localState.label ? `
+            <div class="optimistic-local-state-row">
+              <span class="optimistic-local-state optimistic-local-state-${escapeAttr(localState.status || 'pending')}">${escapeHtml(localState.label)}</span>
+              ${localState.canRetry ? `<button class="btn-retry-local" onclick='ProducaoController.retryProducaoMutation(${JSON.stringify(String(i.producao_id || ''))})'>Tentar novamente</button>` : ''}
+            </div>
+          ` : ''}
+          ${localState.message ? `<div class="optimistic-local-message">${escapeHtml(localState.message)}</div>` : ''}
           <button class="ver-mais">Ver mais</button>
         </div>
       `;
@@ -1046,6 +1070,23 @@
     }
 
     function montarDetalhesProducao(i) {
+      const localState = window.AppEntityMutations?.getUiState
+        ? window.AppEntityMutations.getUiState(i, {
+          pendingLabels: {
+            delete: 'Exclusao pendente'
+          },
+          errorLabels: {
+            delete: 'Falha ao excluir'
+          }
+        })
+        : {
+          status: '',
+          label: '',
+          message: '',
+          canRetry: false,
+          blockActions: false
+        };
+      const bloquearAcoes = !!localState.blockActions;
       const custoPrevisto = formatMoeda(i.custo_previsto || 0);
       const qtdPlanejadaNum = Number(i.qtd_planejada || 0);
       const qtdProduzidaNum = Number(i.qtd_produzida_acumulada || 0);
@@ -1074,6 +1115,13 @@
         <p><b>Previsto:</b> ${previstoLabel}</p>
         <p><b>Produzido:</b> ${escapeHtml(formatQuantidadeResumo(qtdProduzidaNum))} | <b>Restante:</b> ${escapeHtml(formatQuantidadeResumo(qtdRestanteNum))}</p>
         <p><b>Custo previsto:</b> R$ ${custoPrevisto}</p>
+        ${localState.label ? `
+          <div class="optimistic-local-state-row">
+            <span class="optimistic-local-state optimistic-local-state-${escapeAttr(localState.status || 'pending')}">${escapeHtml(localState.label)}</span>
+            ${localState.canRetry ? `<button class="btn-retry-local" onclick='ProducaoController.retryProducaoMutation(${idJs})'>Tentar novamente</button>` : ''}
+          </div>
+        ` : ''}
+        ${localState.message ? `<div class="optimistic-local-message">${escapeHtml(localState.message)}</div>` : ''}
         <p><b>Observacao:</b> ${observacaoLabel}</p>
         ${estoqueAtualizado ? `<p><b>Estoque atualizado:</b> ${dataEstoqueAtualizadoLabel}</p>` : ''}
 
@@ -1103,11 +1151,11 @@
 
         <div class="acoes">
           <button
-            ${podeAtualizarEstoque ? '' : 'disabled'}
+            ${(podeAtualizarEstoque && !bloquearAcoes) ? '' : 'disabled'}
             onclick='ProducaoController.abrirAtualizarEstoque(${idJs})'
           >${labelEstoqueSafe}</button>
-          <button onclick='ProducaoController.editar(${idJs})'>Editar</button>
-          <button onclick='ProducaoController.excluir(${idJs})'>Excluir</button>
+          <button onclick='ProducaoController.editar(${idJs})' ${bloquearAcoes ? 'disabled' : ''}>Editar</button>
+          <button onclick='ProducaoController.excluir(${idJs})' ${bloquearAcoes ? 'disabled' : ''}>Excluir</button>
         </div>
       `;
     }

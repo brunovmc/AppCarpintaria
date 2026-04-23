@@ -5,6 +5,7 @@
     let iniciado = false;
     let salvando = false;
     let mutationLockToken = null;
+    let listenerMutacoesRegistrado = false;
 
     let validacoes = null;
 
@@ -78,9 +79,153 @@
       EstoqueUI.mostrarFormulario();
     }
 
+    function getEstoqueUiState(item) {
+      if (!window.AppEntityMutations?.getUiState) {
+        return {
+          status: '',
+          action: '',
+          label: '',
+          message: '',
+          canRetry: false,
+          blockActions: false
+        };
+      }
+      return window.AppEntityMutations.getUiState(item, {
+        pendingLabels: {
+          delete: 'Exclusao pendente'
+        },
+        errorLabels: {
+          delete: 'Falha ao excluir'
+        }
+      });
+    }
+
+    function limparEstoqueMeta(item) {
+      return window.AppEntityMutations?.limparMeta
+        ? window.AppEntityMutations.limparMeta(item)
+        : { ...(item || {}) };
+    }
+
+    function buildEstoqueOptimistic(payload, options = {}) {
+      const base = limparEstoqueMeta(options.baseItem);
+      const id = String(options.id || base.ID || '').trim() || `tmp_${Date.now()}`;
+      return {
+        ...base,
+        ...payload,
+        ID: id,
+        custo_total_item: payload?.custo_total_item === '' ? '' : Number((payload?.custo_total_item ?? base?.custo_total_item) || 0),
+        valor_unit: Number((payload?.valor_unit ?? base?.valor_unit) || 0),
+        custo_unitario: Number((payload?.custo_unitario ?? base?.custo_unitario) || 0)
+      };
+    }
+
+    function resolveEstoqueSuccessItem(entry, detail, helpers = {}) {
+      const limparMeta = helpers?.limparMeta || (valor => valor);
+      const meta = entry?.meta || {};
+      const result = detail?.result || {};
+      if (result?.ID) {
+        return limparMeta(result);
+      }
+      return limparMeta(meta.optimistic_item) || limparMeta(meta.before_item);
+    }
+
+    function listarMutacoesEstoqueAtivas() {
+      if (!window.AppOptimistic?.list) return [];
+      return window.AppOptimistic.list({
+        scope: 'estoque',
+        domain: 'estoque'
+      });
+    }
+
+    function reconciliarListaEstoqueComMutacoes(listaBase) {
+      if (!window.AppEntityMutations?.mergeFetchedList) {
+        return Array.isArray(listaBase) ? [...listaBase] : [];
+      }
+      return window.AppEntityMutations.mergeFetchedList(listaBase, listarMutacoesEstoqueAtivas(), {
+        domain: 'estoque',
+        idKey: 'ID',
+        resolveSuccessItem: resolveEstoqueSuccessItem
+      });
+    }
+
+    function persistirEReRenderizarEstoque(lista) {
+      if (Array.isArray(lista)) {
+        EstoqueStore.set(lista);
+      }
+      if (typeof aplicarBuscaEstoque === 'function') {
+        aplicarBuscaEstoque();
+      } else {
+        EstoqueUI.renderLista(EstoqueStore.get());
+      }
+      if (typeof popularFiltrosDoPainel === 'function') {
+        popularFiltrosDoPainel();
+      }
+    }
+
+    function agendarSyncSilenciosoEstoque() {
+      if (window.AppTabRefresh?.requestSync) {
+        window.AppTabRefresh.requestSync('estoque', {
+          delayMs: 900,
+          prefetch: true
+        });
+        return;
+      }
+      setTimeout(() => carregarEstoque(true), 900);
+    }
+
+    function tratarEventoMutacaoEstoque(detail) {
+      const entry = detail?.entry;
+      if (!entry || String(entry.scope || '').trim() !== 'estoque') return;
+      if (String(entry?.meta?.domain || '').trim() !== 'estoque') return;
+      if (!window.AppEntityMutations?.applyEntryToList) return;
+
+      const atualizada = window.AppEntityMutations.applyEntryToList(EstoqueStore.get(), detail, {
+        domain: 'estoque',
+        idKey: 'ID',
+        resolveSuccessItem: resolveEstoqueSuccessItem
+      });
+      persistirEReRenderizarEstoque(atualizada);
+      if (window.ProducaoUI?.setEstoqueOpcoes) {
+        window.ProducaoUI.setEstoqueOpcoes(EstoqueStore.get());
+      }
+
+      if (String(detail?.type || '').trim().toLowerCase() === 'success') {
+        marcarDashboardComoSujo();
+        agendarSyncSilenciosoEstoque();
+        return;
+      }
+
+      if (String(detail?.type || '').trim().toLowerCase() === 'error'
+        && String(entry?.meta?.source || '').trim() === 'estoque') {
+        mostrarToast(`${detail?.errorMessage || 'Falha ao sincronizar estoque'}. Use "Tentar novamente".`, 'erro');
+      }
+    }
+
+    function registrarListenerMutacoesSeNecessario() {
+      if (listenerMutacoesRegistrado) return;
+      if (typeof window === 'undefined' || typeof window.addEventListener !== 'function') return;
+      window.addEventListener('app:optimistic-mutation', evento => {
+        tratarEventoMutacaoEstoque(evento?.detail || {});
+      });
+      listenerMutacoesRegistrado = true;
+    }
+
+    function retryEstoqueMutation(id) {
+      const item = EstoqueStore.getById(String(id || '').trim());
+      const mutationId = String(item?._localMutationId || '').trim();
+      if (!mutationId || !window.AppOptimistic?.retry) {
+        mostrarToast('Nao ha sincronizacao pendente para reenviar', 'erro');
+        return;
+      }
+      window.AppOptimistic.retry(mutationId);
+      mostrarToast('Tentando sincronizar novamente...');
+    }
+
     function init() {
       if (iniciado) return;
 
+      registrarListenerMutacoesSeNecessario();
+      window.AppOptimistic?.process?.();
       carregarValidacoes();
       carregarEstoque();
 
@@ -159,15 +304,7 @@
     function hidratarEstoqueDoCache() {
       const listaCache = window.AppTabCache?.ler?.('estoque');
       if (!Array.isArray(listaCache)) return false;
-      EstoqueStore.set(listaCache);
-      if (typeof aplicarBuscaEstoque === 'function') {
-        aplicarBuscaEstoque();
-      } else {
-        EstoqueUI.renderLista(EstoqueStore.get());
-      }
-      if (typeof popularFiltrosDoPainel === 'function') {
-        popularFiltrosDoPainel();
-      }
+      persistirEReRenderizarEstoque(reconciliarListaEstoqueComMutacoes(listaCache));
       return true;
     }
 
@@ -180,15 +317,7 @@
             window.AppRuntime.setReadOnly(false);
           }
           perfEnd(perf, { ok: true, total: Array.isArray(lista) ? lista.length : 0 });
-          EstoqueStore.set(lista);
-          if (typeof aplicarBuscaEstoque === 'function') {
-            aplicarBuscaEstoque();
-          } else {
-            EstoqueUI.renderLista(EstoqueStore.get());
-          }
-          if (typeof popularFiltrosDoPainel === 'function') {
-            popularFiltrosDoPainel();
-          }
+          persistirEReRenderizarEstoque(reconciliarListaEstoqueComMutacoes(lista));
           if (typeof onDone === 'function') onDone();
         })
         .withFailureHandler(() => {
@@ -299,95 +428,51 @@
       const dadosFormulario = { ...dados };
 
       setSalvando(true);
+      const eraEdicao = !!editandoId;
+      const idAtual = String(editandoId || '').trim();
+      const snapshot = eraEdicao ? EstoqueStore.getById(idAtual) : null;
+      const optimisticId = eraEdicao
+        ? idAtual
+        : (window.AppEntityMutations?.tempId?.('EST_TMP') || `EST_TMP_${Date.now()}`);
+      const optimisticItem = buildEstoqueOptimistic(dados, {
+        baseItem: snapshot,
+        id: optimisticId
+      });
 
-      if (editandoId) {
-        const idAtual = editandoId;
-        const snapshot = { ...EstoqueStore.getById(idAtual) };
-
-        EstoqueStore.update(idAtual, dados);
-        EstoqueUI.renderLista(EstoqueStore.get());
-        finalizarUX();
-
-        window.AppRequest.runner()
-          .withFailureHandler(() => {
-            EstoqueStore.update(idAtual, snapshot);
-            EstoqueUI.renderLista(EstoqueStore.get());
-            mostrarToast('Erro ao salvar edicao', 'erro');
-            setSalvando(false);
-            reabrirFormularioAposErro(dadosFormulario, { editando: true, id: idAtual });
-          })
-        .withSuccessHandler(() => {
-          mostrarToast('Salvo com sucesso');
-          marcarDashboardComoSujo();
-          setSalvando(false);
-          window.AppModalUI?.closeAll?.();
-        })
-        .atualizarItemEstoque(idAtual, dados);
-
-        editandoId = null;
-        return;
-      }
-
-      const tempId = `tmp_${Date.now()}`;
-      const itemTemp = {
-        ID: tempId,
-        ...dados
-      };
-
-      EstoqueStore.add(itemTemp);
-      EstoqueUI.renderLista(EstoqueStore.get());
-      finalizarUX();
-      mostrarToast('Salvando...');
-
-      window.AppRequest.runner()
-        .withFailureHandler(() => {
-          EstoqueStore.remove(tempId);
-          EstoqueUI.renderLista(EstoqueStore.get());
-          mostrarToast('Erro ao salvar item', 'erro');
-          setSalvando(false);
-          reabrirFormularioAposErro(dadosFormulario, { editando: false });
-        })
-        .withSuccessHandler(itemSalvo => {
-          EstoqueStore.remove(tempId);
-
-          if (!itemSalvo || !itemSalvo.ID) {
-            const concluirSync = window.AppSyncFeedback?.iniciar
-              ? window.AppSyncFeedback.iniciar('Salvo com sucesso. Atualizando dados...')
-              : null;
-            marcarDashboardComoSujo();
-            setSalvando(false);
-            if (window.AppTabRefresh?.requestSync) {
-              window.AppTabRefresh.requestSync('estoque', {
-                delayMs: 280,
-                prefetch: true,
-                onDone: () => {
-                  if (concluirSync) {
-                    concluirSync('Dados atualizados');
-                  } else {
-                    mostrarToast('Dados atualizados');
-                  }
-                }
-              });
-            } else {
-              carregarEstoque(true, () => {
-                if (concluirSync) {
-                  concluirSync('Dados atualizados');
-                } else {
-                  mostrarToast('Dados atualizados');
-                }
-              });
-            }
-            return;
+      try {
+        if (!window.AppOptimistic?.enqueue) {
+          throw new Error('Fila de sincronizacao indisponivel');
+        }
+        window.AppOptimistic.enqueue({
+          scope: 'estoque',
+          handler: eraEdicao ? 'estoque.update' : 'estoque.create',
+          entityKey: `estoque:${optimisticId}`,
+          payload: dados,
+          meta: {
+            domain: 'estoque',
+            action: eraEdicao ? 'update' : 'create',
+            source: 'estoque',
+            target_id: eraEdicao ? idAtual : '',
+            temp_id: eraEdicao ? '' : optimisticId,
+            before_item: snapshot ? limparEstoqueMeta(snapshot) : null,
+            optimistic_item: limparEstoqueMeta(optimisticItem)
           }
-
-          EstoqueStore.add(itemSalvo);
-          EstoqueUI.renderLista(EstoqueStore.get());
-          mostrarToast('Salvo com sucesso');
-          marcarDashboardComoSujo();
-          setSalvando(false);
-          window.AppModalUI?.closeAll?.();
-        })
-        .criarItemEstoque(dados);
+        });
+        setSalvando(false);
+        editandoId = null;
+        finalizarUX();
+        window.AppModalUI?.closeAll?.();
+        mostrarToast(eraEdicao
+          ? 'Alteracao aplicada localmente. Sincronizando...'
+          : 'Item criado localmente. Sincronizando...');
+      } catch (error) {
+        setSalvando(false);
+        mostrarToast(error?.message || 'Erro ao enfileirar item de estoque', 'erro');
+        reabrirFormularioAposErro(dadosFormulario, {
+          editando: eraEdicao,
+          id: idAtual
+        });
+      }
     }
 
     function finalizarUX() {
@@ -402,6 +487,10 @@
         mostrarToast('Item nao encontrado', 'erro');
         return;
       }
+      if (getEstoqueUiState(item).blockActions) {
+        mostrarToast('Este item possui uma sincronizacao pendente.', 'erro');
+        return;
+      }
 
       editandoId = id;
       EstoqueUI.preencherFormulario(item);
@@ -413,21 +502,39 @@
       if (!confirm('Deseja remover este item?')) return;
 
       const snapshot = EstoqueStore.getById(id);
+      if (!snapshot) {
+        mostrarToast('Item nao encontrado', 'erro');
+        return;
+      }
+      if (getEstoqueUiState(snapshot).blockActions) {
+        mostrarToast('Este item ja possui uma sincronizacao pendente.', 'erro');
+        return;
+      }
 
-      EstoqueStore.remove(id);
-      EstoqueUI.renderLista(EstoqueStore.get());
-      mostrarToast('Item removido');
-
-      window.AppRequest.runner()
-        .withFailureHandler(() => {
-          EstoqueStore.add(snapshot);
-          EstoqueUI.renderLista(EstoqueStore.get());
-          mostrarToast('Erro ao remover', 'erro');
-        })
-        .withSuccessHandler(() => {
-          marcarDashboardComoSujo();
-        })
-        .deletarItemEstoque(id);
+      try {
+        if (!window.AppOptimistic?.enqueue) {
+          throw new Error('Fila de sincronizacao indisponivel');
+        }
+        window.AppOptimistic.enqueue({
+          scope: 'estoque',
+          handler: 'estoque.delete',
+          entityKey: `estoque:${String(id || '').trim()}`,
+          payload: {
+            id: String(id || '').trim()
+          },
+          meta: {
+            domain: 'estoque',
+            action: 'delete',
+            source: 'estoque',
+            target_id: String(id || '').trim(),
+            before_item: limparEstoqueMeta(snapshot),
+            optimistic_item: limparEstoqueMeta(snapshot)
+          }
+        });
+        mostrarToast('Exclusao aplicada localmente. Sincronizando...');
+      } catch (error) {
+        mostrarToast(error?.message || 'Erro ao enfileirar exclusao do item', 'erro');
+      }
     }
 
 
@@ -440,6 +547,7 @@
       salvar,
       editar,
       excluir,
+      retryEstoqueMutation,
       limparEdicao,
       syncFromBackend
     };

@@ -362,6 +362,25 @@
     }
 
     function montarDetalhesCard(v) {
+      const localState = window.AppEntityMutations?.getUiState
+        ? window.AppEntityMutations.getUiState(v, {
+          pendingLabels: {
+            delete: 'Exclusao pendente',
+            receive: 'Recebimento pendente'
+          },
+          errorLabels: {
+            delete: 'Falha ao excluir',
+            receive: 'Falha no recebimento'
+          }
+        })
+        : {
+          status: '',
+          label: '',
+          message: '',
+          canRetry: false,
+          blockActions: false
+        };
+      const bloquearAcoes = !!localState.blockActions;
       const podeReceber = Number(v.total_pendente || 0) > 0.009;
       const idJs = JSON.stringify(String(v.ID || ''));
       const estoqueLabel = v.estoque_baixado
@@ -385,6 +404,13 @@
         <p><b>Forma:</b> ${forma}</p>
         <p><b>Parcelas:</b> ${Number(v.parcelas || 1)}</p>
         <p><b>Financeiro:</b> ${financeiro} | Recebido ${formatarMoeda(v.total_pago || 0)} | Pendente ${formatarMoeda(v.total_pendente || 0)}</p>
+        ${localState.label ? `
+          <div class="optimistic-local-state-row">
+            <span class="optimistic-local-state optimistic-local-state-${escapeAttr(localState.status || 'pending')}">${escapeHtml(localState.label)}</span>
+            ${localState.canRetry ? `<button class="btn-retry-local" onclick='VendasController.retryVendaMutation(${idJs})'>Tentar novamente</button>` : ''}
+          </div>
+        ` : ''}
+        ${localState.message ? `<div class="optimistic-local-message">${escapeHtml(localState.message)}</div>` : ''}
         <p><b>Estoque baixado:</b> ${estoqueLabelSafe}</p>
         <p><b>Observacao:</b> ${observacao}</p>
         <div class="bloco">
@@ -392,9 +418,9 @@
           ${renderParcelasDetalhe(v.parcelas_detalhe)}
         </div>
         <div class="acoes">
-          ${podeReceber ? `<button onclick='VendasController.registrarRecebimento(${idJs})'>Registrar recebimento</button>` : ''}
-          <button onclick='VendasController.editar(${idJs})'>Editar</button>
-          <button onclick='VendasController.excluir(${idJs})'>Excluir</button>
+          ${podeReceber ? `<button onclick='VendasController.registrarRecebimento(${idJs})' ${bloquearAcoes ? 'disabled' : ''}>Registrar recebimento</button>` : ''}
+          <button onclick='VendasController.editar(${idJs})' ${bloquearAcoes ? 'disabled' : ''}>Editar</button>
+          <button onclick='VendasController.excluir(${idJs})' ${bloquearAcoes ? 'disabled' : ''}>Excluir</button>
         </div>
       `;
     }
@@ -403,6 +429,26 @@
       const div = document.createElement('div');
       div.className = 'card card-ficha';
       div.dataset.id = v.ID;
+      const localState = window.AppEntityMutations?.getUiState
+        ? window.AppEntityMutations.getUiState(v, {
+          pendingLabels: {
+            delete: 'Exclusao pendente',
+            receive: 'Recebimento pendente'
+          },
+          errorLabels: {
+            delete: 'Falha ao excluir',
+            receive: 'Falha no recebimento'
+          }
+        })
+        : {
+          status: '',
+          label: '',
+          message: '',
+          canRetry: false,
+          blockActions: false
+        };
+      if (localState.status) div.classList.add(`card-local-${localState.status}`);
+      if (v?._localDeleted) div.classList.add('card-local-delete');
       const item = escapeHtml(v.item || '-');
       const unidade = escapeHtml(v.unidade || '');
       const status = escapeHtml(String(v.status_pagamento || 'PENDENTE').toUpperCase());
@@ -414,6 +460,13 @@
             ${formatarMoeda(v.valor_total_venda || 0)}<br>
             ${status}
           </div>
+          ${localState.label ? `
+            <div class="optimistic-local-state-row">
+              <span class="optimistic-local-state optimistic-local-state-${escapeAttr(localState.status || 'pending')}">${escapeHtml(localState.label)}</span>
+              ${localState.canRetry ? `<button class="btn-retry-local" onclick='VendasController.retryVendaMutation(${JSON.stringify(String(v.ID || ''))})'>Tentar novamente</button>` : ''}
+            </div>
+          ` : ''}
+          ${localState.message ? `<div class="optimistic-local-message">${escapeHtml(localState.message)}</div>` : ''}
           <button class="ver-mais">Ver mais</button>
         </div>
       `;

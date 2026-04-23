@@ -7,6 +7,7 @@
     let mutationLockTokenRecebimento = null;
     let recebimentoVendaId = null;
     let salvandoRecebimento = false;
+    let listenerMutacoesRegistrado = false;
 
     let validacoes = {};
 
@@ -89,8 +90,269 @@
       VendasUI.mostrarFormulario();
     }
 
+    function getVendaUiState(item) {
+      if (!window.AppEntityMutations?.getUiState) {
+        return {
+          status: '',
+          action: '',
+          label: '',
+          message: '',
+          canRetry: false,
+          blockActions: false
+        };
+      }
+      return window.AppEntityMutations.getUiState(item, {
+        pendingLabels: {
+          delete: 'Exclusao pendente',
+          receive: 'Recebimento pendente'
+        },
+        errorLabels: {
+          delete: 'Falha ao excluir',
+          receive: 'Falha no recebimento'
+        }
+      });
+    }
+
+    function limparVendaMeta(item) {
+      return window.AppEntityMutations?.limparMeta
+        ? window.AppEntityMutations.limparMeta(item)
+        : { ...(item || {}) };
+    }
+
+    function buildVendaOptimistic(payload, options = {}) {
+      const base = limparVendaMeta(options.baseItem);
+      const id = String(options.id || base.ID || '').trim() || `tmp_${Date.now()}`;
+      const estoqueInfo = window.EstoqueStore?.getById?.(payload?.estoque_id) || {};
+      const quantidade = Number((payload?.quantidade ?? base.quantidade) || 0);
+      const totalVenda = Number((payload?.valor_total_venda ?? base.valor_total_venda) || 0);
+
+      if (window.AppDespesaMutations?.buildFromPayload) {
+        const financeiro = window.AppDespesaMutations.buildFromPayload({
+          ...payload,
+          ID: id,
+          valor_total: totalVenda
+        }, {
+          baseItem: {
+            ...base,
+            ID: id,
+            valor_total: Number((base?.total_previsto ?? base?.valor_total_venda) || 0)
+          },
+          id
+        });
+        return {
+          ...base,
+          ...payload,
+          ID: id,
+          item: String(base?.item || estoqueInfo?.item || '').trim(),
+          unidade: String(base?.unidade || estoqueInfo?.unidade || '').trim(),
+          nome_produto: String(base?.nome_produto || estoqueInfo?.item || '').trim(),
+          valor_unit_venda: quantidade > 0 ? Number((totalVenda / quantidade).toFixed(6)) : Number(base?.valor_unit_venda || 0),
+          valor_total_venda: totalVenda,
+          total_previsto: financeiro.total_previsto,
+          total_pago: financeiro.total_pago,
+          total_pendente: financeiro.total_pendente,
+          status_pagamento: financeiro.status_pagamento,
+          parcelas: financeiro.parcelas,
+          parcelas_detalhe: financeiro.parcelas_detalhe,
+          data_pagamento: financeiro.data_pagamento,
+          forma_pagamento: financeiro.forma_pagamento,
+          forma_pagamento_padrao: financeiro.forma_pagamento_padrao,
+          quantidade_pagamentos: financeiro.quantidade_pagamentos,
+          data_ultimo_pagamento: financeiro.data_ultimo_pagamento,
+          forma_ultimo_pagamento: financeiro.forma_ultimo_pagamento
+        };
+      }
+
+      const totalPago = Number(base?.total_pago || 0);
+      return {
+        ...base,
+        ...payload,
+        ID: id,
+        item: String(base?.item || estoqueInfo?.item || '').trim(),
+        unidade: String(base?.unidade || estoqueInfo?.unidade || '').trim(),
+        nome_produto: String(base?.nome_produto || estoqueInfo?.item || '').trim(),
+        valor_unit_venda: quantidade > 0 ? Number((totalVenda / quantidade).toFixed(6)) : Number(base?.valor_unit_venda || 0),
+        valor_total_venda: totalVenda,
+        total_previsto: totalVenda,
+        total_pago: totalPago,
+        total_pendente: Math.max(0, totalVenda - totalPago),
+        status_pagamento: totalPago > 0 ? 'PARCIAL' : 'PENDENTE'
+      };
+    }
+
+    function applyRecebimentoVenda(item, payload) {
+      const base = limparVendaMeta(item);
+      if (window.AppDespesaMutations?.applyPayment) {
+        const atualizado = window.AppDespesaMutations.applyPayment({
+          ...base,
+          valor_total: Number((base?.total_previsto ?? base?.valor_total_venda) || 0)
+        }, payload);
+        return {
+          ...base,
+          data_pagamento: atualizado.data_pagamento,
+          forma_pagamento: atualizado.forma_pagamento,
+          forma_pagamento_padrao: atualizado.forma_pagamento_padrao,
+          total_previsto: atualizado.total_previsto,
+          total_pago: atualizado.total_pago,
+          total_pendente: atualizado.total_pendente,
+          status_pagamento: atualizado.status_pagamento,
+          quantidade_pagamentos: atualizado.quantidade_pagamentos,
+          data_ultimo_pagamento: atualizado.data_ultimo_pagamento,
+          forma_ultimo_pagamento: atualizado.forma_ultimo_pagamento,
+          parcelas_detalhe: atualizado.parcelas_detalhe,
+          estoque_baixado: true,
+          data_baixa_estoque: atualizado.data_pagamento || base?.data_baixa_estoque || ''
+        };
+      }
+
+      const totalPrevisto = Number(base?.total_previsto || 0);
+      const totalPago = Math.min(totalPrevisto, Number(base?.total_pago || 0) + Number(payload?.valor_pago || 0));
+      return {
+        ...base,
+        total_pago: totalPago,
+        total_pendente: Math.max(0, totalPrevisto - totalPago),
+        status_pagamento: totalPago >= totalPrevisto ? 'PAGO' : 'PARCIAL',
+        data_pagamento: String(payload?.data_pagamento || '').trim() || base?.data_pagamento || '',
+        forma_pagamento: String(payload?.forma_pagamento || '').trim() || base?.forma_pagamento || '',
+        estoque_baixado: true,
+        data_baixa_estoque: String(payload?.data_pagamento || '').trim() || base?.data_baixa_estoque || ''
+      };
+    }
+
+    function resolveVendaSuccessItem(entry, detail, helpers = {}) {
+      const limparMeta = helpers?.limparMeta || (valor => valor);
+      const meta = entry?.meta || {};
+      const result = detail?.result || {};
+      const optimisticItem = limparMeta(meta.optimistic_item);
+      const beforeItem = limparMeta(meta.before_item);
+      const action = String(meta.action || '').trim().toLowerCase();
+
+      if (action === 'receive' && result?.vendaAtualizada?.ID) {
+        return limparMeta(result.vendaAtualizada);
+      }
+      if (result?.ID) {
+        return limparMeta(result);
+      }
+      return optimisticItem || beforeItem;
+    }
+
+    function listarMutacoesVendaAtivas() {
+      if (!window.AppOptimistic?.list) return [];
+      return window.AppOptimistic.list({
+        scope: 'venda',
+        domain: 'venda'
+      });
+    }
+
+    function reconciliarListaVendasComMutacoes(listaBase) {
+      if (!window.AppEntityMutations?.mergeFetchedList) {
+        return Array.isArray(listaBase) ? [...listaBase] : [];
+      }
+      return window.AppEntityMutations.mergeFetchedList(listaBase, listarMutacoesVendaAtivas(), {
+        domain: 'venda',
+        idKey: 'ID',
+        resolveSuccessItem: resolveVendaSuccessItem
+      });
+    }
+
+    function persistirEReRenderizarVendas(lista) {
+      if (Array.isArray(lista)) {
+        VendasStore.set(lista);
+      }
+      renderListaAtual();
+    }
+
+    function agendarSyncSilenciosoVendas(detail) {
+      const action = String(detail?.entry?.meta?.action || '').trim().toLowerCase();
+      if (window.AppTabRefresh?.requestSync) {
+        window.AppTabRefresh.requestSync('vendas', {
+          delayMs: 900,
+          prefetch: true
+        });
+        if (action === 'receive') {
+          window.AppTabRefresh.requestSync('estoque', {
+            delayMs: 980,
+            prefetch: true
+          });
+        }
+      } else {
+        setTimeout(() => carregarVendas(true), 900);
+        if (action === 'receive' && window.EstoqueController?.syncFromBackend) {
+          setTimeout(() => {
+            window.EstoqueController.syncFromBackend();
+          }, 980);
+        }
+      }
+
+      setTimeout(() => {
+        carregarEstoqueVendavel();
+      }, 640);
+    }
+
+    function tratarEventoMutacaoVenda(detail) {
+      const entry = detail?.entry;
+      if (!entry || String(entry.scope || '').trim() !== 'venda') return;
+      if (String(entry?.meta?.domain || '').trim() !== 'venda') return;
+      if (!window.AppEntityMutations?.applyEntryToList) return;
+
+      const atualizada = window.AppEntityMutations.applyEntryToList(VendasStore.get(), detail, {
+        domain: 'venda',
+        idKey: 'ID',
+        resolveSuccessItem: resolveVendaSuccessItem
+      });
+      persistirEReRenderizarVendas(atualizada);
+
+      if (String(detail?.type || '').trim().toLowerCase() === 'success') {
+        const result = detail?.result || {};
+        if (result?.baixaEstoque?.estoqueAtualizado && window.EstoqueStore) {
+          const estoqueAtualizado = result.baixaEstoque.estoqueAtualizado;
+          const atual = window.EstoqueStore.getById?.(estoqueAtualizado.ID);
+          if (atual) {
+            window.EstoqueStore.update(estoqueAtualizado.ID, estoqueAtualizado);
+          } else {
+            window.EstoqueStore.add(estoqueAtualizado);
+          }
+          if (typeof window.aplicarBuscaEstoque === 'function') {
+            window.aplicarBuscaEstoque();
+          } else if (window.EstoqueUI?.renderLista) {
+            window.EstoqueUI.renderLista(window.EstoqueStore.get());
+          }
+        }
+        invalidarCacheDashboardPorImpacto(entry?.meta?.before_item, entry?.payload, result?.vendaAtualizada || result);
+        agendarSyncSilenciosoVendas(detail);
+        return;
+      }
+
+      if (String(detail?.type || '').trim().toLowerCase() === 'error'
+        && String(entry?.meta?.source || '').trim() === 'vendas') {
+        mostrarToast(`${detail?.errorMessage || 'Falha ao sincronizar venda'}. Use "Tentar novamente".`, 'erro');
+      }
+    }
+
+    function registrarListenerMutacoesSeNecessario() {
+      if (listenerMutacoesRegistrado) return;
+      if (typeof window === 'undefined' || typeof window.addEventListener !== 'function') return;
+      window.addEventListener('app:optimistic-mutation', evento => {
+        tratarEventoMutacaoVenda(evento?.detail || {});
+      });
+      listenerMutacoesRegistrado = true;
+    }
+
+    function retryVendaMutation(id) {
+      const item = VendasStore.getById(String(id || '').trim());
+      const mutationId = String(item?._localMutationId || '').trim();
+      if (!mutationId || !window.AppOptimistic?.retry) {
+        mostrarToast('Nao ha sincronizacao pendente para reenviar', 'erro');
+        return;
+      }
+      window.AppOptimistic.retry(mutationId);
+      mostrarToast('Tentando sincronizar novamente...');
+    }
+
     function init() {
       if (iniciado) return;
+      registrarListenerMutacoesSeNecessario();
+      window.AppOptimistic?.process?.();
       carregarValidacoes();
       carregarEstoqueVendavel();
       carregarVendas();
@@ -140,8 +402,7 @@
     function hidratarVendasDoCache() {
       const listaCache = window.AppTabCache?.ler?.('vendas');
       if (!Array.isArray(listaCache)) return false;
-      VendasStore.set(listaCache);
-      renderListaAtual();
+      persistirEReRenderizarVendas(reconciliarListaVendasComMutacoes(listaCache));
       return true;
     }
 
@@ -152,8 +413,7 @@
           if (window.AppRuntime?.setReadOnly) {
             window.AppRuntime.setReadOnly(false);
           }
-          VendasStore.set(lista);
-          renderListaAtual();
+          persistirEReRenderizarVendas(reconciliarListaVendasComMutacoes(lista));
           if (typeof onDone === 'function') onDone();
         })
         .withFailureHandler(err => {
@@ -227,86 +487,51 @@
       dados.parcelas_detalhe = parcelasDetalhe;
 
       setSalvando(true);
-      if (editandoId) {
-        const idAtual = editandoId;
-        const snapshot = { ...VendasStore.getById(idAtual) };
+      const eraEdicao = !!editandoId;
+      const idAtual = String(editandoId || '').trim();
+      const snapshot = eraEdicao ? VendasStore.getById(idAtual) : null;
+      const optimisticId = eraEdicao
+        ? idAtual
+        : (window.AppEntityMutations?.tempId?.('VND_TMP') || `VND_TMP_${Date.now()}`);
+      const optimisticItem = buildVendaOptimistic(dados, {
+        baseItem: snapshot,
+        id: optimisticId
+      });
 
-        VendasStore.update(idAtual, dados);
-        renderListaAtual();
-        finalizarUX();
-
-        window.AppRequest.runner()
-          .withFailureHandler(err => {
-            VendasStore.update(idAtual, snapshot);
-            renderListaAtual();
-            mostrarToast(err?.message || 'Erro ao salvar venda', 'erro');
-            setSalvando(false);
-            reabrirFormularioAposErro(dadosFormulario, { editando: true, id: idAtual });
-          })
-        .withSuccessHandler(() => {
-          mostrarToast('Venda atualizada');
-          invalidarCacheDashboardPorImpacto(snapshot, dados);
-          setSalvando(false);
-          window.AppModalUI?.closeAll?.();
-        })
-        .atualizarVenda(idAtual, dados);
-
-        editandoId = null;
-        return;
-      }
-
-      const tempId = `tmp_${Date.now()}`;
-      VendasStore.add({ ID: tempId, ...dados });
-      renderListaAtual();
-      finalizarUX();
-      mostrarToast('Salvando...');
-
-      window.AppRequest.runner()
-        .withFailureHandler(err => {
-          VendasStore.remove(tempId);
-          renderListaAtual();
-          mostrarToast(err?.message || 'Erro ao salvar venda', 'erro');
-          setSalvando(false);
-          reabrirFormularioAposErro(dadosFormulario, { editando: false });
-        })
-        .withSuccessHandler(itemSalvo => {
-          VendasStore.remove(tempId);
-          if (!itemSalvo || !itemSalvo.ID) {
-            const concluirSync = window.AppSyncFeedback?.iniciar
-              ? window.AppSyncFeedback.iniciar('Venda salva. Atualizando dados...')
-              : null;
-            setSalvando(false);
-            if (window.AppTabRefresh?.requestSync) {
-              window.AppTabRefresh.requestSync('vendas', {
-                delayMs: 280,
-                prefetch: true,
-                onDone: () => {
-                  if (concluirSync) {
-                    concluirSync('Dados atualizados');
-                  } else {
-                    mostrarToast('Dados atualizados');
-                  }
-                }
-              });
-            } else {
-              carregarVendas(true, () => {
-                if (concluirSync) {
-                  concluirSync('Dados atualizados');
-                } else {
-                  mostrarToast('Dados atualizados');
-                }
-              });
-            }
-            return;
+      try {
+        if (!window.AppOptimistic?.enqueue) {
+          throw new Error('Fila de sincronizacao indisponivel');
+        }
+        window.AppOptimistic.enqueue({
+          scope: 'venda',
+          handler: eraEdicao ? 'venda.update' : 'venda.create',
+          entityKey: `venda:${optimisticId}`,
+          payload: dados,
+          meta: {
+            domain: 'venda',
+            action: eraEdicao ? 'update' : 'create',
+            source: 'vendas',
+            target_id: eraEdicao ? idAtual : '',
+            temp_id: eraEdicao ? '' : optimisticId,
+            before_item: snapshot ? limparVendaMeta(snapshot) : null,
+            optimistic_item: limparVendaMeta(optimisticItem)
           }
-          VendasStore.add(itemSalvo);
-          renderListaAtual();
-          invalidarCacheDashboardPorImpacto(dados, itemSalvo);
-          mostrarToast('Venda salva');
-          setSalvando(false);
-          window.AppModalUI?.closeAll?.();
-        })
-        .criarVenda(dados);
+        });
+        setSalvando(false);
+        editandoId = null;
+        finalizarUX();
+        window.AppModalUI?.closeAll?.();
+        mostrarToast(eraEdicao
+          ? 'Alteracao aplicada localmente. Sincronizando...'
+          : 'Venda criada localmente. Sincronizando...');
+      } catch (error) {
+        setSalvando(false);
+        mostrarToast(error?.message || 'Erro ao enfileirar venda', 'erro');
+        reabrirFormularioAposErro(dadosFormulario, {
+          editando: eraEdicao,
+          id: idAtual
+        });
+      }
     }
 
     function finalizarUX() {
@@ -320,6 +545,10 @@
         mostrarToast('Venda nao encontrada', 'erro');
         return;
       }
+      if (getVendaUiState(item).blockActions) {
+        mostrarToast('Esta venda possui uma sincronizacao pendente.', 'erro');
+        return;
+      }
       editandoId = id;
       VendasUI.preencherFormulario(item);
       VendasUI.mostrarFormulario();
@@ -329,22 +558,39 @@
       if (!podeAlterarDados('Exclusao bloqueada em modo somente leitura')) return;
       if (!confirm('Deseja remover esta venda?')) return;
       const snapshot = VendasStore.getById(id);
-      VendasStore.remove(id);
-      renderListaAtual();
-      mostrarToast('Venda removida');
-      invalidarCacheDashboardPorImpacto(snapshot);
+      if (!snapshot) {
+        mostrarToast('Venda nao encontrada', 'erro');
+        return;
+      }
+      if (getVendaUiState(snapshot).blockActions) {
+        mostrarToast('Esta venda ja possui uma sincronizacao pendente.', 'erro');
+        return;
+      }
 
-      window.AppRequest.runner()
-        .withFailureHandler(err => {
-          if (snapshot) VendasStore.add(snapshot);
-          renderListaAtual();
-          mostrarToast(err?.message || 'Erro ao remover venda', 'erro');
-        })
-        .withSuccessHandler(() => {
-          mostrarToast('Venda removida');
-          carregarEstoqueVendavel();
-        })
-        .deletarVenda(id);
+      try {
+        if (!window.AppOptimistic?.enqueue) {
+          throw new Error('Fila de sincronizacao indisponivel');
+        }
+        window.AppOptimistic.enqueue({
+          scope: 'venda',
+          handler: 'venda.delete',
+          entityKey: `venda:${String(id || '').trim()}`,
+          payload: {
+            id: String(id || '').trim()
+          },
+          meta: {
+            domain: 'venda',
+            action: 'delete',
+            source: 'vendas',
+            target_id: String(id || '').trim(),
+            before_item: limparVendaMeta(snapshot),
+            optimistic_item: limparVendaMeta(snapshot)
+          }
+        });
+        mostrarToast('Exclusao aplicada localmente. Sincronizando...');
+      } catch (error) {
+        mostrarToast(error?.message || 'Erro ao enfileirar exclusao da venda', 'erro');
+      }
     }
 
     function registrarRecebimento(id) {
@@ -353,6 +599,10 @@
       const item = VendasStore.getById(id);
       if (!item) {
         mostrarToast('Venda nao encontrada', 'erro');
+        return;
+      }
+      if (getVendaUiState(item).blockActions) {
+        mostrarToast('Esta venda ja possui uma sincronizacao pendente.', 'erro');
         return;
       }
       const pendente = Number(item.total_pendente || 0);
@@ -407,91 +657,56 @@
       const vendaId = recebimentoVendaId;
       const dadosFormulario = { ...dados };
       const itemAntes = VendasStore.getById(vendaId);
+      if (!itemAntes) {
+        mostrarToast('Venda nao encontrada', 'erro');
+        return;
+      }
+      const optimisticItem = applyRecebimentoVenda(itemAntes, {
+        data_pagamento: dados.data_pagamento,
+        valor_pago: valor,
+        parcela_alvo_id: dados.parcela_alvo_id,
+        forma_pagamento: dados.forma_pagamento,
+        observacao: dados.observacao
+      });
 
       salvandoRecebimento = true;
       setBloqueioMutacaoRecebimento(true);
       VendasUI.fecharModalRecebimento();
       recebimentoVendaId = null;
-
-      window.AppRequest.runner()
-        .withFailureHandler(err => {
-          salvandoRecebimento = false;
-          setBloqueioMutacaoRecebimento(false);
-          mostrarToast(err?.message || 'Erro ao registrar recebimento', 'erro');
-          reabrirModalRecebimentoAposErro(vendaId, dadosFormulario);
-        })
-        .withSuccessHandler(resp => {
-          salvandoRecebimento = false;
-          setBloqueioMutacaoRecebimento(false);
-          window.AppModalUI?.closeAll?.();
-          const concluirSync = window.AppSyncFeedback?.iniciar
-            ? window.AppSyncFeedback.iniciar('Recebimento registrado. Atualizando dados...')
-            : null;
-          let pendenciasSync = 0;
-          const concluirUmaSync = () => {
-            pendenciasSync -= 1;
-            if (pendenciasSync > 0) return;
-            if (concluirSync) {
-              concluirSync('Dados atualizados');
-            } else {
-              mostrarToast('Dados atualizados');
-            }
-          };
-          const agendarSync = (fn) => {
-            if (typeof fn !== 'function') return;
-            pendenciasSync += 1;
-            fn(() => concluirUmaSync());
-          };
-
-          if (resp?.vendaAtualizada?.ID) {
-            VendasStore.update(resp.vendaAtualizada.ID, resp.vendaAtualizada);
-            renderListaAtual();
-          } else {
-            if (window.AppTabRefresh?.requestSync) {
-              agendarSync(done => window.AppTabRefresh.requestSync('vendas', {
-                delayMs: 220,
-                prefetch: true,
-                onDone: done
-              }));
-            } else {
-              agendarSync(done => carregarVendas(true, done));
-            }
+      try {
+        if (!window.AppOptimistic?.enqueue) {
+          throw new Error('Fila de sincronizacao indisponivel');
+        }
+        window.AppOptimistic.enqueue({
+          scope: 'venda',
+          handler: 'venda.receive',
+          entityKey: `venda:${String(vendaId || '').trim()}`,
+          payload: {
+            data_pagamento: dados.data_pagamento,
+            valor_pago: valor,
+            parcela_alvo_id: dados.parcela_alvo_id,
+            forma_pagamento: dados.forma_pagamento,
+            observacao: dados.observacao
+          },
+          meta: {
+            domain: 'venda',
+            action: 'receive',
+            source: 'vendas',
+            target_id: String(vendaId || '').trim(),
+            before_item: limparVendaMeta(itemAntes),
+            optimistic_item: limparVendaMeta(optimisticItem)
           }
-
-          if (resp?.baixaEstoque?.estoqueAtualizado && window.EstoqueStore) {
-            EstoqueStore.update(resp.baixaEstoque.estoqueAtualizado.ID, {
-              quantidade: resp.baixaEstoque.estoqueAtualizado.quantidade
-            });
-          }
-          if (window.EstoqueController?.syncFromBackend) {
-            if (window.AppTabRefresh?.requestSync) {
-              agendarSync(done => window.AppTabRefresh.requestSync('estoque', {
-                delayMs: 220,
-                prefetch: true,
-                onDone: done
-              }));
-            } else {
-              agendarSync(done => EstoqueController.syncFromBackend(done));
-            }
-          }
-
-          invalidarCacheDashboardPorImpacto(itemAntes, dados, resp?.vendaAtualizada);
-          agendarSync(done => carregarEstoqueVendavel(done));
-          if (pendenciasSync === 0) {
-            if (concluirSync) {
-              concluirSync('Dados atualizados');
-            } else {
-              mostrarToast('Dados atualizados');
-            }
-          }
-        })
-        .registrarRecebimentoVenda(vendaId, {
-          data_pagamento: dados.data_pagamento,
-          valor_pago: valor,
-          parcela_alvo_id: dados.parcela_alvo_id,
-          forma_pagamento: dados.forma_pagamento,
-          observacao: dados.observacao
         });
+        salvandoRecebimento = false;
+        setBloqueioMutacaoRecebimento(false);
+        window.AppModalUI?.closeAll?.();
+        mostrarToast('Recebimento aplicado localmente. Sincronizando...');
+      } catch (error) {
+        salvandoRecebimento = false;
+        setBloqueioMutacaoRecebimento(false);
+        mostrarToast(error?.message || 'Erro ao enfileirar recebimento', 'erro');
+        reabrirModalRecebimentoAposErro(vendaId, dadosFormulario);
+      }
     }
 
     function cancelarRecebimento() {
@@ -524,6 +739,7 @@
       registrarRecebimento,
       confirmarRecebimento,
       cancelarRecebimento,
+      retryVendaMutation,
       limparEdicao,
       syncFromBackend
     };

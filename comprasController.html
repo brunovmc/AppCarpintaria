@@ -9,6 +9,7 @@
     let mutationLockTokenPagamento = null;
     let pagamentoCompraId = null;
     let salvandoPagamento = false;
+    let listenerMutacoesRegistrado = false;
     const adicionandoAoEstoque = new Set();
 
     let validacoes = null;
@@ -119,9 +120,291 @@
       ComprasUI.mostrarFormulario();
     }
 
+    function getCompraUiState(item) {
+      if (!window.AppEntityMutations?.getUiState) {
+        return {
+          status: '',
+          action: '',
+          label: '',
+          message: '',
+          canRetry: false,
+          blockActions: false
+        };
+      }
+      return window.AppEntityMutations.getUiState(item, {
+        pendingLabels: {
+          delete: 'Exclusao pendente',
+          payment: 'Pagamento pendente',
+          add_stock: 'Adicao ao estoque pendente'
+        },
+        errorLabels: {
+          delete: 'Falha ao excluir',
+          payment: 'Falha no pagamento',
+          add_stock: 'Falha ao adicionar ao estoque'
+        }
+      });
+    }
+
+    function limparCompraMeta(item) {
+      return window.AppEntityMutations?.limparMeta
+        ? window.AppEntityMutations.limparMeta(item)
+        : { ...(item || {}) };
+    }
+
+    function buildCompraOptimistic(payload, options = {}) {
+      const base = limparCompraMeta(options.baseItem);
+      const id = String(options.id || base.ID || '').trim() || `tmp_${Date.now()}`;
+      const quantidade = Number((payload?.quantidade ?? base.quantidade) || 0);
+      const valorUnit = Number((payload?.valor_unit ?? base.valor_unit) || 0);
+      const valorTotalInformado = payload?.valor_total_item;
+      const totalCalculado = valorTotalInformado === '' || valorTotalInformado == null
+        ? Number((quantidade * valorUnit).toFixed(2))
+        : Number(valorTotalInformado);
+
+      if (window.AppDespesaMutations?.buildFromPayload) {
+        const financeiro = window.AppDespesaMutations.buildFromPayload({
+          ...payload,
+          ID: id,
+          valor_total: totalCalculado
+        }, {
+          baseItem: {
+            ...base,
+            ID: id,
+            valor_total: Number((base?.total_previsto ?? base?.valor_total_item ?? (Number(base?.quantidade || 0) * Number(base?.valor_unit || 0))) || 0)
+          },
+          id
+        });
+
+        return {
+          ...base,
+          ...payload,
+          ID: id,
+          valor_total_item: valorTotalInformado === '' || valorTotalInformado == null ? '' : Number(valorTotalInformado),
+          total_previsto: financeiro.total_previsto,
+          total_pago: financeiro.total_pago,
+          total_pendente: financeiro.total_pendente,
+          status_pagamento: financeiro.status_pagamento,
+          parcelas: financeiro.parcelas,
+          parcelas_detalhe: financeiro.parcelas_detalhe,
+          data_pagamento: financeiro.data_pagamento,
+          forma_pagamento: financeiro.forma_pagamento,
+          forma_pagamento_padrao: financeiro.forma_pagamento_padrao,
+          quantidade_pagamentos: financeiro.quantidade_pagamentos,
+          data_ultimo_pagamento: financeiro.data_ultimo_pagamento,
+          forma_ultimo_pagamento: financeiro.forma_ultimo_pagamento,
+          adicionado_estoque: payload?.adicionado_estoque ?? base?.adicionado_estoque ?? false,
+          estoque_id: payload?.estoque_id ?? base?.estoque_id ?? ''
+        };
+      }
+
+      const totalPrevisto = Number.isFinite(totalCalculado) ? totalCalculado : 0;
+      const totalPago = Number(base?.total_pago || 0);
+      return {
+        ...base,
+        ...payload,
+        ID: id,
+        valor_total_item: valorTotalInformado === '' || valorTotalInformado == null ? '' : Number(valorTotalInformado),
+        total_previsto: totalPrevisto,
+        total_pago: totalPago,
+        total_pendente: Math.max(0, totalPrevisto - totalPago),
+        status_pagamento: totalPago > 0 ? 'PARCIAL' : 'PENDENTE',
+        adicionado_estoque: payload?.adicionado_estoque ?? base?.adicionado_estoque ?? false,
+        estoque_id: payload?.estoque_id ?? base?.estoque_id ?? ''
+      };
+    }
+
+    function applyPagamentoCompra(item, payload) {
+      const base = limparCompraMeta(item);
+      if (window.AppDespesaMutations?.applyPayment) {
+        const atualizado = window.AppDespesaMutations.applyPayment({
+          ...base,
+          valor_total: Number((base?.total_previsto ?? base?.valor_total_item ?? (Number(base?.quantidade || 0) * Number(base?.valor_unit || 0))) || 0)
+        }, payload);
+        return {
+          ...base,
+          data_pagamento: atualizado.data_pagamento,
+          forma_pagamento: atualizado.forma_pagamento,
+          forma_pagamento_padrao: atualizado.forma_pagamento_padrao,
+          total_previsto: atualizado.total_previsto,
+          total_pago: atualizado.total_pago,
+          total_pendente: atualizado.total_pendente,
+          status_pagamento: atualizado.status_pagamento,
+          quantidade_pagamentos: atualizado.quantidade_pagamentos,
+          data_ultimo_pagamento: atualizado.data_ultimo_pagamento,
+          forma_ultimo_pagamento: atualizado.forma_ultimo_pagamento,
+          parcelas_detalhe: atualizado.parcelas_detalhe
+        };
+      }
+
+      const totalPrevisto = Number(base?.total_previsto || 0);
+      const totalPago = Math.min(totalPrevisto, Number(base?.total_pago || 0) + Number(payload?.valor_pago || 0));
+      return {
+        ...base,
+        total_pago: totalPago,
+        total_pendente: Math.max(0, totalPrevisto - totalPago),
+        status_pagamento: totalPago >= totalPrevisto ? 'PAGO' : 'PARCIAL',
+        data_pagamento: String(payload?.data_pagamento || '').trim() || base?.data_pagamento || '',
+        forma_pagamento: String(payload?.forma_pagamento || '').trim() || base?.forma_pagamento || ''
+      };
+    }
+
+    function applyAdicionarAoEstoqueCompra(item) {
+      const base = limparCompraMeta(item);
+      return {
+        ...base,
+        adicionado_estoque: true,
+        estoque_id: String(base?.estoque_id || '').trim()
+      };
+    }
+
+    function resolveCompraSuccessItem(entry, detail, helpers = {}) {
+      const limparMeta = helpers?.limparMeta || (valor => valor);
+      const meta = entry?.meta || {};
+      const result = detail?.result || {};
+      const optimisticItem = limparMeta(meta.optimistic_item);
+      const beforeItem = limparMeta(meta.before_item);
+      const action = String(meta.action || '').trim().toLowerCase();
+
+      if (action === 'payment' && result?.compraAtualizada?.ID) {
+        return limparMeta(result.compraAtualizada);
+      }
+      if (action === 'add_stock') {
+        if (result?.compraAtualizada?.ID) {
+          return limparMeta(result.compraAtualizada);
+        }
+        if (result?.itemEstoqueCriado?.ID) {
+          return {
+            ...optimisticItem,
+            estoque_id: String(result.itemEstoqueCriado.ID || '').trim() || optimisticItem?.estoque_id || ''
+          };
+        }
+      }
+      if (result?.ID) {
+        return limparMeta(result);
+      }
+      return optimisticItem || beforeItem;
+    }
+
+    function listarMutacoesCompraAtivas() {
+      if (!window.AppOptimistic?.list) return [];
+      return window.AppOptimistic.list({
+        scope: 'compra',
+        domain: 'compra'
+      });
+    }
+
+    function reconciliarListaComprasComMutacoes(listaBase) {
+      if (!window.AppEntityMutations?.mergeFetchedList) {
+        return Array.isArray(listaBase) ? [...listaBase] : [];
+      }
+      return window.AppEntityMutations.mergeFetchedList(listaBase, listarMutacoesCompraAtivas(), {
+        domain: 'compra',
+        idKey: 'ID',
+        resolveSuccessItem: resolveCompraSuccessItem
+      });
+    }
+
+    function persistirEReRenderizarCompras(lista) {
+      if (Array.isArray(lista)) {
+        ComprasStore.set(lista);
+      }
+      renderListaAtual();
+      if (typeof popularFiltrosDoPainelCompras === 'function') {
+        popularFiltrosDoPainelCompras();
+      }
+    }
+
+    function agendarSyncSilenciosoCompras(detail) {
+      const action = String(detail?.entry?.meta?.action || '').trim().toLowerCase();
+      if (window.AppTabRefresh?.requestSync) {
+        window.AppTabRefresh.requestSync('compras', {
+          delayMs: 900,
+          prefetch: true
+        });
+        if (action === 'add_stock') {
+          window.AppTabRefresh.requestSync('estoque', {
+            delayMs: 980,
+            prefetch: true
+          });
+        }
+        return;
+      }
+      setTimeout(() => carregarCompras(true), 900);
+      if (action === 'add_stock' && window.EstoqueController?.syncFromBackend) {
+        setTimeout(() => {
+          window.EstoqueController.syncFromBackend();
+        }, 980);
+      }
+    }
+
+    function tratarEventoMutacaoCompra(detail) {
+      const entry = detail?.entry;
+      if (!entry || String(entry.scope || '').trim() !== 'compra') return;
+      if (String(entry?.meta?.domain || '').trim() !== 'compra') return;
+      if (!window.AppEntityMutations?.applyEntryToList) return;
+
+      const atualizada = window.AppEntityMutations.applyEntryToList(ComprasStore.get(), detail, {
+        domain: 'compra',
+        idKey: 'ID',
+        resolveSuccessItem: resolveCompraSuccessItem
+      });
+      persistirEReRenderizarCompras(atualizada);
+
+      if (String(detail?.type || '').trim().toLowerCase() === 'success') {
+        const result = detail?.result || {};
+        const action = String(entry?.meta?.action || '').trim().toLowerCase();
+
+        if (action === 'add_stock' && result?.itemEstoqueCriado && window.EstoqueStore) {
+          const itemEstoque = result.itemEstoqueCriado;
+          const estoqueAtual = window.EstoqueStore.getById?.(itemEstoque.ID);
+          if (estoqueAtual) {
+            window.EstoqueStore.update(itemEstoque.ID, itemEstoque);
+          } else {
+            window.EstoqueStore.add(itemEstoque);
+          }
+          if (typeof window.aplicarBuscaEstoque === 'function') {
+            window.aplicarBuscaEstoque();
+          } else if (window.EstoqueUI?.renderLista) {
+            window.EstoqueUI.renderLista(window.EstoqueStore.get());
+          }
+        }
+
+        invalidarCacheDashboardPorImpacto(entry?.meta?.before_item, entry?.payload, result?.compraAtualizada || result);
+        agendarSyncSilenciosoCompras(detail);
+        return;
+      }
+
+      if (String(detail?.type || '').trim().toLowerCase() === 'error'
+        && String(entry?.meta?.source || '').trim() === 'compras') {
+        mostrarToast(`${detail?.errorMessage || 'Falha ao sincronizar compra'}. Use "Tentar novamente".`, 'erro');
+      }
+    }
+
+    function registrarListenerMutacoesSeNecessario() {
+      if (listenerMutacoesRegistrado) return;
+      if (typeof window === 'undefined' || typeof window.addEventListener !== 'function') return;
+      window.addEventListener('app:optimistic-mutation', evento => {
+        tratarEventoMutacaoCompra(evento?.detail || {});
+      });
+      listenerMutacoesRegistrado = true;
+    }
+
+    function retryCompraMutation(id) {
+      const item = ComprasStore.getById(String(id || '').trim());
+      const mutationId = String(item?._localMutationId || '').trim();
+      if (!mutationId || !window.AppOptimistic?.retry) {
+        mostrarToast('Nao ha sincronizacao pendente para reenviar', 'erro');
+        return;
+      }
+      window.AppOptimistic.retry(mutationId);
+      mostrarToast('Tentando sincronizar novamente...');
+    }
+
     function init() {
       if (iniciado) return;
 
+      registrarListenerMutacoesSeNecessario();
+      window.AppOptimistic?.process?.();
       carregarValidacoes();
       carregarCompras();
 
@@ -201,11 +484,7 @@
     function hidratarComprasDoCache() {
       const listaCache = window.AppTabCache?.ler?.('compras');
       if (!Array.isArray(listaCache)) return false;
-      ComprasStore.set(listaCache);
-      renderListaAtual();
-      if (typeof popularFiltrosDoPainelCompras === 'function') {
-        popularFiltrosDoPainelCompras();
-      }
+      persistirEReRenderizarCompras(reconciliarListaComprasComMutacoes(listaCache));
       return true;
     }
 
@@ -218,11 +497,7 @@
             window.AppRuntime.setReadOnly(false);
           }
           perfEnd(perf, { ok: true, total: Array.isArray(lista) ? lista.length : 0 });
-          ComprasStore.set(lista);
-          renderListaAtual();
-          if (typeof popularFiltrosDoPainelCompras === 'function') {
-            popularFiltrosDoPainelCompras();
-          }
+          persistirEReRenderizarCompras(reconciliarListaComprasComMutacoes(lista));
           if (typeof onDone === 'function') onDone();
         })
         .withFailureHandler(() => {
@@ -378,96 +653,53 @@
       }
 
       setSalvando(true);
+      const eraEdicao = !!editandoId;
+      const idAtual = String(editandoId || '').trim();
+      const snapshot = eraEdicao ? ComprasStore.getById(idAtual) : null;
+      const optimisticId = eraEdicao
+        ? idAtual
+        : (window.AppEntityMutations?.tempId?.('CMP_TMP') || `CMP_TMP_${Date.now()}`);
+      const optimisticItem = buildCompraOptimistic(dados, {
+        baseItem: snapshot,
+        id: optimisticId
+      });
 
-      if (editandoId) {
-        const idAtual = editandoId;
-        const snapshot = { ...ComprasStore.getById(idAtual) };
-
-        ComprasStore.update(idAtual, dados);
-        renderListaAtual();
-        finalizarUX();
-
-        window.AppRequest.runner()
-          .withFailureHandler(() => {
-            ComprasStore.update(idAtual, snapshot);
-            renderListaAtual();
-            mostrarToast('Erro ao salvar edicao', 'erro');
-            setSalvando(false);
-            reabrirFormularioAposErro(dadosFormulario, { editando: true, id: idAtual });
-          })
-        .withSuccessHandler(() => {
-          mostrarToast('Salvo com sucesso');
-          invalidarCacheDashboardPorImpacto(snapshot, dados);
-          setSalvando(false);
-          window.AppModalUI?.closeAll?.();
-        })
-        .atualizarItemCompra(idAtual, dados);
-
+      try {
+        if (!window.AppOptimistic?.enqueue) {
+          throw new Error('Fila de sincronizacao indisponivel');
+        }
+        window.AppOptimistic.enqueue({
+          scope: 'compra',
+          handler: eraEdicao ? 'compra.update' : 'compra.create',
+          entityKey: `compra:${optimisticId}`,
+          payload: dados,
+          meta: {
+            domain: 'compra',
+            action: eraEdicao ? 'update' : 'create',
+            source: 'compras',
+            target_id: eraEdicao ? idAtual : '',
+            temp_id: eraEdicao ? '' : optimisticId,
+            before_item: snapshot ? limparCompraMeta(snapshot) : null,
+            optimistic_item: limparCompraMeta(optimisticItem)
+          }
+        });
+        setSalvando(false);
         editandoId = null;
         origemRefazerId = null;
-        return;
+        finalizarUX();
+        window.AppModalUI?.closeAll?.();
+        mostrarToast(eraEdicao
+          ? 'Alteracao aplicada localmente. Sincronizando...'
+          : 'Compra criada localmente. Sincronizando...');
+      } catch (error) {
+        setSalvando(false);
+        mostrarToast(error?.message || 'Erro ao enfileirar compra', 'erro');
+        reabrirFormularioAposErro(dadosFormulario, {
+          editando: eraEdicao,
+          id: idAtual,
+          origemRefazerId: eraEdicao ? '' : origemRefAtual
+        });
       }
-
-      const tempId = `tmp_${Date.now()}`;
-      const itemTemp = {
-        ID: tempId,
-        ...dados
-      };
-
-      ComprasStore.add(itemTemp);
-      renderListaAtual();
-      finalizarUX();
-      mostrarToast('Salvando...');
-
-      window.AppRequest.runner()
-        .withFailureHandler(() => {
-          ComprasStore.remove(tempId);
-          renderListaAtual();
-          mostrarToast('Erro ao salvar compra', 'erro');
-          setSalvando(false);
-          reabrirFormularioAposErro(dadosFormulario, { editando: false, origemRefazerId: origemRefAtual });
-        })
-        .withSuccessHandler(itemSalvo => {
-          ComprasStore.remove(tempId);
-
-          if (!itemSalvo || !itemSalvo.ID) {
-            const concluirSync = window.AppSyncFeedback?.iniciar
-              ? window.AppSyncFeedback.iniciar('Salvo com sucesso. Atualizando dados...')
-              : null;
-            setSalvando(false);
-            if (window.AppTabRefresh?.requestSync) {
-              window.AppTabRefresh.requestSync('compras', {
-                delayMs: 280,
-                prefetch: true,
-                onDone: () => {
-                  if (concluirSync) {
-                    concluirSync('Dados atualizados');
-                  } else {
-                    mostrarToast('Dados atualizados');
-                  }
-                }
-              });
-            } else {
-              carregarCompras(true, () => {
-                if (concluirSync) {
-                  concluirSync('Dados atualizados');
-                } else {
-                  mostrarToast('Dados atualizados');
-                }
-              });
-            }
-            invalidarCacheDashboardPorImpacto(dados);
-            return;
-          }
-
-          ComprasStore.add(itemSalvo);
-          renderListaAtual();
-          mostrarToast('Salvo com sucesso');
-          invalidarCacheDashboardPorImpacto(dados, itemSalvo);
-          setSalvando(false);
-          window.AppModalUI?.closeAll?.();
-        })
-        .criarItemCompra(dados);
     }
 
     function finalizarUX() {
@@ -480,6 +712,10 @@
 
       if (!item) {
         mostrarToast('Item nao encontrado', 'erro');
+        return;
+      }
+      if (getCompraUiState(item).blockActions) {
+        mostrarToast('Esta compra possui uma sincronizacao pendente.', 'erro');
         return;
       }
 
@@ -495,6 +731,10 @@
 
       if (!item) {
         mostrarToast('Compra nao encontrada', 'erro');
+        return;
+      }
+      if (getCompraUiState(item).blockActions) {
+        mostrarToast('Esta compra possui uma sincronizacao pendente.', 'erro');
         return;
       }
 
@@ -521,19 +761,39 @@
       if (!confirm('Deseja remover esta compra?')) return;
 
       const snapshot = ComprasStore.getById(id);
+      if (!snapshot) {
+        mostrarToast('Compra nao encontrada', 'erro');
+        return;
+      }
+      if (getCompraUiState(snapshot).blockActions) {
+        mostrarToast('Esta compra ja possui uma sincronizacao pendente.', 'erro');
+        return;
+      }
 
-      ComprasStore.remove(id);
-      renderListaAtual();
-      mostrarToast('Compra removida');
-      invalidarCacheDashboardPorImpacto(snapshot);
-
-      window.AppRequest.runner()
-        .withFailureHandler(() => {
-          ComprasStore.add(snapshot);
-          renderListaAtual();
-          mostrarToast('Erro ao remover', 'erro');
-        })
-        .deletarItemCompra(id);
+      try {
+        if (!window.AppOptimistic?.enqueue) {
+          throw new Error('Fila de sincronizacao indisponivel');
+        }
+        window.AppOptimistic.enqueue({
+          scope: 'compra',
+          handler: 'compra.delete',
+          entityKey: `compra:${String(id || '').trim()}`,
+          payload: {
+            id: String(id || '').trim()
+          },
+          meta: {
+            domain: 'compra',
+            action: 'delete',
+            source: 'compras',
+            target_id: String(id || '').trim(),
+            before_item: limparCompraMeta(snapshot),
+            optimistic_item: limparCompraMeta(snapshot)
+          }
+        });
+        mostrarToast('Exclusao aplicada localmente. Sincronizando...');
+      } catch (error) {
+        mostrarToast(error?.message || 'Erro ao enfileirar exclusao da compra', 'erro');
+      }
     }
 
     function adicionarAoEstoque(id) {
@@ -546,6 +806,10 @@
         mostrarToast('Compra nao encontrada', 'erro');
         return;
       }
+      if (getCompraUiState(snapshot).blockActions) {
+        mostrarToast('Esta compra ja possui uma sincronizacao pendente.', 'erro');
+        return;
+      }
 
       const jaAdicionada = String(snapshot.adicionado_estoque).toLowerCase() === 'true';
       if (jaAdicionada) {
@@ -554,48 +818,32 @@
       }
 
       adicionandoAoEstoque.add(id);
-      mostrarToast('Adicionando ao estoque...');
-
-      window.AppRequest.runner()
-        .withFailureHandler(() => {
-          adicionandoAoEstoque.delete(id);
-          mostrarToast('Erro ao adicionar ao estoque', 'erro');
-        })
-        .withSuccessHandler(resp => {
-          adicionandoAoEstoque.delete(id);
-          ComprasStore.update(id, {
-            adicionado_estoque: true,
-            estoque_id: resp?.compraAtualizada?.estoque_id || resp?.itemEstoqueCriado?.ID || ''
-          });
-          renderListaAtual();
-          if (resp?.itemEstoqueCriado && window.EstoqueStore) {
-            // Se o estoque ainda nao foi carregado, add nao liga o flag isLoaded.
-            const atual = EstoqueStore.isLoaded() ? EstoqueStore.get() : [];
-            EstoqueStore.set([resp.itemEstoqueCriado, ...atual]);
-            if (typeof aplicarBuscaEstoque === 'function') {
-              aplicarBuscaEstoque();
-            } else if (window.EstoqueUI?.renderLista) {
-              EstoqueUI.renderLista(EstoqueStore.get());
-            }
+      try {
+        if (!window.AppOptimistic?.enqueue) {
+          throw new Error('Fila de sincronizacao indisponivel');
+        }
+        window.AppOptimistic.enqueue({
+          scope: 'compra',
+          handler: 'compra.add_stock',
+          entityKey: `compra:${String(id || '').trim()}`,
+          payload: {
+            id: String(id || '').trim()
+          },
+          meta: {
+            domain: 'compra',
+            action: 'add_stock',
+            source: 'compras',
+            target_id: String(id || '').trim(),
+            before_item: limparCompraMeta(snapshot),
+            optimistic_item: limparCompraMeta(applyAdicionarAoEstoqueCompra(snapshot))
           }
-          if (window.EstoqueController?.syncFromBackend) {
-            if (window.AppTabRefresh?.requestSync) {
-              window.AppTabRefresh.requestSync('estoque', {
-                delayMs: 260,
-                prefetch: true
-              });
-            } else {
-              EstoqueController.syncFromBackend();
-            }
-          }
-          if (window.AppTabRefresh?.markDirty) {
-            window.AppTabRefresh.markDirty('estoque');
-            window.AppTabRefresh.markDirty('vendas');
-          }
-          invalidarCacheDashboardPorImpacto(snapshot, resp?.compraAtualizada, resp?.itemEstoqueCriado);
-          mostrarToast('Adicionado ao estoque');
-        })
-        .adicionarCompraAoEstoque(id);
+        });
+        mostrarToast('Adicao ao estoque aplicada localmente. Sincronizando...');
+      } catch (error) {
+        mostrarToast(error?.message || 'Erro ao enfileirar adicao ao estoque', 'erro');
+      } finally {
+        adicionandoAoEstoque.delete(id);
+      }
     }
 
     function limparEdicao() {
@@ -610,6 +858,10 @@
       const item = ComprasStore.getById(id);
       if (!item) {
         mostrarToast('Compra nao encontrada', 'erro');
+        return;
+      }
+      if (getCompraUiState(item).blockActions) {
+        mostrarToast('Esta compra ja possui uma sincronizacao pendente.', 'erro');
         return;
       }
 
@@ -672,64 +924,56 @@
       const compraId = pagamentoCompraId;
       const dadosFormulario = { ...dados };
       const itemAntes = ComprasStore.getById(compraId);
+      if (!itemAntes) {
+        mostrarToast('Compra nao encontrada', 'erro');
+        return;
+      }
+      const optimisticItem = applyPagamentoCompra(itemAntes, {
+        data_pagamento: dados.data_pagamento,
+        valor_pago: valorPago,
+        parcela_alvo_id: dados.parcela_alvo_id,
+        forma_pagamento: dados.forma_pagamento,
+        observacao: dados.observacao
+      });
 
       salvandoPagamento = true;
       setBloqueioMutacaoPagamento(true);
       ComprasUI.fecharModalPagamentoCompra();
       pagamentoCompraId = null;
-
-      window.AppRequest.runner()
-        .withFailureHandler(err => {
-          salvandoPagamento = false;
-          setBloqueioMutacaoPagamento(false);
-          mostrarToast(err?.message || 'Erro ao registrar pagamento', 'erro');
-          reabrirModalPagamentoCompraAposErro(compraId, dadosFormulario);
-        })
-        .withSuccessHandler(resp => {
-          salvandoPagamento = false;
-          setBloqueioMutacaoPagamento(false);
-          window.AppModalUI?.closeAll?.();
-
-          if (resp?.compraAtualizada?.ID) {
-            ComprasStore.update(resp.compraAtualizada.ID, resp.compraAtualizada);
-            renderListaAtual();
-            invalidarCacheDashboardPorImpacto(itemAntes, dados, resp?.compraAtualizada);
-            mostrarToast('Pagamento registrado');
-          } else {
-            const concluirSync = window.AppSyncFeedback?.iniciar
-              ? window.AppSyncFeedback.iniciar('Pagamento registrado. Atualizando dados...')
-              : null;
-            if (window.AppTabRefresh?.requestSync) {
-              window.AppTabRefresh.requestSync('compras', {
-                delayMs: 280,
-                prefetch: true,
-                onDone: () => {
-                  if (concluirSync) {
-                    concluirSync('Dados atualizados');
-                  } else {
-                    mostrarToast('Dados atualizados');
-                  }
-                }
-              });
-            } else {
-              carregarCompras(true, () => {
-                if (concluirSync) {
-                  concluirSync('Dados atualizados');
-                } else {
-                  mostrarToast('Dados atualizados');
-                }
-              });
-            }
-            invalidarCacheDashboardPorImpacto(itemAntes, dados);
+      try {
+        if (!window.AppOptimistic?.enqueue) {
+          throw new Error('Fila de sincronizacao indisponivel');
+        }
+        window.AppOptimistic.enqueue({
+          scope: 'compra',
+          handler: 'compra.payment',
+          entityKey: `compra:${String(compraId || '').trim()}`,
+          payload: {
+            data_pagamento: dados.data_pagamento,
+            valor_pago: valorPago,
+            parcela_alvo_id: dados.parcela_alvo_id,
+            forma_pagamento: dados.forma_pagamento,
+            observacao: dados.observacao
+          },
+          meta: {
+            domain: 'compra',
+            action: 'payment',
+            source: 'compras',
+            target_id: String(compraId || '').trim(),
+            before_item: limparCompraMeta(itemAntes),
+            optimistic_item: limparCompraMeta(optimisticItem)
           }
-        })
-        .registrarPagamentoCompra(compraId, {
-          data_pagamento: dados.data_pagamento,
-          valor_pago: valorPago,
-          parcela_alvo_id: dados.parcela_alvo_id,
-          forma_pagamento: dados.forma_pagamento,
-          observacao: dados.observacao
         });
+        salvandoPagamento = false;
+        setBloqueioMutacaoPagamento(false);
+        window.AppModalUI?.closeAll?.();
+        mostrarToast('Pagamento aplicado localmente. Sincronizando...');
+      } catch (error) {
+        salvandoPagamento = false;
+        setBloqueioMutacaoPagamento(false);
+        mostrarToast(error?.message || 'Erro ao enfileirar pagamento', 'erro');
+        reabrirModalPagamentoCompraAposErro(compraId, dadosFormulario);
+      }
     }
 
     function cancelarPagamentoCompra() {
@@ -748,6 +992,7 @@
       registrarPagamento,
       confirmarPagamentoCompra,
       cancelarPagamentoCompra,
+      retryCompraMutation,
       excluir,
       adicionarAoEstoque,
       limparEdicao

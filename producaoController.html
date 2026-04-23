@@ -6,15 +6,166 @@
     let consumoInit = false;
     let salvando = false;
     let mutationLockToken = null;
+    let listenerMutacoesRegistrado = false;
 
     let produtos = [];
     let estoqueOpcoes = [];
     let receitasCache = {};
     let tiposValidacao = [];
 
+    function getProducaoUiState(item) {
+      if (!window.AppEntityMutations?.getUiState) {
+        return {
+          status: '',
+          action: '',
+          label: '',
+          message: '',
+          canRetry: false,
+          blockActions: false
+        };
+      }
+      return window.AppEntityMutations.getUiState(item, {
+        pendingLabels: {
+          delete: 'Exclusao pendente'
+        },
+        errorLabels: {
+          delete: 'Falha ao excluir'
+        }
+      });
+    }
+
+    function limparProducaoMeta(item) {
+      return window.AppEntityMutations?.limparMeta
+        ? window.AppEntityMutations.limparMeta(item)
+        : { ...(item || {}) };
+    }
+
+    function ensureProducaoDisponivel(producaoId, contexto = 'Operacao') {
+      const item = ProducaoStore.getById(String(producaoId || '').trim());
+      if (!item) return true;
+      if (!getProducaoUiState(item).blockActions) return true;
+      mostrarToast(`${contexto}: esta producao possui uma sincronizacao pendente.`, 'erro');
+      return false;
+    }
+
+    function buildProducaoOptimistic(payload, options = {}) {
+      const base = limparProducaoMeta(options.baseItem);
+      const id = String(options.id || base.producao_id || '').trim()
+        || (window.AppEntityMutations?.tempId?.('OP_TMP') || `OP_TMP_${Date.now()}`);
+      const produto = produtos.find(p => String(p?.produto_id || '').trim() === String(payload?.produto_id || '').trim())
+        || window.ProdutosStore?.getById?.(String(payload?.produto_id || '').trim())
+        || {};
+      return {
+        ...base,
+        ...payload,
+        producao_id: id,
+        nome_produto: String(base?.nome_produto || produto?.nome_produto || '').trim(),
+        unidade_produto: String(base?.unidade_produto || produto?.unidade_produto || '').trim(),
+        receita_nome: String(payload?.receita_nome || base?.receita_nome || '').trim(),
+        etapas: Array.isArray(base?.etapas) ? base.etapas : [],
+        saidas_previstas: Array.isArray(base?.saidas_previstas) ? base.saidas_previstas : [],
+        qtd_produzida_acumulada: Number(base?.qtd_produzida_acumulada || 0),
+        qtd_restante: Number((payload?.qtd_planejada ?? base?.qtd_planejada) || 0)
+      };
+    }
+
+    function resolveProducaoSuccessItem(entry, detail, helpers = {}) {
+      const limparMeta = helpers?.limparMeta || (valor => valor);
+      const meta = entry?.meta || {};
+      const result = detail?.result || {};
+      if (result?.producao_id) {
+        return limparMeta(result);
+      }
+      return limparMeta(meta.optimistic_item) || limparMeta(meta.before_item);
+    }
+
+    function listarMutacoesProducaoAtivas() {
+      if (!window.AppOptimistic?.list) return [];
+      return window.AppOptimistic.list({
+        scope: 'producao',
+        domain: 'producao'
+      });
+    }
+
+    function reconciliarListaProducaoComMutacoes(listaBase) {
+      if (!window.AppEntityMutations?.mergeFetchedList) {
+        return Array.isArray(listaBase) ? [...listaBase] : [];
+      }
+      return window.AppEntityMutations.mergeFetchedList(listaBase, listarMutacoesProducaoAtivas(), {
+        domain: 'producao',
+        idKey: 'producao_id',
+        resolveSuccessItem: resolveProducaoSuccessItem
+      });
+    }
+
+    function persistirEReRenderizarProducao(lista) {
+      if (Array.isArray(lista)) {
+        ProducaoStore.set(lista);
+      }
+      renderListaAtual();
+    }
+
+    function agendarSyncSilenciosoProducao() {
+      if (window.AppTabRefresh?.requestSync) {
+        window.AppTabRefresh.requestSync('producao', {
+          delayMs: 900,
+          prefetch: true
+        });
+        return;
+      }
+      setTimeout(() => carregarProducao(true), 900);
+    }
+
+    function tratarEventoMutacaoProducao(detail) {
+      const entry = detail?.entry;
+      if (!entry || String(entry.scope || '').trim() !== 'producao') return;
+      if (String(entry?.meta?.domain || '').trim() !== 'producao') return;
+      if (!window.AppEntityMutations?.applyEntryToList) return;
+
+      const atualizada = window.AppEntityMutations.applyEntryToList(ProducaoStore.get(), detail, {
+        domain: 'producao',
+        idKey: 'producao_id',
+        resolveSuccessItem: resolveProducaoSuccessItem
+      });
+      persistirEReRenderizarProducao(atualizada);
+
+      if (String(detail?.type || '').trim().toLowerCase() === 'success') {
+        marcarDashboardComoSujo();
+        agendarSyncSilenciosoProducao();
+        return;
+      }
+
+      if (String(detail?.type || '').trim().toLowerCase() === 'error'
+        && String(entry?.meta?.source || '').trim() === 'producao') {
+        mostrarToast(`${detail?.errorMessage || 'Falha ao sincronizar producao'}. Use "Tentar novamente".`, 'erro');
+      }
+    }
+
+    function registrarListenerMutacoesSeNecessario() {
+      if (listenerMutacoesRegistrado) return;
+      if (typeof window === 'undefined' || typeof window.addEventListener !== 'function') return;
+      window.addEventListener('app:optimistic-mutation', evento => {
+        tratarEventoMutacaoProducao(evento?.detail || {});
+      });
+      listenerMutacoesRegistrado = true;
+    }
+
+    function retryProducaoMutation(id) {
+      const item = ProducaoStore.getById(String(id || '').trim());
+      const mutationId = String(item?._localMutationId || '').trim();
+      if (!mutationId || !window.AppOptimistic?.retry) {
+        mostrarToast('Nao ha sincronizacao pendente para reenviar', 'erro');
+        return;
+      }
+      window.AppOptimistic.retry(mutationId);
+      mostrarToast('Tentando sincronizar novamente...');
+    }
+
     function init() {
       if (iniciado) return;
 
+      registrarListenerMutacoesSeNecessario();
+      window.AppOptimistic?.process?.();
       carregarProdutos();
       carregarEstoqueOpcoes();
       carregarValidacoes();
@@ -66,8 +217,7 @@
     function hidratarProducaoDoCache() {
       const listaCache = window.AppTabCache?.ler?.('producao');
       if (!Array.isArray(listaCache)) return false;
-      ProducaoStore.set(listaCache);
-      renderListaAtual();
+      persistirEReRenderizarProducao(reconciliarListaProducaoComMutacoes(listaCache));
       return true;
     }
 
@@ -238,6 +388,13 @@
     }
 
     function carregarProdutos(forcarRecarregar = false, onDone) {
+      if (!forcarRecarregar && window.ProdutosStore?.get) {
+        const locais = window.ProdutosStore.get();
+        if (Array.isArray(locais) && locais.length > 0) {
+          produtos = locais;
+          ProducaoUI.renderProdutos(produtos);
+        }
+      }
       window.AppRequest.runner()
         .withSuccessHandler(lista => {
           produtos = Array.isArray(lista) ? lista : [];
@@ -251,6 +408,13 @@
     }
 
     function carregarEstoqueOpcoes(forcarRecarregar = false, onDone) {
+      if (!forcarRecarregar && window.EstoqueStore?.get) {
+        const locais = window.EstoqueStore.get();
+        if (Array.isArray(locais) && locais.length > 0) {
+          estoqueOpcoes = locais;
+          ProducaoUI.setEstoqueOpcoes?.(estoqueOpcoes);
+        }
+      }
       window.AppRequest.runner()
         .withSuccessHandler(lista => {
           estoqueOpcoes = Array.isArray(lista) ? lista : [];
@@ -337,8 +501,7 @@
           if (window.AppRuntime?.setReadOnly) {
             window.AppRuntime.setReadOnly(false);
           }
-          ProducaoStore.set(lista);
-          renderListaAtual();
+          persistirEReRenderizarProducao(reconciliarListaProducaoComMutacoes(lista));
           if (typeof onDone === 'function') onDone();
         })
         .withFailureHandler(err => {
@@ -427,115 +590,52 @@
       const dadosFormulario = { ...dados };
 
       setSalvando(true);
+      const eraEdicao = !!editandoId;
+      const idAtual = String(editandoId || '').trim();
+      const snapshot = eraEdicao ? ProducaoStore.getById(idAtual) : null;
+      const optimisticId = eraEdicao
+        ? idAtual
+        : (window.AppEntityMutations?.tempId?.('OP_TMP') || `OP_TMP_${Date.now()}`);
+      const optimisticItem = buildProducaoOptimistic(dados, {
+        baseItem: snapshot,
+        id: optimisticId
+      });
 
-      if (editandoId) {
-        const idAtual = editandoId;
-        const snapshot = { ...ProducaoStore.getById(idAtual) };
-
-        ProducaoStore.update(idAtual, dados);
-        renderListaAtual();
-        finalizarUX();
-
-        window.AppRequest.runner()
-        .withFailureHandler(err => {
-          ProducaoStore.update(idAtual, snapshot);
-          renderListaAtual();
-          const msg = err?.message || 'Erro ao salvar edicao';
-          mostrarToast(msg, 'erro');
-          setSalvando(false);
-          reabrirFormularioAposErro(dadosFormulario, { editando: true, id: idAtual });
-        })
-        .withSuccessHandler(() => {
-          mostrarToast('Salvo com sucesso');
-          marcarDashboardComoSujo();
-          if (window.AppTabRefresh?.requestSync) {
-            window.AppTabRefresh.requestSync('producao', {
-              delayMs: 300,
-              prefetch: true
-            });
+      try {
+        if (!window.AppOptimistic?.enqueue) {
+          throw new Error('Fila de sincronizacao indisponivel');
+        }
+        window.AppOptimistic.enqueue({
+          scope: 'producao',
+          handler: eraEdicao ? 'producao.update' : 'producao.create',
+          entityKey: `producao:${optimisticId}`,
+          payload: dados,
+          meta: {
+            domain: 'producao',
+            action: eraEdicao ? 'update' : 'create',
+            source: 'producao',
+            target_id: eraEdicao ? idAtual : '',
+            temp_id: eraEdicao ? '' : optimisticId,
+            before_item: snapshot ? limparProducaoMeta(snapshot) : null,
+            optimistic_item: limparProducaoMeta(optimisticItem)
           }
-          setSalvando(false);
-          window.AppModalUI?.closeAll?.();
-        })
-        .atualizarProducao(idAtual, dados);
-
+        });
+        setSalvando(false);
         editandoId = null;
-        return;
+        finalizarUX();
+        window.AppModalUI?.closeAll?.();
+        mostrarToast(eraEdicao
+          ? 'Alteracao aplicada localmente. Sincronizando...'
+          : 'Producao criada localmente. Sincronizando...');
+      } catch (error) {
+        setSalvando(false);
+        const msg = error?.message || 'Erro ao enfileirar producao';
+        mostrarToast(msg, 'erro');
+        reabrirFormularioAposErro(dadosFormulario, {
+          editando: eraEdicao,
+          id: idAtual
+        });
       }
-
-      const tempId = `tmp_${Date.now()}`;
-      const produto = produtos.find(p => p.produto_id === dados.produto_id) || {};
-
-      const itemTemp = {
-        producao_id: tempId,
-        nome_produto: produto.nome_produto || '',
-        unidade_produto: produto.unidade_produto || '',
-        receita_nome: dados.receita_nome || '',
-        etapas: [],
-        ...dados
-      };
-
-      ProducaoStore.add(itemTemp);
-      renderListaAtual();
-      finalizarUX();
-      mostrarToast('Salvando...');
-
-      window.AppRequest.runner()
-        .withFailureHandler(err => {
-          ProducaoStore.remove(tempId);
-          renderListaAtual();
-          const msg = err?.message || 'Erro ao salvar producao';
-          mostrarToast(msg, 'erro');
-          setSalvando(false);
-          reabrirFormularioAposErro(dadosFormulario, { editando: false });
-        })
-        .withSuccessHandler(itemSalvo => {
-          ProducaoStore.remove(tempId);
-
-          if (!itemSalvo || !itemSalvo.producao_id) {
-            const concluirSync = window.AppSyncFeedback?.iniciar
-              ? window.AppSyncFeedback.iniciar('Salvo com sucesso. Atualizando dados...')
-              : null;
-            marcarDashboardComoSujo();
-            setSalvando(false);
-            if (window.AppTabRefresh?.requestSync) {
-              window.AppTabRefresh.requestSync('producao', {
-                delayMs: 280,
-                prefetch: true,
-                onDone: () => {
-                  if (concluirSync) {
-                    concluirSync('Dados atualizados');
-                  } else {
-                    mostrarToast('Dados atualizados');
-                  }
-                }
-              });
-            } else {
-              carregarProducao(true, () => {
-                if (concluirSync) {
-                  concluirSync('Dados atualizados');
-                } else {
-                  mostrarToast('Dados atualizados');
-                }
-              });
-            }
-            return;
-          }
-
-          ProducaoStore.add(itemSalvo);
-          renderListaAtual();
-          mostrarToast('Salvo com sucesso');
-          marcarDashboardComoSujo();
-          if (window.AppTabRefresh?.requestSync) {
-            window.AppTabRefresh.requestSync('producao', {
-              delayMs: 300,
-              prefetch: true
-            });
-          }
-          setSalvando(false);
-          window.AppModalUI?.closeAll?.();
-        })
-        .criarProducao(dados);
     }
 
     function finalizarUX() {
@@ -548,6 +648,10 @@
 
       if (!item) {
         mostrarToast('Producao nao encontrada', 'erro');
+        return;
+      }
+      if (getProducaoUiState(item).blockActions) {
+        mostrarToast('Esta producao possui uma sincronizacao pendente.', 'erro');
         return;
       }
 
@@ -586,21 +690,39 @@
       if (!confirm('Deseja remover esta producao?')) return;
 
       const snapshot = ProducaoStore.getById(id);
+      if (!snapshot) {
+        mostrarToast('Producao nao encontrada', 'erro');
+        return;
+      }
+      if (getProducaoUiState(snapshot).blockActions) {
+        mostrarToast('Esta producao ja possui uma sincronizacao pendente.', 'erro');
+        return;
+      }
 
-      ProducaoStore.remove(id);
-      renderListaAtual();
-      mostrarToast('Producao removida');
-
-      window.AppRequest.runner()
-        .withFailureHandler(() => {
-          ProducaoStore.add(snapshot);
-          renderListaAtual();
-          mostrarToast('Erro ao remover', 'erro');
-        })
-        .withSuccessHandler(() => {
-          marcarDashboardComoSujo();
-        })
-        .deletarProducao(id);
+      try {
+        if (!window.AppOptimistic?.enqueue) {
+          throw new Error('Fila de sincronizacao indisponivel');
+        }
+        window.AppOptimistic.enqueue({
+          scope: 'producao',
+          handler: 'producao.delete',
+          entityKey: `producao:${String(id || '').trim()}`,
+          payload: {
+            id: String(id || '').trim()
+          },
+          meta: {
+            domain: 'producao',
+            action: 'delete',
+            source: 'producao',
+            target_id: String(id || '').trim(),
+            before_item: limparProducaoMeta(snapshot),
+            optimistic_item: limparProducaoMeta(snapshot)
+          }
+        });
+        mostrarToast('Exclusao aplicada localmente. Sincronizando...');
+      } catch (error) {
+        mostrarToast(error?.message || 'Erro ao enfileirar exclusao da producao', 'erro');
+      }
     }
 
     function carregarMateriaisPrevistos(id, forcar = false, onDone) {
@@ -678,6 +800,7 @@
       const prodId = String(producaoId || '').trim();
       const lotId = String(loteId || '').trim();
       const custo = Number(String(custoUnitarioInput || '').replace(',', '.'));
+      if (!ensureProducaoDisponivel(prodId, 'Atualizacao bloqueada')) return;
 
       if (!prodId || !lotId) {
         mostrarToast('Lote de saida invalido', 'erro');
@@ -740,6 +863,7 @@
       const nome = String(nomeSaida || '').trim();
       const produtoRefId = String(produtoRefIdInput || '').trim();
       const preco = Number(String(precoVendaInput || '').replace(',', '.'));
+      if (!ensureProducaoDisponivel(prodId, 'Atualizacao bloqueada')) return;
 
       if (!prodId) {
         mostrarToast('Producao invalida', 'erro');
@@ -841,6 +965,7 @@
       const needId = String(necessidadeId || '').trim();
       const dados = payload || {};
       const estId = String(dados.estoque_id || '').trim();
+      if (!ensureProducaoDisponivel(prodId, 'Vinculo bloqueado')) return;
 
       if (!prodId || !needId) {
         mostrarToast('Reserva invalida', 'erro');
@@ -872,6 +997,7 @@
       const prodId = String(producaoId || '').trim();
       const needId = String(necessidadeId || '').trim();
       const resId = String(reservaId || '').trim();
+      if (!ensureProducaoDisponivel(prodId, 'Vinculo bloqueado')) return;
 
       if (!prodId || !needId || !resId) {
         mostrarToast('Reserva invalida', 'erro');
@@ -894,6 +1020,7 @@
     function adicionarItemManual(producaoId, payload, buttonEl) {
       if (!podeAlterarDados('Adicao bloqueada em modo somente leitura')) return;
       const prodId = String(producaoId || '').trim();
+      if (!ensureProducaoDisponivel(prodId, 'Adicao bloqueada')) return;
       if (!prodId) {
         mostrarToast('Producao invalida', 'erro');
         return;
@@ -937,6 +1064,7 @@
 
     function abrirAtualizarEstoque(id) {
       if (!podeAlterarDados('Atualizacao bloqueada em modo somente leitura')) return;
+      if (!ensureProducaoDisponivel(id, 'Atualizacao bloqueada')) return;
       const item = ProducaoStore.getById(id);
       if (!item) return;
 
@@ -983,6 +1111,7 @@
         mostrarToast('Producao invalida', 'erro');
         return;
       }
+      if (!ensureProducaoDisponivel(payload.producaoId, 'Atualizacao bloqueada')) return;
       if (payload.qtdProduzida <= 0) {
         mostrarToast('Informe a quantidade produzida do lote', 'erro');
         return;
@@ -1076,6 +1205,7 @@
         mostrarToast('Producao invalida', 'erro');
         return;
       }
+      if (!ensureProducaoDisponivel(payload.producaoId, 'Vinculo bloqueado')) return;
       if (payload.faltantes > 0) {
         mostrarToast('Selecione o item de estoque para todos os pendentes', 'erro');
         return;
@@ -1113,6 +1243,7 @@
 
     function adicionarEtapa(producaoId, nome, buttonEl) {
       if (!podeAlterarDados('Adicao bloqueada em modo somente leitura')) return;
+      if (!ensureProducaoDisponivel(producaoId, 'Adicao bloqueada')) return;
       const item = ProducaoStore.getById(producaoId);
       if (!item) return;
 
@@ -1154,6 +1285,7 @@
 
     function marcarEtapa(producaoId, etapaId, feito) {
       if (!podeAlterarDados('Edicao bloqueada em modo somente leitura')) return;
+      if (!ensureProducaoDisponivel(producaoId, 'Edicao bloqueada')) return;
       const item = ProducaoStore.getById(producaoId);
       if (!item) return;
 
@@ -1198,6 +1330,7 @@
 
     function iniciarEdicaoEtapa(producaoId, etapaId) {
       if (!podeAlterarDados('Edicao bloqueada em modo somente leitura')) return;
+      if (!ensureProducaoDisponivel(producaoId, 'Edicao bloqueada')) return;
       const item = ProducaoStore.getById(producaoId);
       if (!item) return;
 
@@ -1225,6 +1358,7 @@
 
     function salvarEdicaoEtapa(producaoId, etapaId, novoNome, buttonEl) {
       if (!podeAlterarDados('Edicao bloqueada em modo somente leitura')) return;
+      if (!ensureProducaoDisponivel(producaoId, 'Edicao bloqueada')) return;
       const item = ProducaoStore.getById(producaoId);
       if (!item) return;
 
@@ -1274,6 +1408,7 @@
 
     function moverEtapaParaCima(producaoId, etapaId) {
       if (!podeAlterarDados('Edicao bloqueada em modo somente leitura')) return;
+      if (!ensureProducaoDisponivel(producaoId, 'Edicao bloqueada')) return;
       const item = ProducaoStore.getById(producaoId);
       if (!item) return;
 
@@ -1322,6 +1457,7 @@
     function deletarEtapa(producaoId, etapaId) {
       if (!podeAlterarDados('Exclusao bloqueada em modo somente leitura')) return;
       if (!confirm('Deseja remover esta etapa?')) return;
+      if (!ensureProducaoDisponivel(producaoId, 'Exclusao bloqueada')) return;
 
       const item = ProducaoStore.getById(producaoId);
       if (!item) return;
@@ -1378,6 +1514,7 @@
       atualizarPrecoVendaProdutoSaida,
       confirmarPendenciasVinculo,
       limparEdicao,
+      retryProducaoMutation,
       iniciarEdicaoEtapa,
       cancelarEdicaoEtapa,
       salvarEdicaoEtapa,
