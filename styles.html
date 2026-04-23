@@ -930,6 +930,63 @@
     color: #1d6b2a;
   }
 
+  .despesa-local-state-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin: 8px 0 2px;
+    flex-wrap: wrap;
+  }
+
+  .despesa-local-state {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    border-radius: 999px;
+    padding: 4px 10px;
+    font-size: 11.5px;
+    font-weight: 800;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+  }
+
+  .despesa-local-state-pending {
+    background: #eef4ff;
+    color: #2857a4;
+    border: 1px solid #c7dafb;
+  }
+
+  .despesa-local-state-error {
+    background: #fff0f0;
+    color: #9f1f1f;
+    border: 1px solid #f4c0c0;
+  }
+
+  .despesa-local-message {
+    margin: 6px 0 2px;
+    font-size: 12.5px;
+    color: #9f1f1f;
+  }
+
+  .despesa-btn-retry {
+    border-color: #d9b57a;
+    background: #fff7e6;
+    color: #7a4b00;
+  }
+
+  .despesa-card.despesa-local-pending {
+    box-shadow: 0 0 0 1px rgba(40, 87, 164, 0.12);
+  }
+
+  .despesa-card.despesa-local-error {
+    box-shadow: 0 0 0 1px rgba(159, 31, 31, 0.14);
+  }
+
+  .despesa-card.despesa-local-delete {
+    opacity: 0.78;
+  }
+
   .despesa-card-meta {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));

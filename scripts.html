@@ -938,72 +938,11 @@
   function createMutationUiLock() {
     let seq = 0;
     const tokens = new Set();
-    const estadosOriginais = new WeakMap();
-
-    const classesSomenteLeitura = [
-      'ver-mais',
-      'modal-close-square',
-      'btn-carregar-mais',
-      'compras-separador-acao'
-    ];
-    const acoesSomenteLeituraOnclick = [
-      'fecharmodal',
-      'fecharformulario',
-      'cancelarpagamento',
-      'cancelarrecebimento',
-      'fecharobservabilidadecard'
-    ];
-
-    function coletarBotoesBloqueio() {
-      return [...document.querySelectorAll('button')].filter(isMutationButton);
-    }
-
-    function isReadOnlyButton(btn) {
-      if (!btn || btn.tagName !== 'BUTTON') return false;
-      if (btn.classList && classesSomenteLeitura.some(cls => btn.classList.contains(cls))) {
-        return true;
-      }
-      if (btn.id === 'btnDashboardAtualizar') return true;
-      const onclick = String(btn.getAttribute('onclick') || '').toLowerCase();
-      return acoesSomenteLeituraOnclick.some(acao => onclick.includes(acao));
-    }
 
     function aplicarEstadoBloqueio(ativo) {
       if (document?.body) {
         document.body.classList.toggle('app-mutation-locked', !!ativo);
       }
-      const botoes = coletarBotoesBloqueio();
-
-      if (ativo) {
-        botoes.forEach(btn => {
-          if (!estadosOriginais.has(btn)) {
-            estadosOriginais.set(btn, !!btn.disabled);
-          }
-          btn.disabled = true;
-          btn.dataset.appMutationLocked = '1';
-        });
-        return;
-      }
-
-      botoes.forEach(btn => {
-        if (btn.dataset.appMutationLocked !== '1') return;
-        const estadoOriginal = estadosOriginais.has(btn)
-          ? estadosOriginais.get(btn)
-          : false;
-        btn.disabled = !!estadoOriginal;
-        delete btn.dataset.appMutationLocked;
-        estadosOriginais.delete(btn);
-      });
-    }
-
-    function isMutationButton(btn) {
-      if (!btn || btn.tagName !== 'BUTTON') return false;
-      if (btn.closest('.navbar')) return false;
-      if (btn.closest('.top-bar')) return false;
-      if (btn.closest('#painelFiltroEstoque')) return false;
-      if (btn.closest('#painelFiltroCompras')) return false;
-      if (isReadOnlyButton(btn)) return false;
-      return true;
     }
 
     function emitirMudanca() {
@@ -1046,14 +985,6 @@
     function isLocked() {
       return tokens.size > 0;
     }
-
-    document.addEventListener('click', evento => {
-      if (!isLocked()) return;
-      const btn = evento.target?.closest?.('button');
-      if (!btn || !isMutationButton(btn)) return;
-      evento.preventDefault();
-      evento.stopImmediatePropagation();
-    }, true);
 
     return {
       lock,
@@ -1141,6 +1072,717 @@
   }
 
   window.AppActionButtons = window.AppActionButtons || createActionButtonHelper();
+
+  function createOptimisticMutationHelper() {
+    const STORAGE_KEY = 'app:optimistic:v1';
+    const STORAGE_TTL_MS = 1000 * 60 * 60 * 24 * 14;
+    let seq = 0;
+    let processing = false;
+    const entries = new Map();
+    const handlers = {};
+
+    function storageDisponivel() {
+      try {
+        if (!window.localStorage) return false;
+        const key = `${STORAGE_KEY}:probe`;
+        window.localStorage.setItem(key, '1');
+        window.localStorage.removeItem(key);
+        return true;
+      } catch (error) {
+        return false;
+      }
+    }
+
+    function clone(value) {
+      if (value == null) return value;
+      try {
+        return JSON.parse(JSON.stringify(value));
+      } catch (error) {
+        return value;
+      }
+    }
+
+    function normalizarStatus(status) {
+      const valor = String(status || '').trim().toLowerCase();
+      if (valor === 'error') return 'error';
+      if (valor === 'sending') return 'pending';
+      return 'pending';
+    }
+
+    function gerarId() {
+      seq += 1;
+      return `opt_${Date.now()}_${seq}`;
+    }
+
+    function ordenarEntries(lista) {
+      return [...lista].sort((a, b) => {
+        const ta = Number(a?.createdAt || 0);
+        const tb = Number(b?.createdAt || 0);
+        if (ta !== tb) return ta - tb;
+        return String(a?.id || '').localeCompare(String(b?.id || ''));
+      });
+    }
+
+    function snapshotEntries() {
+      return ordenarEntries(entries.values()).map(clone);
+    }
+
+    function salvarStorage() {
+      if (!storageDisponivel()) return;
+      try {
+        window.localStorage.setItem(STORAGE_KEY, JSON.stringify({
+          updatedAt: Date.now(),
+          seq,
+          entries: snapshotEntries()
+        }));
+      } catch (error) {
+        // sem acao
+      }
+    }
+
+    function carregarStorage() {
+      if (!storageDisponivel()) return;
+      try {
+        const raw = window.localStorage.getItem(STORAGE_KEY);
+        if (!raw) return;
+        const payload = JSON.parse(raw);
+        if (!payload || typeof payload !== 'object') return;
+        const updatedAt = Number(payload.updatedAt || 0);
+        if (updatedAt && (Date.now() - updatedAt) > STORAGE_TTL_MS) {
+          window.localStorage.removeItem(STORAGE_KEY);
+          return;
+        }
+        seq = Math.max(seq, Number(payload.seq || 0));
+        const lista = Array.isArray(payload.entries) ? payload.entries : [];
+        lista.forEach(item => {
+          const entry = normalizarEntry(item);
+          if (!entry) return;
+          entries.set(entry.id, entry);
+        });
+      } catch (error) {
+        // sem acao
+      }
+    }
+
+    function normalizarEntry(raw) {
+      if (!raw || typeof raw !== 'object') return null;
+      const id = String(raw.id || '').trim() || gerarId();
+      const createdAt = Number(raw.createdAt || Date.now());
+      const updatedAt = Number(raw.updatedAt || createdAt || Date.now());
+      return {
+        id,
+        scope: String(raw.scope || '').trim(),
+        handler: String(raw.handler || '').trim(),
+        entityKey: String(raw.entityKey || '').trim(),
+        payload: clone(raw.payload ?? null),
+        meta: clone(raw.meta ?? {}),
+        attempts: Math.max(0, Number(raw.attempts || 0)),
+        status: normalizarStatus(raw.status),
+        errorMessage: String(raw.errorMessage || '').trim(),
+        createdAt,
+        updatedAt
+      };
+    }
+
+    function emitir(type, extra = {}) {
+      if (typeof window === 'undefined') return;
+      try {
+        window.dispatchEvent(new CustomEvent('app:optimistic-mutation', {
+          detail: {
+            type: String(type || '').trim(),
+            entry: extra.entry ? clone(extra.entry) : null,
+            result: extra.result === undefined ? undefined : clone(extra.result),
+            errorMessage: String(extra.errorMessage || '').trim(),
+            entries: snapshotEntries()
+          }
+        }));
+      } catch (error) {
+        // sem acao
+      }
+    }
+
+    function processarDepois() {
+      if (typeof window !== 'undefined' && typeof window.setTimeout === 'function') {
+        window.setTimeout(processarFila, 24);
+        return;
+      }
+      setTimeout(processarFila, 24);
+    }
+
+    function listar(options = {}) {
+      const scope = String(options.scope || '').trim();
+      const domain = String(options.domain || '').trim();
+      const status = String(options.status || '').trim().toLowerCase();
+      return snapshotEntries().filter(entry => {
+        if (scope && entry.scope !== scope) return false;
+        if (domain && String(entry?.meta?.domain || '').trim() !== domain) return false;
+        if (status && String(entry.status || '').trim().toLowerCase() !== status) return false;
+        return true;
+      });
+    }
+
+    function get(id) {
+      const chave = String(id || '').trim();
+      if (!chave || !entries.has(chave)) return null;
+      return clone(entries.get(chave));
+    }
+
+    function existeMutacaoAtiva(entityKey, ignoreId = '') {
+      const alvo = String(entityKey || '').trim();
+      const ignorar = String(ignoreId || '').trim();
+      if (!alvo) return false;
+      return snapshotEntries().some(entry => {
+        if (ignorar && entry.id === ignorar) return false;
+        return entry.entityKey === alvo;
+      });
+    }
+
+    function enqueue(config = {}) {
+      const entry = normalizarEntry({
+        ...config,
+        id: config.id || gerarId(),
+        attempts: 0,
+        status: 'pending',
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        errorMessage: ''
+      });
+      if (!entry || !entry.handler) {
+        throw new Error('Mutacao otimista invalida.');
+      }
+      if (entry.entityKey && existeMutacaoAtiva(entry.entityKey, entry.id)) {
+        throw new Error('Ja existe uma sincronizacao pendente para este item.');
+      }
+      entries.set(entry.id, entry);
+      salvarStorage();
+      emitir('queued', { entry });
+      processarDepois();
+      return clone(entry);
+    }
+
+    function retry(id) {
+      const chave = String(id || '').trim();
+      const entry = chave ? entries.get(chave) : null;
+      if (!entry) return null;
+      entry.status = 'pending';
+      entry.errorMessage = '';
+      entry.updatedAt = Date.now();
+      salvarStorage();
+      emitir('retry', { entry });
+      processarDepois();
+      return clone(entry);
+    }
+
+    function registerHandler(name, handler) {
+      const chave = String(name || '').trim();
+      if (!chave || typeof handler !== 'function') return () => {};
+      handlers[chave] = handler;
+      processarDepois();
+      return () => {
+        if (handlers[chave] === handler) {
+          delete handlers[chave];
+        }
+      };
+    }
+
+    async function processarFila() {
+      if (processing) return;
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
+
+      const entry = snapshotEntries().find(item => item.status === 'pending' && handlers[item.handler]);
+      if (!entry) return;
+      const original = entries.get(entry.id);
+      if (!original) return;
+
+      processing = true;
+      original.status = 'sending';
+      original.updatedAt = Date.now();
+      salvarStorage();
+      emitir('sending', { entry: original });
+
+      try {
+        const result = await Promise.resolve(handlers[entry.handler](clone(entry)));
+        const atual = entries.get(entry.id);
+        const snapshot = clone(atual || entry);
+        entries.delete(entry.id);
+        salvarStorage();
+        emitir('success', {
+          entry: snapshot,
+          result
+        });
+      } catch (error) {
+        const atual = entries.get(entry.id);
+        if (atual) {
+          atual.status = 'error';
+          atual.errorMessage = String(error?.message || 'Falha ao sincronizar').trim() || 'Falha ao sincronizar';
+          atual.attempts = Math.max(0, Number(atual.attempts || 0)) + 1;
+          atual.updatedAt = Date.now();
+          salvarStorage();
+          emitir('error', {
+            entry: atual,
+            errorMessage: atual.errorMessage
+          });
+        }
+      } finally {
+        processing = false;
+        processarDepois();
+      }
+    }
+
+    if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+      window.addEventListener('online', processarDepois);
+    }
+
+    carregarStorage();
+
+    return {
+      enqueue,
+      retry,
+      list: listar,
+      get,
+      registerHandler,
+      process: processarDepois
+    };
+  }
+
+  window.AppOptimistic = window.AppOptimistic || createOptimisticMutationHelper();
+
+  function createDespesaMutationHelper() {
+    const META_KEYS = [
+      '_localStatus',
+      '_localAction',
+      '_localMutationId',
+      '_localErrorMessage',
+      '_localRetryable',
+      '_localDeleted',
+      '_localSource'
+    ];
+
+    function clone(value) {
+      if (value == null) return value;
+      try {
+        return JSON.parse(JSON.stringify(value));
+      } catch (error) {
+        return value;
+      }
+    }
+
+    function parseNumero(valor) {
+      if (window.AppDomainUtils?.parseNumeroZero) {
+        return window.AppDomainUtils.parseNumeroZero(valor);
+      }
+      const raw = String(valor ?? '').trim();
+      if (!raw) return 0;
+      const num = Number(raw.replace(',', '.'));
+      return Number.isFinite(num) ? num : 0;
+    }
+
+    function round2(valor) {
+      return Math.round(parseNumero(valor) * 100) / 100;
+    }
+
+    function clampDate(valor) {
+      const raw = String(valor || '').trim();
+      return /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : '';
+    }
+
+    function tempId(prefix = 'DES_TMP') {
+      return `${prefix}_${Date.now()}_${Math.floor(Math.random() * 100000)}`;
+    }
+
+    function limparMeta(item) {
+      const base = clone(item) || {};
+      META_KEYS.forEach(key => {
+        delete base[key];
+      });
+      return base;
+    }
+
+    function aplicarMeta(item, opcoes = {}) {
+      const base = limparMeta(item);
+      const status = String(opcoes.status || '').trim().toLowerCase();
+      if (!status) return base;
+      base._localStatus = status === 'error' ? 'error' : 'pending';
+      base._localAction = String(opcoes.action || '').trim();
+      base._localMutationId = String(opcoes.mutationId || '').trim();
+      base._localErrorMessage = String(opcoes.errorMessage || '').trim();
+      base._localRetryable = opcoes.retryable !== false;
+      base._localDeleted = !!opcoes.localDeleted;
+      base._localSource = String(opcoes.source || '').trim();
+      return base;
+    }
+
+    function getStatusPagamento(totalPrevisto, totalPago) {
+      const previsto = round2(totalPrevisto);
+      const pago = round2(totalPago);
+      const pendente = round2(Math.max(0, previsto - pago));
+      if (pendente <= 0.009) return 'PAGO';
+      if (pago > 0.009) return 'PARCIAL';
+      return 'PENDENTE';
+    }
+
+    function buildParcelasDetalhe(payload, baseItem) {
+      const base = clone(baseItem) || {};
+      const parcelasAtuais = Array.isArray(base.parcelas_detalhe) ? base.parcelas_detalhe : [];
+      const possuiPagamento = parcelasAtuais.some(parcela => round2(parcela?.valor_pago) > 0.009);
+      if (possuiPagamento) {
+        return parcelasAtuais;
+      }
+
+      const detalhes = Array.isArray(payload?.parcelas_detalhe) ? payload.parcelas_detalhe : [];
+      const quantidade = Math.max(1, Math.floor(parseNumero(payload?.parcelas || detalhes.length || 1) || 1));
+      const origemId = String(base.ID || payload?.ID || tempId('PAR')).trim();
+      const fallbackData = clampDate(payload?.data_vencimento || payload?.data_competencia);
+
+      if (detalhes.length === 0) {
+        const valorPrevisto = round2(payload?.valor_total);
+        return [{
+          ID: `${origemId}_P1`,
+          parcela_numero: 1,
+          parcelas_total: 1,
+          data_prevista: fallbackData,
+          valor_previsto: valorPrevisto,
+          valor_pago: 0,
+          valor_pendente: valorPrevisto,
+          status: valorPrevisto <= 0.009 ? 'PAGO' : 'PENDENTE',
+          data_quitacao: '',
+          pagamento_id: ''
+        }];
+      }
+
+      return detalhes.map((parcela, idx) => {
+        const valorPrevisto = round2(parcela?.valor ?? parcela?.valor_previsto);
+        const valorPago = round2(parcela?.valor_pago);
+        const pendente = round2(Math.max(0, valorPrevisto - valorPago));
+        return {
+          ID: String(parcela?.ID || `${origemId}_P${idx + 1}`).trim(),
+          parcela_numero: idx + 1,
+          parcelas_total: quantidade,
+          data_prevista: clampDate(parcela?.data || parcela?.data_prevista || fallbackData),
+          valor_previsto: valorPrevisto,
+          valor_pago: valorPago,
+          valor_pendente: pendente,
+          status: pendente <= 0.009 ? 'PAGO' : (valorPago > 0.009 ? 'PARCIAL' : 'PENDENTE'),
+          data_quitacao: clampDate(parcela?.data_quitacao),
+          pagamento_id: String(parcela?.pagamento_id || '').trim()
+        };
+      });
+    }
+
+    function buildFromPayload(payload, options = {}) {
+      const base = clone(options.baseItem) || {};
+      const id = String(options.id || base.ID || tempId()).trim();
+      const totalPrevisto = round2(payload?.valor_total ?? base.valor_total ?? base.total_previsto);
+      const totalPago = round2(base.total_pago);
+      const totalPendente = round2(Math.max(0, totalPrevisto - totalPago));
+      const parcelasDetalhe = buildParcelasDetalhe({
+        ...payload,
+        ID: id
+      }, base);
+
+      return {
+        ...base,
+        ID: id,
+        ativo: true,
+        descricao: String((payload?.descricao ?? base.descricao) || '').trim(),
+        categoria: String((payload?.categoria ?? base.categoria) || '').trim(),
+        fornecedor: String((payload?.fornecedor ?? base.fornecedor) || '').trim(),
+        pago_por: String((payload?.pago_por ?? base.pago_por) || '').trim(),
+        valor_total: totalPrevisto,
+        data_competencia: clampDate(payload?.data_competencia ?? base.data_competencia),
+        data_vencimento: clampDate(payload?.data_vencimento ?? base.data_vencimento),
+        data_pagamento: clampDate(payload?.data_pagamento ?? base.data_pagamento),
+        forma_pagamento: String((payload?.forma_pagamento ?? base.forma_pagamento) || '').trim(),
+        forma_pagamento_padrao: String((payload?.forma_pagamento ?? base.forma_pagamento_padrao) || '').trim(),
+        parcelas: Math.max(1, Math.floor(parseNumero((payload?.parcelas ?? base.parcelas) || parcelasDetalhe.length || 1) || 1)),
+        parcelas_detalhe: parcelasDetalhe,
+        fixo: !!(payload?.fixo ?? base.fixo),
+        observacao: String((payload?.observacao ?? base.observacao) || '').trim(),
+        total_previsto: totalPrevisto,
+        total_pago: totalPago,
+        total_pendente: totalPendente,
+        status_pagamento: getStatusPagamento(totalPrevisto, totalPago),
+        quantidade_pagamentos: Math.max(0, Number(base.quantidade_pagamentos || 0)),
+        data_ultimo_pagamento: clampDate(base.data_ultimo_pagamento),
+        forma_ultimo_pagamento: String(base.forma_ultimo_pagamento || '').trim()
+      };
+    }
+
+    function applyPayment(item, payload, mutationId = '') {
+      const base = limparMeta(item);
+      const totalPrevisto = round2(base.total_previsto || base.valor_total);
+      const valorPagoAtual = round2(base.total_pago);
+      const incremento = round2(Math.min(parseNumero(payload?.valor_pago), Math.max(0, totalPrevisto - valorPagoAtual)));
+      const totalPago = round2(valorPagoAtual + incremento);
+      const totalPendente = round2(Math.max(0, totalPrevisto - totalPago));
+      const dataPagamento = clampDate(payload?.data_pagamento);
+      const formaPagamento = String(payload?.forma_pagamento || base.forma_pagamento || '').trim();
+      const parcelaAlvoId = String(payload?.parcela_alvo_id || '').trim();
+
+      const parcelas = (Array.isArray(base.parcelas_detalhe) ? clone(base.parcelas_detalhe) : []).map(parcela => {
+        const valorPrevisto = round2(parcela?.valor_previsto);
+        const valorPagoParcial = round2(parcela?.valor_pago);
+        const valorPendenteParcial = round2(Math.max(0, valorPrevisto - valorPagoParcial));
+        return {
+          ...parcela,
+          valor_previsto: valorPrevisto,
+          valor_pago: valorPagoParcial,
+          valor_pendente: valorPendenteParcial,
+          status: valorPendenteParcial <= 0.009 ? 'PAGO' : (valorPagoParcial > 0.009 ? 'PARCIAL' : 'PENDENTE')
+        };
+      });
+
+      if (incremento > 0 && parcelas.length > 0) {
+        const idxParcela = parcelaAlvoId
+          ? parcelas.findIndex(parcela => String(parcela?.ID || '').trim() === parcelaAlvoId)
+          : parcelas.findIndex(parcela => round2(parcela?.valor_pendente) > 0.009);
+        if (idxParcela >= 0) {
+          const atual = parcelas[idxParcela];
+          const pagoParcela = round2(Math.min(round2(atual.valor_pendente) + round2(atual.valor_pago), round2(atual.valor_pago) + incremento));
+          const pendenteParcela = round2(Math.max(0, round2(atual.valor_previsto) - pagoParcela));
+          parcelas[idxParcela] = {
+            ...atual,
+            valor_pago: pagoParcela,
+            valor_pendente: pendenteParcela,
+            status: pendenteParcela <= 0.009 ? 'PAGO' : 'PARCIAL',
+            data_quitacao: pendenteParcela <= 0.009 ? dataPagamento : String(atual?.data_quitacao || '').trim(),
+            pagamento_id: String(atual?.pagamento_id || (mutationId ? `TMPPG_${mutationId}` : '')).trim()
+          };
+        }
+      }
+
+      return {
+        ...base,
+        forma_pagamento: formaPagamento || base.forma_pagamento,
+        forma_pagamento_padrao: formaPagamento || base.forma_pagamento_padrao,
+        data_pagamento: dataPagamento || base.data_pagamento,
+        data_ultimo_pagamento: dataPagamento || base.data_ultimo_pagamento,
+        forma_ultimo_pagamento: formaPagamento || base.forma_ultimo_pagamento,
+        total_previsto: totalPrevisto,
+        total_pago: totalPago,
+        total_pendente: totalPendente,
+        status_pagamento: getStatusPagamento(totalPrevisto, totalPago),
+        quantidade_pagamentos: Math.max(0, Number(base.quantidade_pagamentos || 0)) + (incremento > 0 ? 1 : 0),
+        parcelas_detalhe: parcelas
+      };
+    }
+
+    function getUiState(item) {
+      const status = String(item?._localStatus || '').trim().toLowerCase();
+      const action = String(item?._localAction || '').trim().toLowerCase();
+      if (!status) {
+        return {
+          status: '',
+          action: '',
+          label: '',
+          message: '',
+          canRetry: false,
+          blockActions: false
+        };
+      }
+
+      if (status === 'error') {
+        const label = action === 'delete'
+          ? 'Falha ao excluir'
+          : action === 'payment'
+            ? 'Falha no pagamento'
+            : 'Falha na sincronizacao';
+        return {
+          status: 'error',
+          action,
+          label,
+          message: String(item?._localErrorMessage || '').trim(),
+          canRetry: !!item?._localMutationId,
+          blockActions: true
+        };
+      }
+
+      const label = action === 'delete'
+        ? 'Exclusao pendente'
+        : action === 'payment'
+          ? 'Pagamento pendente'
+          : 'Sincronizando';
+
+      return {
+        status: 'pending',
+        action,
+        label,
+        message: '',
+        canRetry: false,
+        blockActions: true
+      };
+    }
+
+    function localizarIndex(lista, ids = []) {
+      const chaves = ids
+        .map(valor => String(valor || '').trim())
+        .filter(Boolean);
+      if (chaves.length === 0) return -1;
+      return (Array.isArray(lista) ? lista : []).findIndex(item => {
+        const id = String(item?.ID || '').trim();
+        return !!id && chaves.includes(id);
+      });
+    }
+
+    function upsert(lista, item, extraIds = []) {
+      const arr = Array.isArray(lista) ? clone(lista) : [];
+      const base = clone(item);
+      if (!base) return arr;
+      const idx = localizarIndex(arr, [base.ID, ...extraIds]);
+      if (idx >= 0) {
+        arr[idx] = base;
+      } else {
+        arr.unshift(base);
+      }
+      return arr;
+    }
+
+    function remove(lista, ids = []) {
+      const chaves = ids
+        .map(valor => String(valor || '').trim())
+        .filter(Boolean);
+      if (chaves.length === 0) return Array.isArray(lista) ? clone(lista) : [];
+      return (Array.isArray(lista) ? clone(lista) : []).filter(item => {
+        const id = String(item?.ID || '').trim();
+        return !id || !chaves.includes(id);
+      });
+    }
+
+    function canonicalSuccessItem(entry, detail = {}) {
+      const meta = entry?.meta || {};
+      if (meta.action === 'create' && detail?.result && typeof detail.result === 'object') {
+        return limparMeta(detail.result);
+      }
+      if (meta.action === 'payment' && detail?.result?.despesaAtualizada) {
+        return limparMeta(detail.result.despesaAtualizada);
+      }
+      if (meta.action === 'update' && detail?.result && typeof detail.result === 'object' && detail.result.ID) {
+        return limparMeta(detail.result);
+      }
+      return limparMeta(meta.optimistic_item);
+    }
+
+    function applyEntryToList(lista, detail = {}) {
+      const entry = detail.entry || {};
+      const meta = entry.meta || {};
+      if (String(meta.domain || '').trim() !== 'despesa') {
+        return Array.isArray(lista) ? clone(lista) : [];
+      }
+
+      const tipo = String(detail.type || '').trim().toLowerCase();
+      const action = String(meta.action || '').trim().toLowerCase();
+      const beforeItem = clone(meta.before_item);
+      const optimisticItem = clone(meta.optimistic_item);
+      const idsRelacionados = [
+        optimisticItem?.ID,
+        beforeItem?.ID,
+        entry.entityKey
+      ];
+
+      if (tipo === 'success') {
+        if (action === 'delete') {
+          return remove(lista, idsRelacionados);
+        }
+        const canonical = canonicalSuccessItem(entry, detail);
+        return upsert(remove(lista, idsRelacionados), canonical, idsRelacionados);
+      }
+
+      if (tipo === 'error') {
+        const withError = aplicarMeta(optimisticItem || beforeItem, {
+          status: 'error',
+          action,
+          mutationId: entry.id,
+          errorMessage: detail.errorMessage || entry.errorMessage,
+          retryable: true,
+          localDeleted: action === 'delete',
+          source: meta.source
+        });
+        return upsert(lista, withError, idsRelacionados);
+      }
+
+      const withPending = aplicarMeta(optimisticItem || beforeItem, {
+        status: 'pending',
+        action,
+        mutationId: entry.id,
+        retryable: true,
+        localDeleted: action === 'delete',
+        source: meta.source
+      });
+      return upsert(lista, withPending, idsRelacionados);
+    }
+
+    function mergeFetchedList(listaBase, entriesAtivas) {
+      let atual = Array.isArray(listaBase) ? clone(listaBase).map(limparMeta) : [];
+      (Array.isArray(entriesAtivas) ? entriesAtivas : []).forEach(entry => {
+        if (!entry || !['pending', 'sending', 'error'].includes(String(entry.status || '').trim().toLowerCase())) {
+          return;
+        }
+        atual = applyEntryToList(atual, {
+          type: entry.status === 'error' ? 'error' : 'sending',
+          entry,
+          errorMessage: entry.errorMessage
+        });
+      });
+      return atual;
+    }
+
+    return {
+      clone,
+      round2,
+      tempId,
+      limparMeta,
+      aplicarMeta,
+      buildFromPayload,
+      applyPayment,
+      getUiState,
+      applyEntryToList,
+      mergeFetchedList
+    };
+  }
+
+  window.AppDespesaMutations = window.AppDespesaMutations || createDespesaMutationHelper();
+
+  if (window.AppOptimistic?.registerHandler) {
+    window.AppOptimistic.registerHandler('despesa.create', entry => {
+      if (!window.AppRequest?.call) {
+        return Promise.reject(new Error('google.script.run indisponivel'));
+      }
+      return window.AppRequest.call('criarDespesaGeral', [entry.payload], {
+        context: 'optimistic.despesa.create',
+        errorMessage: 'Erro ao sincronizar nova despesa'
+      });
+    });
+
+    window.AppOptimistic.registerHandler('despesa.update', entry => {
+      if (!window.AppRequest?.call) {
+        return Promise.reject(new Error('google.script.run indisponivel'));
+      }
+      return window.AppRequest.call('atualizarDespesaGeral', [entry.meta?.target_id, entry.payload], {
+        context: 'optimistic.despesa.update',
+        errorMessage: 'Erro ao sincronizar alteracoes da despesa'
+      });
+    });
+
+    window.AppOptimistic.registerHandler('despesa.delete', entry => {
+      if (!window.AppRequest?.call) {
+        return Promise.reject(new Error('google.script.run indisponivel'));
+      }
+      return window.AppRequest.call('deletarDespesaGeral', [entry.meta?.target_id], {
+        context: 'optimistic.despesa.delete',
+        errorMessage: 'Erro ao sincronizar exclusao da despesa'
+      });
+    });
+
+    window.AppOptimistic.registerHandler('despesa.payment', entry => {
+      if (!window.AppRequest?.call) {
+        return Promise.reject(new Error('google.script.run indisponivel'));
+      }
+      return window.AppRequest.call('registrarPagamentoDespesaGeral', [entry.meta?.target_id, entry.payload], {
+        context: 'optimistic.despesa.payment',
+        errorMessage: 'Erro ao sincronizar pagamento da despesa'
+      });
+    });
+  }
 
   function createUserAccessHelper() {
     let contexto = null;

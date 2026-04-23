@@ -18,6 +18,7 @@
     let cacheComposicaoLocal = {};
     let cacheDespesasLocal = { ts: 0, data: null };
     let runtimeListenerRegistrado = false;
+    let listenerMutacoesRegistrado = false;
     let prefetchVizinhoRefTs = {};
 
     const DASHBOARD_CACHE_TTL_RESUMO_MS = 30000;
@@ -605,6 +606,387 @@
       };
     }
 
+    function listarMutacoesDespesaAtivas() {
+      if (!window.AppOptimistic?.list) return [];
+      return window.AppOptimistic.list({
+        scope: 'despesa',
+        domain: 'despesa'
+      });
+    }
+
+    function reconciliarListaDespesasComMutacoes(listaBase) {
+      if (!window.AppDespesaMutations?.mergeFetchedList) {
+        return Array.isArray(listaBase) ? [...listaBase] : [];
+      }
+      return window.AppDespesaMutations.mergeFetchedList(listaBase, listarMutacoesDespesaAtivas());
+    }
+
+    function cloneJson(valor) {
+      if (valor == null) return valor;
+      try {
+        return JSON.parse(JSON.stringify(valor));
+      } catch (error) {
+        return valor;
+      }
+    }
+
+    function parseDataISO(valor) {
+      const raw = String(valor || '').trim();
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return null;
+      const data = new Date(`${raw}T00:00:00`);
+      return Number.isNaN(data.getTime()) ? null : data;
+    }
+
+    function obterIntervaloReferencia(referencia) {
+      const ref = referenciaEhValida(referencia) ? referencia : getMesAtualISO();
+      const [ano, mes] = ref.split('-').map(Number);
+      const inicio = new Date(ano, mes - 1, 1);
+      const fim = new Date(ano, mes, 1);
+      const hoje = new Date();
+      hoje.setHours(0, 0, 0, 0);
+      const limite7 = new Date(hoje.getTime());
+      limite7.setDate(limite7.getDate() + 7);
+      return { inicio, fim, hoje, limite7 };
+    }
+
+    function chaveMesData(valor) {
+      const raw = String(valor || '').trim();
+      if (/^\d{4}-\d{2}$/.test(raw)) return raw;
+      const match = raw.match(/^(\d{4}-\d{2})-\d{2}/);
+      return match && match[1] ? match[1] : '';
+    }
+
+    function normalizarMapaAgregado(lista) {
+      const mapa = {};
+      (Array.isArray(lista) ? lista : []).forEach(item => {
+        const label = String(item?.label || '').trim();
+        if (!label) return;
+        mapa[label] = round2(parseNumeroInput(item?.valor || 0));
+      });
+      return mapa;
+    }
+
+    function serializarMapaAgregado(mapa) {
+      return Object.keys(mapa || {})
+        .map(label => ({
+          label,
+          valor: round2(parseNumeroInput(mapa[label] || 0))
+        }))
+        .filter(item => item.valor > 0.009)
+        .sort((a, b) => {
+          if (b.valor !== a.valor) return b.valor - a.valor;
+          return a.label.localeCompare(b.label, 'pt-BR', { sensitivity: 'base' });
+        });
+    }
+
+    function ajustarMapaAgregado(mapa, label, delta) {
+      const chave = String(label || '').trim() || 'SEM_DADO';
+      const valorAtual = round2(parseNumeroInput(mapa[chave] || 0));
+      const proximo = round2(valorAtual + round2(delta));
+      if (proximo <= 0.009) {
+        delete mapa[chave];
+        return;
+      }
+      mapa[chave] = proximo;
+    }
+
+    function normalizarResumoBase(resumo) {
+      const base = cloneJson(resumo) || {};
+      base.cards = {
+        gasto_pago_mes: 0,
+        compromisso_previsto_mes: 0,
+        vendas_no_mes: 0,
+        recebido_vendas_mes: 0,
+        pendente_total: 0,
+        vencido_total: 0,
+        avencer_7_dias: 0,
+        valor_estoque_total: 0,
+        valor_produtos_estoque: 0,
+        valor_produtos_producao: 0,
+        contador_bruno_mes: 0,
+        contador_zizu_mes: 0,
+        contador_investimento_mes: 0,
+        contador_investimento_acumulado: 0,
+        ...(base.cards || {})
+      };
+      base.agregados = {
+        ...(base.agregados || {}),
+        gasto_por_categoria: serializarMapaAgregado(normalizarMapaAgregado(base?.agregados?.gasto_por_categoria)),
+        gasto_por_fornecedor: serializarMapaAgregado(normalizarMapaAgregado(base?.agregados?.gasto_por_fornecedor))
+      };
+      return base;
+    }
+
+    function calcularRateioPagoPor(pagoPor, valor) {
+      const total = round2(parseNumeroInput(valor || 0));
+      const resultado = { bruno: 0, zizu: 0, investimento: 0 };
+      if (total <= 0.009) return resultado;
+      const bruto = String(pagoPor || '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .trim()
+        .toUpperCase();
+
+      if (bruto === 'AMBOS') {
+        const metade = round2(total / 2);
+        resultado.bruno = metade;
+        resultado.zizu = metade;
+        return resultado;
+      }
+      if (bruto === 'BRUNO') {
+        resultado.bruno = total;
+        return resultado;
+      }
+      if (bruto === 'ZIZU') {
+        resultado.zizu = total;
+        return resultado;
+      }
+      if (bruto === 'INVESTIMENTO') {
+        resultado.investimento = total;
+      }
+      return resultado;
+    }
+
+    function calcularPendenciasResumoDespesa(item, referencia) {
+      const despesa = item || {};
+      const { inicio, fim, hoje, limite7 } = obterIntervaloReferencia(referencia);
+      const totalPendenteItem = round2(parseNumeroInput(despesa.total_pendente || 0));
+      const parcelas = Array.isArray(despesa.parcelas_detalhe) ? despesa.parcelas_detalhe : [];
+      let compromissoPendenteMes = 0;
+      let pendenteMes = 0;
+
+      if (parcelas.length > 0) {
+        parcelas.forEach(parcela => {
+          const dataPrevista = parseDataISO(parcela?.data_prevista || parcela?.data);
+          if (!dataPrevista) return;
+          const valorPendente = round2(parcela?.valor_pendente ?? Math.max(0, parseNumeroInput(parcela?.valor_previsto) - parseNumeroInput(parcela?.valor_pago)));
+          if (valorPendente <= 0.009) return;
+          if (dataPrevista >= inicio && dataPrevista < fim) {
+            pendenteMes = round2(pendenteMes + valorPendente);
+          }
+          if (dataPrevista < fim) {
+            compromissoPendenteMes = round2(compromissoPendenteMes + valorPendente);
+          }
+        });
+      } else {
+        const vencimento = parseDataISO(despesa.data_vencimento);
+        if (vencimento && totalPendenteItem > 0.009) {
+          if (vencimento < fim) {
+            compromissoPendenteMes = round2(compromissoPendenteMes + totalPendenteItem);
+          }
+          if (vencimento >= inicio && vencimento < fim) {
+            pendenteMes = round2(pendenteMes + totalPendenteItem);
+          }
+        }
+      }
+
+      let vencido = 0;
+      let aVencer = 0;
+      const dataVencimento = parseDataISO(despesa.data_vencimento);
+      if (dataVencimento && totalPendenteItem > 0.009) {
+        if (dataVencimento.getTime() < hoje.getTime()) {
+          vencido = totalPendenteItem;
+        } else if (dataVencimento.getTime() <= limite7.getTime()) {
+          aVencer = totalPendenteItem;
+        }
+      }
+
+      return {
+        compromissoPendenteMes,
+        pendenteMes,
+        vencido,
+        aVencer
+      };
+    }
+
+    function canonicalDespesaSuccessItem(detail) {
+      const entry = detail?.entry || {};
+      const meta = entry.meta || {};
+      if (meta.action === 'payment' && detail?.result?.despesaAtualizada) {
+        return cloneJson(detail.result.despesaAtualizada);
+      }
+      if (meta.action === 'create' && detail?.result && typeof detail.result === 'object') {
+        return cloneJson(detail.result);
+      }
+      if (meta.action === 'update' && detail?.result && typeof detail.result === 'object' && detail.result.ID) {
+        return cloneJson(detail.result);
+      }
+      return cloneJson(meta.optimistic_item);
+    }
+
+    function aplicarPatchResumoDespesa(resumoBase, referencia, beforeItem, afterItem, options = {}) {
+      const resumo = normalizarResumoBase(resumoBase);
+      const cards = { ...(resumo.cards || {}) };
+      const categoriaMap = normalizarMapaAgregado(resumo?.agregados?.gasto_por_categoria);
+      const fornecedorMap = normalizarMapaAgregado(resumo?.agregados?.gasto_por_fornecedor);
+      const before = beforeItem ? calcularPendenciasResumoDespesa(beforeItem, referencia) : {
+        compromissoPendenteMes: 0,
+        pendenteMes: 0,
+        vencido: 0,
+        aVencer: 0
+      };
+      const after = afterItem ? calcularPendenciasResumoDespesa(afterItem, referencia) : {
+        compromissoPendenteMes: 0,
+        pendenteMes: 0,
+        vencido: 0,
+        aVencer: 0
+      };
+
+      const deltaCompromissoPendencia = round2(after.compromissoPendenteMes - before.compromissoPendenteMes);
+      const deltaPendenteMes = round2(after.pendenteMes - before.pendenteMes);
+      const deltaVencido = round2(after.vencido - before.vencido);
+      const deltaAVencer = round2(after.aVencer - before.aVencer);
+
+      cards.compromisso_previsto_mes = round2(parseNumeroInput(cards.compromisso_previsto_mes || 0) + deltaCompromissoPendencia);
+      cards.pendente_total = round2(parseNumeroInput(cards.pendente_total || 0) + deltaPendenteMes);
+      cards.vencido_total = round2(parseNumeroInput(cards.vencido_total || 0) + deltaVencido);
+      cards.avencer_7_dias = round2(parseNumeroInput(cards.avencer_7_dias || 0) + deltaAVencer);
+
+      if (options.includePaymentDelta) {
+        const valorPago = round2(parseNumeroInput(options.paymentValue || 0));
+        const referenciaPagamento = chaveMesData(options.paymentDate);
+        if (valorPago > 0.009 && referenciaPagamento === referencia) {
+          cards.gasto_pago_mes = round2(parseNumeroInput(cards.gasto_pago_mes || 0) + valorPago);
+          cards.compromisso_previsto_mes = round2(parseNumeroInput(cards.compromisso_previsto_mes || 0) + valorPago);
+
+          const rateio = calcularRateioPagoPor(afterItem?.pago_por || beforeItem?.pago_por, valorPago);
+          cards.contador_bruno_mes = round2(parseNumeroInput(cards.contador_bruno_mes || 0) + rateio.bruno);
+          cards.contador_zizu_mes = round2(parseNumeroInput(cards.contador_zizu_mes || 0) + rateio.zizu);
+          cards.contador_investimento_mes = round2(parseNumeroInput(cards.contador_investimento_mes || 0) + rateio.investimento);
+          cards.contador_investimento_acumulado = round2(parseNumeroInput(cards.contador_investimento_acumulado || 0) + rateio.investimento);
+
+          ajustarMapaAgregado(categoriaMap, afterItem?.categoria || beforeItem?.categoria || 'SEM_CATEGORIA', valorPago);
+          ajustarMapaAgregado(fornecedorMap, afterItem?.fornecedor || beforeItem?.fornecedor || 'SEM_FORNECEDOR', valorPago);
+        }
+      }
+
+      resumo.cards = cards;
+      resumo.agregados = {
+        ...(resumo.agregados || {}),
+        gasto_por_categoria: serializarMapaAgregado(categoriaMap),
+        gasto_por_fornecedor: serializarMapaAgregado(fornecedorMap)
+      };
+      return resumo;
+    }
+
+    function persistirResumoLocal(referencia, resumo) {
+      const ref = String(referencia || '').trim();
+      if (!referenciaEhValida(ref) || !resumo) return;
+      const ts = Date.now();
+      salvarResumoCacheLocal(ref, resumo);
+      salvarResumoPersistido(ref, resumo, ts, gerarResumoHash(resumo));
+    }
+
+    function aplicarResumoMutacaoDespesa(detail) {
+      const entry = detail?.entry || {};
+      const meta = entry.meta || {};
+      if (String(meta.domain || '').trim() !== 'despesa') return;
+
+      const tipo = String(detail?.type || '').trim().toLowerCase();
+      let beforeItem = null;
+      let afterItem = null;
+      let includePaymentDelta = false;
+
+      if (tipo === 'queued') {
+        beforeItem = meta.before_item || null;
+        afterItem = meta.action === 'delete' ? null : (meta.optimistic_item || null);
+        includePaymentDelta = meta.action === 'payment';
+      } else if (tipo === 'success' && meta.action !== 'delete') {
+        beforeItem = meta.optimistic_item || null;
+        afterItem = canonicalDespesaSuccessItem(detail);
+      } else {
+        return;
+      }
+
+      const refs = coletarMesesImpactados(
+        beforeItem,
+        afterItem,
+        meta.before_item,
+        meta.optimistic_item,
+        detail?.result?.despesaAtualizada,
+        entry?.payload?.data_pagamento
+      );
+
+      refs.forEach(ref => {
+        const resumoAtual = lerResumoCacheLocal(ref) || lerResumoPersistido(ref)?.resumo;
+        if (!resumoAtual) return;
+        const resumoPatch = aplicarPatchResumoDespesa(resumoAtual, ref, beforeItem, afterItem, {
+          includePaymentDelta,
+          paymentValue: entry?.payload?.valor_pago,
+          paymentDate: entry?.payload?.data_pagamento
+        });
+        persistirResumoLocal(ref, resumoPatch);
+        if (ref === getMesReferenciaAtiva()) {
+          renderResumoCompleto(resumoPatch);
+          atualizarTextoUltimaAtualizacao(Date.now());
+        }
+      });
+    }
+
+    function reconciliarResumoComMutacoes(resumoBase, referencia) {
+      const entries = listarMutacoesDespesaAtivas();
+      if (!resumoBase) return null;
+      let resumo = normalizarResumoBase(resumoBase);
+      entries.forEach(entry => {
+        const meta = entry.meta || {};
+        if (String(meta.domain || '').trim() !== 'despesa') return;
+        resumo = aplicarPatchResumoDespesa(
+          resumo,
+          referencia,
+          meta.before_item || null,
+          meta.action === 'delete' ? null : (meta.optimistic_item || null),
+          {
+            includePaymentDelta: meta.action === 'payment',
+            paymentValue: entry?.payload?.valor_pago,
+            paymentDate: entry?.payload?.data_pagamento
+          }
+        );
+      });
+      return resumo;
+    }
+
+    function agendarSyncSilenciosoDashboard() {
+      if (window.AppTabRefresh?.requestSync) {
+        window.AppTabRefresh.requestSync('dashboard', {
+          delayMs: 900,
+          prefetch: true
+        });
+        return;
+      }
+      setTimeout(() => {
+        atualizar(true);
+      }, 900);
+    }
+
+    function tratarEventoMutacaoDespesaDashboard(detail) {
+      const entry = detail?.entry;
+      if (!entry || String(entry.scope || '').trim() !== 'despesa') return;
+      if (String(entry?.meta?.domain || '').trim() !== 'despesa') return;
+
+      if (window.AppDespesaMutations?.applyEntryToList) {
+        despesas = window.AppDespesaMutations.applyEntryToList(despesas, detail);
+        salvarDespesasCacheLocal(despesas);
+        if (despesasVisiveis) {
+          renderDespesas();
+        }
+      }
+
+      aplicarResumoMutacaoDespesa(detail);
+
+      if (String(detail?.type || '').trim() === 'success') {
+        agendarSyncSilenciosoDashboard();
+      }
+    }
+
+    function registrarListenerMutacoesSeNecessario() {
+      if (listenerMutacoesRegistrado) return;
+      if (typeof window === 'undefined' || typeof window.addEventListener !== 'function') return;
+      window.addEventListener('app:optimistic-mutation', evento => {
+        tratarEventoMutacaoDespesaDashboard(evento?.detail || {});
+      });
+      listenerMutacoesRegistrado = true;
+    }
+
     function setCarregandoDashboard(ativo) {
       carregandoDashboard = !!ativo;
       const f = el();
@@ -630,6 +1012,10 @@
       if (!s) return 0;
       const n = Number(s.replace(',', '.'));
       return isNaN(n) ? 0 : n;
+    }
+
+    function round2(valor) {
+      return Math.round(parseNumeroInput(valor) * 100) / 100;
     }
 
     function parseBooleanInput(valor) {
@@ -790,6 +1176,8 @@
 
     function init() {
       registrarListenerRuntimeSeNecessario();
+      registrarListenerMutacoesSeNecessario();
+      window.AppOptimistic?.process?.();
       atualizarIndicadorSomenteLeitura();
       bindEventosDashboard();
 
@@ -944,7 +1332,7 @@
       const cacheSessao = !forcarRecarregar ? lerResumoCacheLocal(refValida) : null;
       const cachePersistido = !forcarRecarregar ? lerResumoPersistido(refValida) : null;
       const hadCache = !!cacheSessao || !!cachePersistido;
-      const resumoCache = cacheSessao || cachePersistido?.resumo || null;
+      const resumoCache = reconciliarResumoComMutacoes(cacheSessao || cachePersistido?.resumo || null, refValida);
       const hashCache = cachePersistido?.hash || gerarResumoHash(resumoCache || {});
 
       if (resumoCache) {
@@ -958,7 +1346,7 @@
         .withSuccessHandler(resumo => {
           if (requestSeq !== resumoRequestSeq) return;
 
-          const resumoSeguro = resumo || {};
+          const resumoSeguro = reconciliarResumoComMutacoes(resumo || {}, refValida);
           const hashNovo = gerarResumoHash(resumoSeguro);
           const mudou = !!forcarRecarregar || !hadCache || hashNovo !== hashCache;
           const tsAtualizacao = Date.now();
@@ -1620,7 +2008,7 @@
     function carregarDespesas(forcarRecarregar = false, onDone) {
       const despesasCache = !forcarRecarregar ? lerDespesasCacheLocal() : null;
       if (Array.isArray(despesasCache)) {
-        despesas = despesasCache;
+        despesas = reconciliarListaDespesasComMutacoes(despesasCache);
         renderDespesas();
         if (typeof onDone === 'function') onDone();
         return;
@@ -1632,7 +2020,7 @@
           if (typeof onDone === 'function') onDone();
         })
         .withSuccessHandler(lista => {
-          despesas = Array.isArray(lista) ? lista : [];
+          despesas = reconciliarListaDespesasComMutacoes(Array.isArray(lista) ? lista : []);
           salvarDespesasCacheLocal(despesas);
           renderDespesas();
           if (typeof onDone === 'function') onDone();

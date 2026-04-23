@@ -24,6 +24,7 @@
     let carregandoMais = false;
     let renderJobSeq = 0;
     let listenerFecharFiltrosAtivo = false;
+    let listenerMutacoesRegistrado = false;
 
     const PAGE_SIZE = 30;
     const RENDER_CHUNK_SIZE = 8;
@@ -543,6 +544,70 @@
       }
     }
 
+    function listarMutacoesDespesaAtivas() {
+      if (!window.AppOptimistic?.list) return [];
+      return window.AppOptimistic.list({
+        scope: 'despesa',
+        domain: 'despesa'
+      });
+    }
+
+    function reconciliarListaComMutacoes(listaBase) {
+      if (!window.AppDespesaMutations?.mergeFetchedList) {
+        return Array.isArray(listaBase) ? [...listaBase] : [];
+      }
+      return window.AppDespesaMutations.mergeFetchedList(listaBase, listarMutacoesDespesaAtivas());
+    }
+
+    function persistirEReRenderizarLista() {
+      carregado = true;
+      popularFiltrosListaDespesas();
+      renderDespesas();
+      salvarCacheDespesas();
+    }
+
+    function agendarSyncSilenciosoDespesas() {
+      if (window.AppTabRefresh?.requestSync) {
+        window.AppTabRefresh.requestSync('despesas', {
+          delayMs: 900,
+          prefetch: true
+        });
+        return;
+      }
+      setTimeout(() => {
+        carregarDespesas(true);
+      }, 900);
+    }
+
+    function tratarEventoMutacaoDespesa(detail) {
+      const entry = detail?.entry;
+      if (!entry || String(entry.scope || '').trim() !== 'despesa') return;
+      if (String(entry?.meta?.domain || '').trim() !== 'despesa') return;
+      if (!window.AppDespesaMutations?.applyEntryToList) return;
+
+      despesas = window.AppDespesaMutations.applyEntryToList(despesas, detail);
+      persistirEReRenderizarLista();
+
+      if (String(detail?.type || '').trim() === 'success') {
+        agendarSyncSilenciosoDespesas();
+        return;
+      }
+
+      if (String(detail?.type || '').trim() === 'error'
+        && String(entry?.meta?.source || '').trim() === 'despesas') {
+        mostrarToast(`${detail?.errorMessage || 'Falha ao sincronizar despesa'}. Use "Tentar novamente".`, 'erro');
+      }
+    }
+
+    function registrarListenerMutacoesSeNecessario() {
+      if (listenerMutacoesRegistrado) return;
+      if (typeof window === 'undefined' || typeof window.addEventListener !== 'function') return;
+      window.addEventListener('app:optimistic-mutation', evento => {
+        tratarEventoMutacaoDespesa(evento?.detail || {});
+      });
+      listenerMutacoesRegistrado = true;
+    }
+
     function filtrarDespesas(lista, texto) {
       const arr = Array.isArray(lista) ? lista : [];
       const termo = normalizarTexto(texto);
@@ -581,12 +646,24 @@
     function montarCardResumoDespesa(d) {
       const pendente = Number(d?.total_pendente || 0);
       const pago = Number(d?.total_pago || 0);
-      const podePagar = pendente > 0.009;
+      const localState = window.AppDespesaMutations?.getUiState
+        ? window.AppDespesaMutations.getUiState(d)
+        : {
+          status: '',
+          label: '',
+          message: '',
+          canRetry: false,
+          blockActions: false
+        };
+      const bloquearAcoes = !!localState.blockActions;
+      const podePagar = pendente > 0.009 && !bloquearAcoes;
       const statusVisual = obterStatusVisual(d);
       const statusClasse = obterClasseStatus(statusVisual);
+      const estadoClasse = localState.status ? `despesa-local-${localState.status}` : '';
+      const estadoDeleteClasse = d?._localDeleted ? 'despesa-local-delete' : '';
 
       const card = document.createElement('div');
-      card.className = `card card-ficha despesa-card despesa-card-${statusClasse}`;
+      card.className = `card card-ficha despesa-card despesa-card-${statusClasse} ${estadoClasse} ${estadoDeleteClasse}`.trim();
       card.innerHTML = `
         <div class="card-ficha-topo">${escapeHtml(d?.descricao || '-')}</div>
         <div class="card-ficha-corpo">
@@ -594,6 +671,13 @@
             <span class="despesa-card-resumo-label">Despesa geral</span>
             <span class="despesa-status-badge despesa-status-${statusClasse}">${escapeHtml(statusVisual)}</span>
           </div>
+          ${localState.label ? `
+            <div class="despesa-local-state-row">
+              <span class="despesa-local-state despesa-local-state-${escapeHtml(localState.status || 'pending')}">${escapeHtml(localState.label)}</span>
+              ${localState.canRetry ? `<button class="despesa-btn-inline despesa-btn-retry" onclick="DespesasController.retryDespesaMutation('${escapeHtml(d?.ID)}')">Tentar novamente</button>` : ''}
+            </div>
+          ` : ''}
+          ${localState.message ? `<div class="despesa-local-message">${escapeHtml(localState.message)}</div>` : ''}
 
           <div class="despesa-card-meta-area">
             <div class="despesa-card-meta">
@@ -603,8 +687,8 @@
             </div>
 
             <div class="despesa-acoes-laterais">
-              <button class="despesa-btn-acao" onclick="DespesasController.editarDespesa('${escapeHtml(d?.ID)}')">Editar</button>
-              <button class="despesa-btn-acao" onclick="DespesasController.excluirDespesa('${escapeHtml(d?.ID)}')">Excluir</button>
+              <button class="despesa-btn-acao" onclick="DespesasController.editarDespesa('${escapeHtml(d?.ID)}')" ${bloquearAcoes ? 'disabled' : ''}>Editar</button>
+              <button class="despesa-btn-acao" onclick="DespesasController.excluirDespesa('${escapeHtml(d?.ID)}')" ${bloquearAcoes ? 'disabled' : ''}>Excluir</button>
             </div>
           </div>
 
@@ -752,10 +836,8 @@
     function hidratarDespesasDoCache() {
       const listaCache = window.AppTabCache?.ler?.('despesas');
       if (!Array.isArray(listaCache)) return false;
-      despesas = [...listaCache];
-      carregado = true;
-      popularFiltrosListaDespesas();
-      renderDespesas();
+      despesas = reconciliarListaComMutacoes(listaCache);
+      persistirEReRenderizarLista();
       return true;
     }
 
@@ -778,17 +860,16 @@
           if (window.AppRuntime?.setReadOnly) {
             window.AppRuntime.setReadOnly(false);
           }
-          despesas = Array.isArray(lista) ? lista : [];
-          carregado = true;
-          popularFiltrosListaDespesas();
-          renderDespesas();
-          salvarCacheDespesas();
+          despesas = reconciliarListaComMutacoes(Array.isArray(lista) ? lista : []);
+          persistirEReRenderizarLista();
           if (typeof onDone === 'function') onDone();
         })
         .listarDespesasGerais(!!forcarRecarregar);
     }
 
     function init() {
+      registrarListenerMutacoesSeNecessario();
+      window.AppOptimistic?.process?.();
       if (!iniciado) {
         const f = el();
         bindFiltrosListaDespesas();
@@ -902,6 +983,10 @@
       const item = despesas.find(d => String(d.ID || '').trim() === despesaId);
       if (!item) {
         mostrarToast('Despesa nao encontrada', 'erro');
+        return;
+      }
+      if (window.AppDespesaMutations?.getUiState?.(item)?.blockActions) {
+        mostrarToast('Aguarde a sincronizacao atual terminar ou use "Tentar novamente".', 'erro');
         return;
       }
 
@@ -1048,52 +1133,50 @@
       const despesaAnterior = despesaEditandoId ? getById(despesaEditandoId) : null;
       const eraEdicao = !!despesaEditandoId;
       const idEdicaoAtual = despesaEditandoId;
+      const optimisticId = eraEdicao ? idEdicaoAtual : (window.AppDespesaMutations?.tempId?.('DES_TMP') || `DES_TMP_${Date.now()}`);
+      const optimisticItem = window.AppDespesaMutations?.buildFromPayload
+        ? window.AppDespesaMutations.buildFromPayload(payload, {
+          baseItem: despesaAnterior,
+          id: optimisticId
+        })
+        : {
+          ...(despesaAnterior || {}),
+          ...payload,
+          ID: optimisticId
+        };
 
       setSalvandoDespesa(true);
-      cancelarFormularioDespesa();
-      const runner = window.AppRequest.runner()
-        .withFailureHandler(err => {
-          setSalvandoDespesa(false);
-          mostrarToast(err?.message || 'Erro ao salvar despesa', 'erro');
-          reabrirFormularioDespesaAposErro(payloadFormulario, {
-            editando: eraEdicao,
-            id: idEdicaoAtual
-          });
-        })
-        .withSuccessHandler(() => {
-          setSalvandoDespesa(false);
-          const concluirSync = window.AppSyncFeedback?.iniciar
-            ? window.AppSyncFeedback.iniciar('Despesa salva. Atualizando dados...')
-            : null;
-          window.AppModalUI?.closeAll?.();
-          if (window.AppTabRefresh?.requestSync) {
-            window.AppTabRefresh.requestSync('despesas', {
-              delayMs: 300,
-              prefetch: true,
-              onDone: () => {
-                if (concluirSync) {
-                  concluirSync('Dados atualizados');
-                } else {
-                  mostrarToast('Dados atualizados');
-                }
-              }
-            });
-          } else {
-            carregarDespesas(true, () => {
-              if (concluirSync) {
-                concluirSync('Dados atualizados');
-              } else {
-                mostrarToast('Dados atualizados');
-              }
-            });
+      try {
+        if (!window.AppOptimistic?.enqueue) {
+          throw new Error('Fila de sincronizacao indisponivel');
+        }
+        window.AppOptimistic.enqueue({
+          scope: 'despesa',
+          handler: eraEdicao ? 'despesa.update' : 'despesa.create',
+          entityKey: eraEdicao ? `despesa:${idEdicaoAtual}` : `despesa:${optimisticId}`,
+          payload,
+          meta: {
+            domain: 'despesa',
+            action: eraEdicao ? 'update' : 'create',
+            source: 'despesas',
+            target_id: eraEdicao ? idEdicaoAtual : '',
+            before_item: despesaAnterior ? (window.AppDespesaMutations?.limparMeta?.(despesaAnterior) || despesaAnterior) : null,
+            optimistic_item: window.AppDespesaMutations?.limparMeta?.(optimisticItem) || optimisticItem
           }
-          notificarDashboardAlterado(despesaAnterior, payload);
         });
-
-      if (eraEdicao && idEdicaoAtual) {
-        runner.atualizarDespesaGeral(idEdicaoAtual, payload);
-      } else {
-        runner.criarDespesaGeral(payload);
+        setSalvandoDespesa(false);
+        cancelarFormularioDespesa();
+        window.AppModalUI?.closeAll?.();
+        mostrarToast(eraEdicao
+          ? 'Alteracao aplicada localmente. Sincronizando...'
+          : 'Despesa criada localmente. Sincronizando...');
+      } catch (error) {
+        setSalvandoDespesa(false);
+        mostrarToast(error?.message || 'Erro ao enfileirar despesa', 'erro');
+        reabrirFormularioDespesaAposErro(payloadFormulario, {
+          editando: eraEdicao,
+          id: idEdicaoAtual
+        });
       }
     }
 
@@ -1103,28 +1186,54 @@
       if (!despesaId) return;
       if (!confirm('Deseja remover esta despesa geral?')) return;
       const despesaAtual = getById(despesaId);
+      if (!despesaAtual) {
+        mostrarToast('Despesa nao encontrada', 'erro');
+        return;
+      }
+      if (window.AppDespesaMutations?.getUiState?.(despesaAtual)?.blockActions) {
+        mostrarToast('Esta despesa ja possui uma sincronizacao pendente.', 'erro');
+        return;
+      }
 
-      window.AppRequest.runner()
-        .withFailureHandler(() => {
-          mostrarToast('Erro ao remover despesa', 'erro');
-        })
-        .withSuccessHandler(() => {
-          mostrarToast('Despesa removida');
-          if (window.AppTabRefresh?.requestSync) {
-            window.AppTabRefresh.requestSync('despesas', {
-              immediate: true,
-              prefetch: true
-            });
-          } else {
-            carregarDespesas(true);
+      try {
+        if (!window.AppOptimistic?.enqueue) {
+          throw new Error('Fila de sincronizacao indisponivel');
+        }
+        window.AppOptimistic.enqueue({
+          scope: 'despesa',
+          handler: 'despesa.delete',
+          entityKey: `despesa:${despesaId}`,
+          payload: {
+            id: despesaId
+          },
+          meta: {
+            domain: 'despesa',
+            action: 'delete',
+            source: 'despesas',
+            target_id: despesaId,
+            before_item: window.AppDespesaMutations?.limparMeta?.(despesaAtual) || despesaAtual,
+            optimistic_item: window.AppDespesaMutations?.limparMeta?.(despesaAtual) || despesaAtual
           }
-          notificarDashboardAlterado(despesaAtual);
-        })
-        .deletarDespesaGeral(despesaId);
+        });
+        mostrarToast('Exclusao aplicada localmente. Sincronizando...');
+      } catch (error) {
+        mostrarToast(error?.message || 'Erro ao enfileirar exclusao da despesa', 'erro');
+      }
     }
 
     function excluir(id) {
       excluirDespesa(id);
+    }
+
+    function retryDespesaMutation(id) {
+      const item = getById(id);
+      const mutationId = String(item?._localMutationId || '').trim();
+      if (!mutationId || !window.AppOptimistic?.retry) {
+        mostrarToast('Nao ha sincronizacao pendente para reenviar', 'erro');
+        return;
+      }
+      window.AppOptimistic.retry(mutationId);
+      mostrarToast('Tentando sincronizar novamente...');
     }
 
     function setSalvandoPagamentoDespesa(ativo) {
@@ -1167,6 +1276,10 @@
       const item = despesas.find(d => String(d.ID || '').trim() === despesaId);
       if (!item) {
         mostrarToast('Despesa nao encontrada', 'erro');
+        return false;
+      }
+      if (window.AppDespesaMutations?.getUiState?.(item)?.blockActions) {
+        mostrarToast('Esta despesa ja possui uma sincronizacao pendente.', 'erro');
         return false;
       }
 
@@ -1301,6 +1414,10 @@
       const despesaIdAtual = despesaPagamentoId;
       const eraParcelado = despesaPagamentoParcelado;
       const despesaAtual = getById(despesaIdAtual);
+      if (!despesaAtual) {
+        mostrarToast('Despesa nao encontrada', 'erro');
+        return;
+      }
       const dadosFormulario = {
         data_pagamento: dataPagamento,
         valor_pago: valorPago,
@@ -1308,6 +1425,12 @@
         forma_pagamento: formaPagamento,
         observacao
       };
+      const optimisticItem = window.AppDespesaMutations?.applyPayment
+        ? window.AppDespesaMutations.applyPayment(despesaAtual, dadosFormulario)
+        : {
+          ...(despesaAtual || {}),
+          data_pagamento: dataPagamento
+        };
 
       setSalvandoPagamentoDespesa(true);
       if (f.modalPagamentoDespesa) {
@@ -1315,51 +1438,38 @@
       }
       despesaPagamentoId = null;
       despesaPagamentoParcelado = false;
-
-      window.AppRequest.runner()
-        .withFailureHandler(err => {
-          setSalvandoPagamentoDespesa(false);
-          mostrarToast(err?.message || 'Erro ao registrar pagamento', 'erro');
-          reabrirPagamentoDespesaAposErro(despesaIdAtual, dadosFormulario);
-        })
-        .withSuccessHandler(() => {
-          setSalvandoPagamentoDespesa(false);
-          window.AppModalUI?.closeAll?.();
-          const concluirSync = window.AppSyncFeedback?.iniciar
-            ? window.AppSyncFeedback.iniciar('Pagamento registrado. Atualizando dados...')
-            : null;
-          if (window.AppTabRefresh?.requestSync) {
-            window.AppTabRefresh.requestSync('despesas', {
-              delayMs: 300,
-              prefetch: true,
-              onDone: () => {
-                if (concluirSync) {
-                  concluirSync('Dados atualizados');
-                } else {
-                  mostrarToast('Dados atualizados');
-                }
-              }
-            });
-          } else {
-            carregarDespesas(true, () => {
-              if (concluirSync) {
-                concluirSync('Dados atualizados');
-              } else {
-                mostrarToast('Dados atualizados');
-              }
-            });
+      try {
+        if (!window.AppOptimistic?.enqueue) {
+          throw new Error('Fila de sincronizacao indisponivel');
+        }
+        window.AppOptimistic.enqueue({
+          scope: 'despesa',
+          handler: 'despesa.payment',
+          entityKey: `despesa:${despesaIdAtual}`,
+          payload: {
+            data_pagamento: dataPagamento,
+            valor_pago: valorPago,
+            parcela_alvo_id: dadosFormulario.parcela_alvo_id,
+            forma_pagamento: formaPagamento,
+            observacao
+          },
+          meta: {
+            domain: 'despesa',
+            action: 'payment',
+            source: 'despesas',
+            target_id: despesaIdAtual,
+            before_item: despesaAtual ? (window.AppDespesaMutations?.limparMeta?.(despesaAtual) || despesaAtual) : null,
+            optimistic_item: window.AppDespesaMutations?.limparMeta?.(optimisticItem) || optimisticItem
           }
-          notificarDashboardAlterado(despesaAtual, {
-            data_pagamento: dataPagamento
-          });
-        })
-        .registrarPagamentoDespesaGeral(despesaIdAtual, {
-          data_pagamento: dataPagamento,
-          valor_pago: valorPago,
-          parcela_alvo_id: dadosFormulario.parcela_alvo_id,
-          forma_pagamento: formaPagamento,
-          observacao
         });
+        setSalvandoPagamentoDespesa(false);
+        window.AppModalUI?.closeAll?.();
+        mostrarToast('Pagamento aplicado localmente. Sincronizando...');
+      } catch (error) {
+        setSalvandoPagamentoDespesa(false);
+        mostrarToast(error?.message || 'Erro ao enfileirar pagamento', 'erro');
+        reabrirPagamentoDespesaAposErro(despesaIdAtual, dadosFormulario);
+      }
     }
 
     function cancelarPagamentoDespesa() {
@@ -1392,6 +1502,7 @@
       salvarDespesa,
       excluir,
       excluirDespesa,
+      retryDespesaMutation,
       registrarPagamento,
       registrarPagamentoDespesa,
       confirmarPagamentoDespesa,
