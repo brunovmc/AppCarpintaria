@@ -608,6 +608,38 @@
       listenerMutacoesRegistrado = true;
     }
 
+    function getDespesaUiState(item) {
+      if (!window.AppDespesaMutations?.getUiState) {
+        return {
+          status: '',
+          action: '',
+          label: '',
+          message: '',
+          canRetry: false,
+          blockActions: false
+        };
+      }
+      return window.AppDespesaMutations.getUiState(item);
+    }
+
+    function ehCriacaoLocalComFalha(item, localState = null) {
+      const state = localState || getDespesaUiState(item);
+      const status = String(state?.status || '').trim().toLowerCase();
+      const action = String(item?._localAction || state?.action || '').trim().toLowerCase();
+      const mutationId = String(item?._localMutationId || '').trim();
+      return ['error', 'conflict'].includes(status)
+        && action === 'create'
+        && !!mutationId;
+    }
+
+    function descartarMutacaoDespesa(item) {
+      const mutationId = String(item?._localMutationId || '').trim();
+      if (!mutationId || !window.AppOptimistic?.discard) {
+        throw new Error('Nao ha sincronizacao local para descartar.');
+      }
+      return window.AppOptimistic.discard(mutationId);
+    }
+
     function filtrarDespesas(lista, texto) {
       const arr = Array.isArray(lista) ? lista : [];
       const termo = normalizarTexto(texto);
@@ -646,21 +678,15 @@
     function montarCardResumoDespesa(d) {
       const pendente = Number(d?.total_pendente || 0);
       const pago = Number(d?.total_pago || 0);
-      const localState = window.AppDespesaMutations?.getUiState
-        ? window.AppDespesaMutations.getUiState(d)
-        : {
-          status: '',
-          label: '',
-          message: '',
-          canRetry: false,
-          blockActions: false
-        };
-      const bloquearAcoes = !!localState.blockActions;
+      const localState = getDespesaUiState(d);
+      const criacaoLocalComFalha = ehCriacaoLocalComFalha(d, localState);
+      const bloquearAcoes = !!localState.blockActions && !criacaoLocalComFalha;
       const podePagar = pendente > 0.009 && !bloquearAcoes;
       const statusVisual = obterStatusVisual(d);
       const statusClasse = obterClasseStatus(statusVisual);
       const estadoClasse = localState.status ? `despesa-local-${localState.status}` : '';
       const estadoDeleteClasse = d?._localDeleted ? 'despesa-local-delete' : '';
+      const rotuloExcluir = criacaoLocalComFalha ? 'Descartar' : 'Excluir';
 
       const card = document.createElement('div');
       card.className = `card card-ficha despesa-card despesa-card-${statusClasse} ${estadoClasse} ${estadoDeleteClasse}`.trim();
@@ -688,7 +714,7 @@
 
             <div class="despesa-acoes-laterais">
               <button class="despesa-btn-acao" onclick="DespesasController.editarDespesa('${escapeHtml(d?.ID)}')" ${bloquearAcoes ? 'disabled' : ''}>Editar</button>
-              <button class="despesa-btn-acao" onclick="DespesasController.excluirDespesa('${escapeHtml(d?.ID)}')" ${bloquearAcoes ? 'disabled' : ''}>Excluir</button>
+              <button class="despesa-btn-acao" onclick="DespesasController.excluirDespesa('${escapeHtml(d?.ID)}')" ${bloquearAcoes ? 'disabled' : ''}>${rotuloExcluir}</button>
             </div>
           </div>
 
@@ -980,12 +1006,25 @@
     function editarDespesa(id) {
       if (!podeAlterarDados('Edicao bloqueada em modo somente leitura')) return;
       const despesaId = String(id || '').trim();
-      const item = despesas.find(d => String(d.ID || '').trim() === despesaId);
+      const item = getById(despesaId);
       if (!item) {
         mostrarToast('Despesa nao encontrada', 'erro');
         return;
       }
-      if (window.AppDespesaMutations?.getUiState?.(item)?.blockActions) {
+      const localState = getDespesaUiState(item);
+      if (ehCriacaoLocalComFalha(item, localState)) {
+        const snapshot = window.AppDespesaMutations?.limparMeta?.(item) || { ...(item || {}) };
+        try {
+          descartarMutacaoDespesa(item);
+        } catch (error) {
+          mostrarToast(error?.message || 'Nao foi possivel liberar a despesa local para edicao', 'erro');
+          return;
+        }
+        reabrirFormularioDespesaAposErro(snapshot, { editando: false });
+        mostrarToast('Despesa com falha reaberta para ajuste.');
+        return;
+      }
+      if (localState.blockActions) {
         mostrarToast('Aguarde a sincronizacao atual terminar ou use "Tentar novamente".', 'erro');
         return;
       }
@@ -1184,13 +1223,26 @@
       if (!podeAlterarDados('Exclusao bloqueada em modo somente leitura')) return;
       const despesaId = String(id || '').trim();
       if (!despesaId) return;
-      if (!confirm('Deseja remover esta despesa geral?')) return;
       const despesaAtual = getById(despesaId);
       if (!despesaAtual) {
         mostrarToast('Despesa nao encontrada', 'erro');
         return;
       }
-      if (window.AppDespesaMutations?.getUiState?.(despesaAtual)?.blockActions) {
+      const localState = getDespesaUiState(despesaAtual);
+      const mensagemConfirmacao = ehCriacaoLocalComFalha(despesaAtual, localState)
+        ? 'Deseja descartar esta despesa local com falha de sincronizacao?'
+        : 'Deseja remover esta despesa geral?';
+      if (!confirm(mensagemConfirmacao)) return;
+      if (ehCriacaoLocalComFalha(despesaAtual, localState)) {
+        try {
+          descartarMutacaoDespesa(despesaAtual);
+          mostrarToast('Despesa local descartada.');
+        } catch (error) {
+          mostrarToast(error?.message || 'Nao foi possivel descartar a despesa local', 'erro');
+        }
+        return;
+      }
+      if (localState.blockActions) {
         mostrarToast('Esta despesa ja possui uma sincronizacao pendente.', 'erro');
         return;
       }
@@ -1278,7 +1330,7 @@
         mostrarToast('Despesa nao encontrada', 'erro');
         return false;
       }
-      if (window.AppDespesaMutations?.getUiState?.(item)?.blockActions) {
+      if (getDespesaUiState(item).blockActions) {
         mostrarToast('Esta despesa ja possui uma sincronizacao pendente.', 'erro');
         return false;
       }

@@ -3,7 +3,12 @@
 
     let itens = [];
     let carregado = false;
+    let versao = 0;
     const CACHE_TAB = 'compras';
+
+    function tocarVersao() {
+      versao += 1;
+    }
 
     function salvarCache() {
       window.AppTabCache?.salvar?.(CACHE_TAB, itens);
@@ -93,6 +98,7 @@
     function set(lista) {
       itens = ordenarCompras(lista);
       carregado = true;
+      tocarVersao();
       salvarCache();
       emitirStoreLoaded();
     }
@@ -105,9 +111,14 @@
       return carregado;
     }
 
+    function getVersion() {
+      return versao;
+    }
+
     function clear() {
       itens = [];
       carregado = false;
+      tocarVersao();
       removerCache();
     }
 
@@ -118,6 +129,7 @@
       if (!item || !item.ID) return;
       itens.unshift(item);
       itens = ordenarCompras(itens);
+      tocarVersao();
       salvarCache();
     }
 
@@ -130,11 +142,13 @@
         ...dados
       };
       itens = ordenarCompras(itens);
+      tocarVersao();
       salvarCache();
     }
 
     function remove(id) {
       itens = itens.filter(i => i.ID !== id);
+      tocarVersao();
       salvarCache();
     }
 
@@ -180,6 +194,7 @@
       set,
       get,
       isLoaded,
+      getVersion,
       clear,
 
       add,
