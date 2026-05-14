@@ -799,21 +799,6 @@
       };
     }
 
-    function canonicalDespesaSuccessItem(detail) {
-      const entry = detail?.entry || {};
-      const meta = entry.meta || {};
-      if (meta.action === 'payment' && detail?.result?.despesaAtualizada) {
-        return cloneJson(detail.result.despesaAtualizada);
-      }
-      if (meta.action === 'create' && detail?.result && typeof detail.result === 'object') {
-        return cloneJson(detail.result);
-      }
-      if (meta.action === 'update' && detail?.result && typeof detail.result === 'object' && detail.result.ID) {
-        return cloneJson(detail.result);
-      }
-      return cloneJson(meta.optimistic_item);
-    }
-
     function aplicarPatchResumoDespesa(resumoBase, referencia, beforeItem, afterItem, options = {}) {
       const resumo = normalizarResumoBase(resumoBase);
       const cards = { ...(resumo.cards || {}) };
@@ -869,12 +854,21 @@
       return resumo;
     }
 
-    function persistirResumoLocal(referencia, resumo) {
+    function obterResumoBaseCache(referencia) {
       const ref = String(referencia || '').trim();
-      if (!referenciaEhValida(ref) || !resumo) return;
-      const ts = Date.now();
-      salvarResumoCacheLocal(ref, resumo);
-      salvarResumoPersistido(ref, resumo, ts, gerarResumoHash(resumo));
+      if (!referenciaEhValida(ref)) return null;
+      return lerResumoCacheLocal(ref) || lerResumoPersistido(ref)?.resumo || null;
+    }
+
+    function renderResumoCacheComMutacoes(referencia, updatedAt = Date.now()) {
+      const ref = String(referencia || '').trim();
+      const resumoBase = obterResumoBaseCache(ref);
+      if (!resumoBase) return false;
+      const resumoVisual = reconciliarResumoComMutacoes(resumoBase, ref);
+      if (!resumoVisual) return false;
+      renderResumoCompleto(resumoVisual);
+      atualizarTextoUltimaAtualizacao(updatedAt);
+      return true;
     }
 
     function aplicarResumoMutacaoDespesa(detail) {
@@ -883,24 +877,10 @@
       if (String(meta.domain || '').trim() !== 'despesa') return;
 
       const tipo = String(detail?.type || '').trim().toLowerCase();
-      let beforeItem = null;
-      let afterItem = null;
-      let includePaymentDelta = false;
-
-      if (tipo === 'queued') {
-        beforeItem = meta.before_item || null;
-        afterItem = meta.action === 'delete' ? null : (meta.optimistic_item || null);
-        includePaymentDelta = meta.action === 'payment';
-      } else if (tipo === 'success' && meta.action !== 'delete') {
-        beforeItem = meta.optimistic_item || null;
-        afterItem = canonicalDespesaSuccessItem(detail);
-      } else {
-        return;
-      }
+      const tiposQueAlteramPrevia = ['queued', 'discarded', 'retry', 'sending', 'paused', 'offline', 'error', 'conflict'];
+      if (!tiposQueAlteramPrevia.includes(tipo)) return;
 
       const refs = coletarMesesImpactados(
-        beforeItem,
-        afterItem,
         meta.before_item,
         meta.optimistic_item,
         detail?.result?.despesaAtualizada,
@@ -908,17 +888,8 @@
       );
 
       refs.forEach(ref => {
-        const resumoAtual = lerResumoCacheLocal(ref) || lerResumoPersistido(ref)?.resumo;
-        if (!resumoAtual) return;
-        const resumoPatch = aplicarPatchResumoDespesa(resumoAtual, ref, beforeItem, afterItem, {
-          includePaymentDelta,
-          paymentValue: entry?.payload?.valor_pago,
-          paymentDate: entry?.payload?.data_pagamento
-        });
-        persistirResumoLocal(ref, resumoPatch);
         if (ref === getMesReferenciaAtiva()) {
-          renderResumoCompleto(resumoPatch);
-          atualizarTextoUltimaAtualizacao(Date.now());
+          renderResumoCacheComMutacoes(ref);
         }
       });
     }
@@ -1332,8 +1303,9 @@
       const cacheSessao = !forcarRecarregar ? lerResumoCacheLocal(refValida) : null;
       const cachePersistido = !forcarRecarregar ? lerResumoPersistido(refValida) : null;
       const hadCache = !!cacheSessao || !!cachePersistido;
-      const resumoCache = reconciliarResumoComMutacoes(cacheSessao || cachePersistido?.resumo || null, refValida);
-      const hashCache = cachePersistido?.hash || gerarResumoHash(resumoCache || {});
+      const resumoBaseCache = cacheSessao || cachePersistido?.resumo || null;
+      const resumoCache = reconciliarResumoComMutacoes(resumoBaseCache, refValida);
+      const hashCache = cachePersistido?.hash || gerarResumoHash(resumoBaseCache || {});
 
       if (resumoCache) {
         renderResumoCompleto(resumoCache);
@@ -1346,7 +1318,8 @@
         .withSuccessHandler(resumo => {
           if (requestSeq !== resumoRequestSeq) return;
 
-          const resumoSeguro = reconciliarResumoComMutacoes(resumo || {}, refValida);
+          const resumoSeguro = resumo || {};
+          const resumoVisual = reconciliarResumoComMutacoes(resumoSeguro, refValida);
           const hashNovo = gerarResumoHash(resumoSeguro);
           const mudou = !!forcarRecarregar || !hadCache || hashNovo !== hashCache;
           const tsAtualizacao = Date.now();
@@ -1359,7 +1332,7 @@
           prefetchComposicoesCardsDashboard(refValida);
 
           if (mudou) {
-            renderResumoCompleto(resumoSeguro);
+            renderResumoCompleto(resumoVisual);
           }
           atualizarTextoUltimaAtualizacao(tsAtualizacao);
           setModoSomenteLeitura(false);
