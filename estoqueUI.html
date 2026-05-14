@@ -674,6 +674,7 @@
       const div = document.createElement('div');
       div.className = 'card card-ficha';
       div.dataset.id = i.ID;
+      if (i?._localMutationId) div.dataset.localMutationId = String(i._localMutationId || '').trim();
       const localState = obterEstadoLocalEstoque(i);
       if (localState.status) div.classList.add(`card-local-${localState.status}`);
       if (i?._localDeleted) div.classList.add('card-local-delete');

@@ -429,6 +429,7 @@
       const div = document.createElement('div');
       div.className = 'card card-ficha';
       div.dataset.id = v.ID;
+      if (v?._localMutationId) div.dataset.localMutationId = String(v._localMutationId || '').trim();
       const localState = window.AppEntityMutations?.getUiState
         ? window.AppEntityMutations.getUiState(v, {
           pendingLabels: {

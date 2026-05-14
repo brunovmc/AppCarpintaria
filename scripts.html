@@ -3025,6 +3025,19 @@
     const hints = new Map();
     let elWrap = null;
     let elTexto = null;
+    let acaoAtual = null;
+    let eventosBannerRegistrados = false;
+
+    function executarAcaoAtual() {
+      if (typeof acaoAtual !== 'function') return;
+      try {
+        acaoAtual();
+      } catch (error) {
+        if (typeof console !== 'undefined' && console.warn) {
+          console.warn('[sync] erro ao executar acao do aviso', error);
+        }
+      }
+    }
 
     function garantirElemento() {
       if (elWrap && document.body?.contains(elWrap)) return;
@@ -3035,6 +3048,21 @@
         elTexto = document.createElement('span');
         elTexto.id = 'appSyncBannerText';
         elWrap.appendChild(elTexto);
+      }
+      if (!eventosBannerRegistrados) {
+        elWrap.addEventListener('click', event => {
+          if (typeof acaoAtual !== 'function') return;
+          event.preventDefault();
+          executarAcaoAtual();
+        });
+        elWrap.addEventListener('keydown', event => {
+          if (typeof acaoAtual !== 'function') return;
+          const tecla = String(event?.key || '').toLowerCase();
+          if (tecla !== 'enter' && tecla !== ' ' && tecla !== 'spacebar') return;
+          event.preventDefault();
+          executarAcaoAtual();
+        });
+        eventosBannerRegistrados = true;
       }
     }
 
@@ -3057,9 +3085,14 @@
       const alvo = alvoAtivo || alvoHint;
 
       if (!alvo) {
+        acaoAtual = null;
         elWrap.classList.add('hidden');
+        elWrap.classList.remove('app-sync-banner-clickable');
         elWrap.removeAttribute('data-aba-sync');
         elWrap.removeAttribute('data-sync-kind');
+        elWrap.removeAttribute('tabindex');
+        elWrap.setAttribute('role', 'status');
+        elWrap.removeAttribute('aria-label');
         return;
       }
 
@@ -3067,6 +3100,7 @@
       const texto = String(alvo?.texto || '').trim();
       const kind = String(alvo?.kind || '').trim();
       const labelAba = obterLabelAbaSync(abaAlvo);
+      acaoAtual = typeof alvo?.onClick === 'function' ? alvo.onClick : null;
 
       elTexto.textContent = texto || `Sincronizando ${labelAba}...`;
       if (abaAlvo) {
@@ -3078,6 +3112,17 @@
         elWrap.setAttribute('data-sync-kind', kind);
       } else {
         elWrap.removeAttribute('data-sync-kind');
+      }
+      if (acaoAtual) {
+        elWrap.classList.add('app-sync-banner-clickable');
+        elWrap.setAttribute('tabindex', '0');
+        elWrap.setAttribute('role', 'button');
+        elWrap.setAttribute('aria-label', `${texto || `Sincronizando ${labelAba}`} Abrir item relacionado.`);
+      } else {
+        elWrap.classList.remove('app-sync-banner-clickable');
+        elWrap.removeAttribute('tabindex');
+        elWrap.setAttribute('role', 'status');
+        elWrap.removeAttribute('aria-label');
       }
       elWrap.classList.remove('hidden');
     }
@@ -3134,7 +3179,8 @@
       hints.set(chave, {
         aba: normalizarNomeAba(payload?.aba),
         texto,
-        kind: String(payload?.kind || '').trim()
+        kind: String(payload?.kind || '').trim(),
+        onClick: typeof payload?.onClick === 'function' ? payload.onClick : null
       });
       render();
     }
@@ -3162,6 +3208,162 @@
 
   window.AppSyncStatus = window.AppSyncStatus || createSyncStatusHelper();
 
+  function obterEntradasOutbox(lista = []) {
+    if (Array.isArray(lista) && lista.length > 0) return lista;
+    if (!window.AppOptimistic?.list) return [];
+    try {
+      return window.AppOptimistic.list();
+    } catch (error) {
+      return [];
+    }
+  }
+
+  function escolherEntradaOutboxPrincipal(lista = []) {
+    const entradas = obterEntradasOutbox(lista);
+    const prioridade = ['conflict', 'error', 'offline', 'paused', 'pending', 'sending'];
+    for (const status of prioridade) {
+      const encontrada = entradas.find(entry => String(entry?.status || '').trim().toLowerCase() === status);
+      if (encontrada) return encontrada;
+    }
+    return entradas[0] || null;
+  }
+
+  function obterAbaEntradaOutbox(entry) {
+    const meta = entry?.meta || {};
+    const bruto = String(meta.source || meta.domain || entry?.scope || '').trim().toLowerCase();
+    const mapa = {
+      despesa: 'despesas',
+      despesas: 'despesas',
+      compra: 'compras',
+      compras: 'compras',
+      venda: 'vendas',
+      vendas: 'vendas',
+      estoque: 'estoque',
+      produto: 'produtos',
+      produtos: 'produtos',
+      producao: 'producao'
+    };
+    return normalizarNomeAba(mapa[bruto] || bruto);
+  }
+
+  function obterIdItemEntradaOutbox(entry) {
+    const meta = entry?.meta || {};
+    const optimistic = meta.optimistic_item || {};
+    const before = meta.before_item || {};
+    const entityParts = String(entry?.entityKey || '').split(':');
+    const candidates = [
+      meta.target_id,
+      meta.temp_id,
+      meta.optimistic_id,
+      optimistic.ID,
+      optimistic.produto_id,
+      optimistic.producao_id,
+      before.ID,
+      before.produto_id,
+      before.producao_id,
+      entityParts.length > 1 ? entityParts[entityParts.length - 1] : ''
+    ];
+    return candidates
+      .map(valor => String(valor || '').trim())
+      .find(Boolean) || '';
+  }
+
+  function escaparCssAttr(valor) {
+    const raw = String(valor || '');
+    if (window.CSS?.escape) return window.CSS.escape(raw);
+    return raw.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  }
+
+  function buscarElementoEntradaOutbox(entry) {
+    const aba = obterAbaEntradaOutbox(entry);
+    const raiz = document.getElementById(`aba-${aba}`) || document;
+    const mutationId = String(entry?.id || '').trim();
+    const itemId = obterIdItemEntradaOutbox(entry);
+    if (mutationId) {
+      const porMutacao = raiz.querySelector(`[data-local-mutation-id="${escaparCssAttr(mutationId)}"]`);
+      if (porMutacao) return porMutacao;
+    }
+    if (itemId) {
+      const porItem = raiz.querySelector(`[data-id="${escaparCssAttr(itemId)}"]`);
+      if (porItem) return porItem;
+    }
+    return null;
+  }
+
+  function destacarElementoEntradaOutbox(el) {
+    if (!el) return;
+    el.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+    el.classList.add('app-locate-highlight');
+    if (!el.hasAttribute('tabindex')) {
+      el.setAttribute('tabindex', '-1');
+      el.dataset.tempFocus = '1';
+    }
+    try {
+      el.focus({ preventScroll: true });
+    } catch (error) {
+      // sem acao
+    }
+    setTimeout(() => {
+      el.classList.remove('app-locate-highlight');
+      if (el.dataset.tempFocus === '1') {
+        el.removeAttribute('tabindex');
+        delete el.dataset.tempFocus;
+      }
+    }, 2600);
+  }
+
+  function tentarLocalizarEntradaOutbox(entry, tentativa = 0) {
+    const alvo = buscarElementoEntradaOutbox(entry);
+    if (alvo) {
+      destacarElementoEntradaOutbox(alvo);
+      return true;
+    }
+
+    const aba = obterAbaEntradaOutbox(entry);
+    const raiz = document.getElementById(`aba-${aba}`) || document;
+    const btnMais = raiz.querySelector('.btn-carregar-mais:not(:disabled)');
+    if (btnMais && tentativa < 12) {
+      btnMais.click();
+      setTimeout(() => tentarLocalizarEntradaOutbox(entry, tentativa + 1), 250);
+      return false;
+    }
+
+    if (tentativa < 20) {
+      setTimeout(() => tentarLocalizarEntradaOutbox(entry, tentativa + 1), 350);
+      return false;
+    }
+
+    if (typeof mostrarToast === 'function') {
+      mostrarToast('Nao encontrei o item com falha nos filtros atuais.', 'erro');
+    }
+    return false;
+  }
+
+  function abrirEntradaOutbox(entryOrId) {
+    const entry = typeof entryOrId === 'string'
+      ? window.AppOptimistic?.get?.(entryOrId)
+      : entryOrId;
+    if (!entry) {
+      if (typeof mostrarToast === 'function') mostrarToast('Falha local nao encontrada.', 'erro');
+      return false;
+    }
+    const aba = obterAbaEntradaOutbox(entry);
+    if (!aba) {
+      if (typeof mostrarToast === 'function') mostrarToast('Nao consegui identificar a aba da falha.', 'erro');
+      return false;
+    }
+    if (typeof trocarAba === 'function') {
+      trocarAba(aba);
+    }
+    setTimeout(() => tentarLocalizarEntradaOutbox(entry), 280);
+    return true;
+  }
+
+  window.AppOutboxLocator = {
+    ...(window.AppOutboxLocator || {}),
+    open: abrirEntradaOutbox
+  };
+
   function formatarResumoOutboxHint(summary = {}) {
     const total = Math.max(0, Number(summary?.total || 0));
     if (total <= 0) return '';
@@ -3178,11 +3380,11 @@
     const pluralizar = (valor, singular, plural) => `${valor} ${valor === 1 ? singular : plural}`;
 
     if (conflict > 0) {
-      return `${pluralizar(conflict, 'alteracao com conflito', 'alteracoes com conflito')} aguardando revisao.`;
+      return `${pluralizar(conflict, 'alteracao com conflito', 'alteracoes com conflito')} aguardando revisao. Toque para revisar.`;
     }
 
     if (error > 0 && active === 0) {
-      return `${pluralizar(error, 'alteracao falhou', 'alteracoes falharam')}. Use "Tentar novamente".`;
+      return `${pluralizar(error, 'alteracao falhou', 'alteracoes falharam')}. Toque para localizar.`;
     }
 
     if (!online || offline > 0) {
@@ -3205,7 +3407,7 @@
     return '';
   }
 
-  function atualizarHintOutboxSincronizacao(summary = {}) {
+  function atualizarHintOutboxSincronizacao(summary = {}, entries = []) {
     const syncStatus = window.AppSyncStatus;
     if (!syncStatus?.setHint || !syncStatus?.clearHint) return;
     const texto = formatarResumoOutboxHint(summary);
@@ -3213,18 +3415,20 @@
       syncStatus.clearHint('optimistic-outbox');
       return;
     }
+    const entradaAlvo = escolherEntradaOutboxPrincipal(entries);
     syncStatus.setHint('optimistic-outbox', {
       texto,
-      kind: 'optimistic'
+      kind: 'optimistic',
+      onClick: entradaAlvo?.id ? () => abrirEntradaOutbox(entradaAlvo.id) : null
     });
   }
 
   if (typeof window !== 'undefined' && typeof window.addEventListener === 'function' && !window.__appOptimisticSyncHintBound) {
     window.addEventListener('app:optimistic-state', evento => {
-      atualizarHintOutboxSincronizacao(evento?.detail?.summary || {});
+      atualizarHintOutboxSincronizacao(evento?.detail?.summary || {}, evento?.detail?.entries || []);
     });
     window.__appOptimisticSyncHintBound = true;
-    atualizarHintOutboxSincronizacao(window.AppOptimistic?.getState?.() || {});
+    atualizarHintOutboxSincronizacao(window.AppOptimistic?.getState?.() || {}, window.AppOptimistic?.list?.() || []);
   }
 
   function getMesAtualReferencia() {

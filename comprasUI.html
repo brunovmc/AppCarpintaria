@@ -851,6 +851,7 @@
       const jaAdicionada = compraJaAdicionadaAoEstoque(i);
       if (jaAdicionada) div.classList.add('card-adicionado-estoque');
       div.dataset.id = i.ID;
+      if (i?._localMutationId) div.dataset.localMutationId = String(i._localMutationId || '').trim();
       const localState = obterEstadoLocalCompra(i);
       if (localState.status) div.classList.add(`card-local-${localState.status}`);
       if (i?._localDeleted) div.classList.add('card-local-delete');

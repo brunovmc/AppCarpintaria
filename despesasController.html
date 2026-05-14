@@ -690,6 +690,8 @@
 
       const card = document.createElement('div');
       card.className = `card card-ficha despesa-card despesa-card-${statusClasse} ${estadoClasse} ${estadoDeleteClasse}`.trim();
+      card.dataset.id = String(d?.ID || '').trim();
+      if (d?._localMutationId) card.dataset.localMutationId = String(d._localMutationId || '').trim();
       card.innerHTML = `
         <div class="card-ficha-topo">${escapeHtml(d?.descricao || '-')}</div>
         <div class="card-ficha-corpo">
