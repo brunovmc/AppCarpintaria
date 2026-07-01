@@ -632,12 +632,41 @@
         && !!mutationId;
     }
 
+    function podeDescartarFalhaDespesa(item, localState = null) {
+      const state = localState || getDespesaUiState(item);
+      const status = String(state?.status || '').trim().toLowerCase();
+      const mutationId = String(item?._localMutationId || '').trim();
+      return ['error', 'conflict'].includes(status) && !!mutationId;
+    }
+
     function descartarMutacaoDespesa(item) {
       const mutationId = String(item?._localMutationId || '').trim();
       if (!mutationId || !window.AppOptimistic?.discard) {
         throw new Error('Nao ha sincronizacao local para descartar.');
       }
       return window.AppOptimistic.discard(mutationId);
+    }
+
+    function atualizarAposDescartarFalhaDespesa(item) {
+      const refs = window.DashboardController?.coletarMesesImpactados
+        ? window.DashboardController.coletarMesesImpactados(item, getHojeISO())
+        : [];
+      if (window.DashboardController?.invalidarCacheMeses) {
+        window.DashboardController.invalidarCacheMeses(refs);
+      }
+      if (window.AppTabRefresh?.requestSync) {
+        window.AppTabRefresh.requestSync('despesas', {
+          immediate: true,
+          prefetch: true
+        });
+        window.AppTabRefresh.requestSync('dashboard', {
+          immediate: true,
+          prefetch: true
+        });
+        return;
+      }
+      carregarDespesas(true);
+      window.DashboardController?.atualizar?.(true);
     }
 
     function filtrarDespesas(lista, texto) {
@@ -680,6 +709,7 @@
       const pago = Number(d?.total_pago || 0);
       const localState = getDespesaUiState(d);
       const criacaoLocalComFalha = ehCriacaoLocalComFalha(d, localState);
+      const podeDescartarFalha = podeDescartarFalhaDespesa(d, localState) && !criacaoLocalComFalha;
       const bloquearAcoes = !!localState.blockActions && !criacaoLocalComFalha;
       const podePagar = pendente > 0.009 && !bloquearAcoes;
       const statusVisual = obterStatusVisual(d);
@@ -703,6 +733,7 @@
             <div class="despesa-local-state-row">
               <span class="despesa-local-state despesa-local-state-${escapeHtml(localState.status || 'pending')}">${escapeHtml(localState.label)}</span>
               ${localState.canRetry ? `<button class="despesa-btn-inline despesa-btn-retry" onclick="DespesasController.retryDespesaMutation('${escapeHtml(d?.ID)}')">Tentar novamente</button>` : ''}
+              ${podeDescartarFalha ? `<button class="despesa-btn-inline despesa-btn-retry" onclick="DespesasController.descartarFalhaDespesa('${escapeHtml(d?.ID)}')">Descartar falha</button>` : ''}
             </div>
           ` : ''}
           ${localState.message ? `<div class="despesa-local-message">${escapeHtml(localState.message)}</div>` : ''}
@@ -1290,6 +1321,28 @@
       mostrarToast('Tentando sincronizar novamente...');
     }
 
+    function descartarFalhaDespesa(id) {
+      const item = getById(id);
+      if (!item || !podeDescartarFalhaDespesa(item)) {
+        mostrarToast('Nao ha falha local para descartar', 'erro');
+        return;
+      }
+      const action = String(item?._localAction || '').trim().toLowerCase();
+      const tipo = action === 'payment'
+        ? 'pagamento local'
+        : action === 'update'
+          ? 'alteracao local'
+          : 'sincronizacao local';
+      if (!confirm(`Descartar esta ${tipo} com falha e recarregar os dados confirmados?`)) return;
+      try {
+        descartarMutacaoDespesa(item);
+        atualizarAposDescartarFalhaDespesa(item);
+        mostrarToast('Falha local descartada. Recarregando dados...');
+      } catch (error) {
+        mostrarToast(error?.message || 'Nao foi possivel descartar a falha local', 'erro');
+      }
+    }
+
     function setSalvandoPagamentoDespesa(ativo) {
       salvandoPagamentoDespesa = !!ativo;
       if (window.AppMutationUI?.lock && window.AppMutationUI?.unlock) {
@@ -1557,6 +1610,7 @@
       excluir,
       excluirDespesa,
       retryDespesaMutation,
+      descartarFalhaDespesa,
       registrarPagamento,
       registrarPagamentoDespesa,
       confirmarPagamentoDespesa,
