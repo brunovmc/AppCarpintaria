@@ -41,6 +41,7 @@ const DESPESAS_GERAIS_SCHEMA = [
   'origem_fixo_id',
   'fixo_encerrado_em',
   'fixo_bloqueios_json',
+  'client_request_id',
   'observacao'
 ];
 
@@ -882,8 +883,50 @@ function calcularPlanoParcelasFinanceiro(totalPrevisto, parcelas, dataInicio, pa
   }));
 }
 
-function gerarParcelasFinanceirasOrigem(origemTipo, origemId) {
-  const origem = obterOrigemPagamentoFinanceiro(origemTipo, origemId);
+function montarOrigemPagamentoPreCarregadaFinanceiro(origemTipo, origemId, origemPreCarregada) {
+  const tipo = normalizarOrigemTipoFinanceiro(origemTipo);
+  const origemRaw = origemPreCarregada && typeof origemPreCarregada === 'object'
+    ? origemPreCarregada
+    : {};
+  const itemRaw = origemRaw.item && typeof origemRaw.item === 'object'
+    ? origemRaw.item
+    : origemRaw;
+  const id = String(origemId || origemRaw.id || origemRaw.ID || itemRaw.ID || '').trim();
+  if (!id) {
+    throw new Error('Origem de pagamento nao informada.');
+  }
+
+  const item = {
+    ...itemRaw,
+    ID: String(itemRaw.ID || id).trim() || id,
+    ativo: itemRaw.ativo === undefined ? true : itemRaw.ativo
+  };
+  let totalPrevisto = round2Financeiro(parseNumeroBR(origemRaw.total_previsto));
+  if (totalPrevisto <= 0) {
+    if (tipo === ORIGEM_TIPO_COMPRA) {
+      totalPrevisto = getTotalPrevistoCompraFinanceiro(item);
+    } else if (tipo === ORIGEM_TIPO_VENDA) {
+      totalPrevisto = getTotalPrevistoVendaFinanceiro(item);
+    } else {
+      totalPrevisto = getTotalPrevistoDespesaFinanceiro(item);
+    }
+  }
+
+  return {
+    tipo,
+    id,
+    item,
+    total_previsto: totalPrevisto,
+    natureza: origemRaw.natureza
+      ? normalizarNaturezaFinanceiro(origemRaw.natureza)
+      : getNaturezaOrigemFinanceiro(tipo)
+  };
+}
+
+function gerarParcelasFinanceirasOrigem(origemTipo, origemId, origemPreCarregada) {
+  const origem = origemPreCarregada
+    ? montarOrigemPagamentoPreCarregadaFinanceiro(origemTipo, origemId, origemPreCarregada)
+    : obterOrigemPagamentoFinanceiro(origemTipo, origemId);
   const item = origem.item || {};
   const parcelas = Math.max(1, Math.floor(parseNumeroBR(item.parcelas) || 1));
   const dataInicio = item.data_pagamento || item.data_venda || item.comprado_em || item.data_competencia || new Date();
@@ -1108,6 +1151,54 @@ function normalizarPayloadDespesaGeral(payload) {
     parcelas_detalhe_json: serializarParcelasDetalheFinanceiro(parcelasDetalhe),
     fixo,
     observacao: String(dados.observacao || '').trim()
+  };
+}
+
+function normalizarClientRequestIdDespesaFinanceiro(valor) {
+  return String(valor || '').trim().slice(0, 120);
+}
+
+function buscarDespesaPorClientRequestIdFinanceiro(sheet, clientRequestId) {
+  const chave = normalizarClientRequestIdDespesaFinanceiro(clientRequestId);
+  if (!sheet || !chave) return null;
+
+  ensureSchema(sheet, DESPESAS_GERAIS_SCHEMA);
+  return rowsToObjects(sheet).find(item => {
+    return String(item.ativo).toLowerCase() === 'true' &&
+      normalizarClientRequestIdDespesaFinanceiro(item.client_request_id) === chave;
+  }) || null;
+}
+
+function montarDespesaGeralRetornoFinanceiro(item, parcelas) {
+  const base = { ...(item || {}) };
+  const id = String(base.ID || '').trim();
+  const totalPrevisto = getTotalPrevistoDespesaFinanceiro(base);
+  const parcelasDetalhe = Array.isArray(parcelas)
+    ? parcelas
+    : (id ? listarParcelasFinanceirasOrigem(ORIGEM_TIPO_DESPESA, id) : []);
+  const totalPago = round2Financeiro(
+    parcelasDetalhe.reduce((acc, parcela) => acc + round2Financeiro(parseNumeroBR(parcela.valor_pago)), 0)
+  );
+  const totalPendente = round2Financeiro(Math.max(0, totalPrevisto - totalPago));
+
+  return {
+    ...base,
+    ID: id,
+    valor_total: round2Financeiro(parseNumeroBR(base.valor_total)),
+    fixo: parseBooleanFinanceiro(base.fixo),
+    origem_fixo_id: String(base.origem_fixo_id || '').trim(),
+    criado_em: base.criado_em ? formatarDataYmdHmFinanceiroSafe(base.criado_em) : '',
+    data_competencia: base.data_competencia ? formatarDataYmdFinanceiroSafe(base.data_competencia) : '',
+    data_vencimento: base.data_vencimento ? formatarDataYmdFinanceiroSafe(base.data_vencimento) : '',
+    data_pagamento: base.data_pagamento ? formatarDataYmdFinanceiroSafe(base.data_pagamento) : '',
+    total_previsto: totalPrevisto,
+    total_pago: totalPago,
+    total_pendente: totalPendente,
+    status_pagamento: getStatusPagamentoFinanceiro(totalPrevisto, totalPago),
+    quantidade_pagamentos: parcelasDetalhe.filter(parcela => String(parcela.pagamento_id || '').trim()).length,
+    data_ultimo_pagamento: '',
+    forma_ultimo_pagamento: '',
+    parcelas_detalhe: parcelasDetalhe
   };
 }
 
@@ -1428,7 +1519,10 @@ function gerarRecorrenciaDespesasFixasFinanceiro() {
         const ok = insert(ABA_DESPESAS_GERAIS, novo, DESPESAS_GERAIS_SCHEMA);
         if (!ok) break;
         try {
-          gerarParcelasFinanceirasOrigem(ORIGEM_TIPO_DESPESA, novo.ID);
+          gerarParcelasFinanceirasOrigem(ORIGEM_TIPO_DESPESA, novo.ID, {
+            item: novo,
+            total_previsto: getTotalPrevistoDespesaFinanceiro(novo)
+          });
         } catch (error) {
           // sem acao: recorrencia nao deve falhar por parcelas
         }
@@ -1521,21 +1615,128 @@ function recarregarCacheDespesasGerais() {
 function criarDespesaGeral(payload) {
   assertCanWrite('Criacao de despesa geral');
   const dados = normalizarPayloadDespesaGeral(payload);
-  const novoId = gerarId('DES');
-  const novo = {
-    ...dados,
-    ID: novoId,
-    ativo: true,
-    criado_em: new Date(),
-    origem_fixo_id: dados.fixo ? novoId : '',
-    fixo_encerrado_em: '',
-    fixo_bloqueios_json: ''
-  };
+  const clientRequestId = normalizarClientRequestIdDespesaFinanceiro(payload?.client_request_id);
+  const lock = (typeof LockService !== 'undefined' && LockService.getScriptLock)
+    ? LockService.getScriptLock()
+    : null;
 
-  const ok = insert(ABA_DESPESAS_GERAIS, novo, DESPESAS_GERAIS_SCHEMA);
-  if (!ok) return null;
-  gerarParcelasFinanceirasOrigem(ORIGEM_TIPO_DESPESA, novo.ID);
-  return listarDespesasGerais(true).find(i => i.ID === novo.ID) || null;
+  if (lock) {
+    lock.waitLock(10000);
+  }
+
+  try {
+    const ss = getDataSpreadsheet();
+    let sheet = ss.getSheetByName(ABA_DESPESAS_GERAIS);
+    if (!sheet) {
+      sheet = ss.insertSheet(ABA_DESPESAS_GERAIS);
+    }
+    ensureSchema(sheet, DESPESAS_GERAIS_SCHEMA);
+
+    const existente = buscarDespesaPorClientRequestIdFinanceiro(sheet, clientRequestId);
+    if (existente) {
+      const parcelasExistentes = listarParcelasFinanceirasOrigem(ORIGEM_TIPO_DESPESA, existente.ID);
+      const parcelas = parcelasExistentes.length > 0
+        ? parcelasExistentes
+        : gerarParcelasFinanceirasOrigem(ORIGEM_TIPO_DESPESA, existente.ID);
+      return montarDespesaGeralRetornoFinanceiro(existente, parcelas);
+    }
+
+    const novoId = gerarId('DES');
+    const novo = {
+      ...dados,
+      ID: novoId,
+      ativo: true,
+      criado_em: new Date(),
+      origem_fixo_id: dados.fixo ? novoId : '',
+      fixo_encerrado_em: '',
+      fixo_bloqueios_json: '',
+      client_request_id: clientRequestId
+    };
+
+    const ok = insert(ABA_DESPESAS_GERAIS, novo, DESPESAS_GERAIS_SCHEMA);
+    if (!ok) return null;
+    try {
+      SpreadsheetApp.flush();
+    } catch (error) {
+      // sem acao: a leitura seguinte ainda valida se a linha esta disponivel
+    }
+    const parcelas = gerarParcelasFinanceirasOrigem(ORIGEM_TIPO_DESPESA, novo.ID, {
+      item: novo,
+      total_previsto: getTotalPrevistoDespesaFinanceiro(novo)
+    });
+    return montarDespesaGeralRetornoFinanceiro(novo, parcelas);
+  } finally {
+    if (lock) {
+      try {
+        lock.releaseLock();
+      } catch (error) {
+        // sem acao
+      }
+    }
+  }
+}
+
+function repararParcelasDespesasGerais(limite) {
+  assertCanWrite('Reparo de parcelas de despesas gerais');
+  const max = Math.max(1, Math.min(500, Math.floor(Number(limite || 200))));
+  const sheetDespesas = getSheet(ABA_DESPESAS_GERAIS);
+  if (!sheetDespesas) {
+    return {
+      ok: false,
+      erro: 'Aba DESPESAS_GERAIS nao encontrada.',
+      total_sem_parcelas: 0,
+      reparadas: 0,
+      erros: []
+    };
+  }
+
+  ensureSchema(sheetDespesas, DESPESAS_GERAIS_SCHEMA);
+  const despesasAtivas = rowsToObjects(sheetDespesas)
+    .filter(item => String(item.ativo).toLowerCase() === 'true' && String(item.ID || '').trim());
+
+  const sheetParcelas = getSheet(ABA_PARCELAS_FINANCEIRAS);
+  const idsComParcelas = {};
+  if (sheetParcelas) {
+    ensureSchema(sheetParcelas, PARCELAS_FINANCEIRAS_SCHEMA);
+    rowsToObjects(sheetParcelas)
+      .filter(parcela => {
+        return String(parcela.ativo).toLowerCase() === 'true' &&
+          String(parcela.origem_tipo || '').trim().toUpperCase() === ORIGEM_TIPO_DESPESA;
+      })
+      .forEach(parcela => {
+        const origemId = String(parcela.origem_id || '').trim();
+        if (origemId) idsComParcelas[origemId] = true;
+      });
+  }
+
+  const semParcelas = despesasAtivas
+    .filter(despesa => !idsComParcelas[String(despesa.ID || '').trim()]);
+  const erros = [];
+  let reparadas = 0;
+
+  semParcelas.slice(0, max).forEach(despesa => {
+    const id = String(despesa.ID || '').trim();
+    try {
+      regerarParcelasFinanceirasOrigemComPagamentos(ORIGEM_TIPO_DESPESA, id);
+      reparadas += 1;
+    } catch (error) {
+      erros.push({
+        ID: id,
+        descricao: String(despesa.descricao || '').trim(),
+        erro: error && error.message ? error.message : String(error)
+      });
+    }
+  });
+
+  limparCacheDespesasGerais();
+  limparCacheDashboardFinanceiro();
+  return {
+    ok: erros.length === 0,
+    limite: max,
+    total_sem_parcelas: semParcelas.length,
+    reparadas,
+    erros
+  };
 }
 
 function atualizarDespesaGeral(id, payload) {

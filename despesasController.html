@@ -1206,6 +1206,9 @@
       const eraEdicao = !!despesaEditandoId;
       const idEdicaoAtual = despesaEditandoId;
       const optimisticId = eraEdicao ? idEdicaoAtual : (window.AppDespesaMutations?.tempId?.('DES_TMP') || `DES_TMP_${Date.now()}`);
+      if (!eraEdicao) {
+        payload.client_request_id = optimisticId;
+      }
       const optimisticItem = window.AppDespesaMutations?.buildFromPayload
         ? window.AppDespesaMutations.buildFromPayload(payload, {
           baseItem: despesaAnterior,

@@ -2419,7 +2419,16 @@
       if (!window.AppRequest?.call) {
         return Promise.reject(new Error('google.script.run indisponivel'));
       }
-      return window.AppRequest.call('criarDespesaGeral', [entry.payload], {
+      const payload = { ...(entry.payload || {}) };
+      if (!String(payload.client_request_id || '').trim()) {
+        payload.client_request_id = String(
+          entry.meta?.optimistic_item?.ID ||
+          entry.entityKey ||
+          entry.id ||
+          ''
+        ).trim();
+      }
+      return window.AppRequest.call('criarDespesaGeral', [payload], {
         context: 'optimistic.despesa.create',
         errorMessage: 'Erro ao sincronizar nova despesa'
       });
