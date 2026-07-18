@@ -1,6 +1,4 @@
-<div id="despesasResumoLista" class="despesas-resumo-linha hidden"></div>
-
-<div id="painelFiltroDespesasLista" class="hidden despesas-filtros">
+<div id="painelFiltroDespesasLista" class="hidden despesas-filtros despesas-filtros-topo">
   <div class="despesas-filtros-grid">
     <div class="campo-ajuda-wrap">
       <span class="campo-ajuda-tag">Status</span>
@@ -34,8 +32,41 @@
   <button id="btnLimparFiltrosDespesas" type="button">Limpar filtros</button>
 </div>
 
-<div id="listaDespesasGerais"></div>
-<div id="listaControlesDespesas" class="lista-controles"></div>
+<div id="despesasInbox" class="despesas-inbox">
+  <div class="despesas-inbox-topo">
+    <div class="despesas-inbox-titulo">
+      <strong>Comprovantes</strong>
+      <span id="despesasInboxResumo">0 pendentes</span>
+    </div>
+
+    <div class="despesas-inbox-acoes">
+      <input id="inputComprovanteDespesa" class="hidden" type="file" accept="image/*">
+      <button id="btnUploadComprovanteDespesa" type="button">Adicionar imagem</button>
+      <button id="btnToggleInboxDespesas" class="despesas-inbox-toggle" type="button" aria-expanded="false" aria-controls="despesasInboxConteudo">Ver comprovantes</button>
+    </div>
+  </div>
+
+  <div id="despesasInboxConteudo" class="despesas-inbox-conteudo hidden">
+    <div class="despesas-inbox-conteudo-topo">
+      <span>Revise os dados extraidos antes de confirmar.</span>
+      <button id="btnAtualizarInboxDespesas" type="button">Atualizar</button>
+    </div>
+    <div id="despesasInboxStatus" class="despesas-inbox-status hidden"></div>
+    <div id="listaInboxDespesas" class="despesas-inbox-list"></div>
+  </div>
+</div>
+
+<section class="despesas-cadastradas">
+  <div class="despesas-cadastradas-titulo">
+    <strong>Despesas cadastradas</strong>
+    <span>Historico financeiro</span>
+  </div>
+
+  <div id="despesasResumoLista" class="despesas-resumo-linha hidden"></div>
+
+  <div id="listaDespesasGerais"></div>
+  <div id="listaControlesDespesas" class="lista-controles"></div>
+</section>
 
 <div id="formularioDespesaGeral" class="modal hidden">
   <div class="modal-content form-modal-content">
