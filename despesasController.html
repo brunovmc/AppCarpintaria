@@ -4,6 +4,12 @@
     let carregado = false;
     let validacoes = {};
     let despesas = [];
+    let inboxDespesas = [];
+    let carregandoInboxDespesas = false;
+    let processandoComprovanteDespesa = false;
+    let inboxDespesasExpandida = false;
+    let inboxDespesasEstadoInicialDefinido = false;
+    const inboxDespesasBusyIds = new Set();
     let filtroTexto = '';
     let filtrosLista = {
       status: '',
@@ -28,6 +34,9 @@
 
     const PAGE_SIZE = 30;
     const RENDER_CHUNK_SIZE = 8;
+    const COMPROVANTE_MAX_DATA_URL_LENGTH = 7 * 1024 * 1024;
+    const COMPROVANTE_MAX_DIMENSION = 1600;
+    const COMPROVANTE_JPEG_QUALITY = 0.82;
     const STATUS_LABEL_ORDEM = ['VENCIDO', 'PENDENTE', 'PARCIAL', 'PAGO'];
     const STATUS_PRIORIDADE = {
       VENCIDO: 0,
@@ -47,6 +56,15 @@
         filtroCategoria: document.getElementById('filtroDespesaCategoria'),
         filtroFornecedor: document.getElementById('filtroDespesaFornecedor'),
         btnLimparFiltros: document.getElementById('btnLimparFiltrosDespesas'),
+        despesasInbox: document.getElementById('despesasInbox'),
+        despesasInboxResumo: document.getElementById('despesasInboxResumo'),
+        despesasInboxConteudo: document.getElementById('despesasInboxConteudo'),
+        despesasInboxStatus: document.getElementById('despesasInboxStatus'),
+        listaInboxDespesas: document.getElementById('listaInboxDespesas'),
+        inputComprovanteDespesa: document.getElementById('inputComprovanteDespesa'),
+        btnUploadComprovanteDespesa: document.getElementById('btnUploadComprovanteDespesa'),
+        btnToggleInboxDespesas: document.getElementById('btnToggleInboxDespesas'),
+        btnAtualizarInboxDespesas: document.getElementById('btnAtualizarInboxDespesas'),
         formDespesa: document.getElementById('formularioDespesaGeral'),
         despesaFormTitulo: document.getElementById('despesaFormTitulo'),
         btnSalvarDespesa: document.getElementById('btnSalvarDespesaGeral'),
@@ -88,6 +106,12 @@
       const mm = String(d.getMonth() + 1).padStart(2, '0');
       const dd = String(d.getDate()).padStart(2, '0');
       return `${yyyy}-${mm}-${dd}`;
+    }
+
+    function getAmbienteBancoAtivoInbox() {
+      const ctx = window.AppDbEnv?.getContext?.() || {};
+      const env = String(ctx.effective_env || ctx.selected_env || '').trim().toLowerCase();
+      return env === 'dev' ? 'dev' : 'prod';
     }
 
     function parseNumeroInput(valor) {
@@ -926,18 +950,578 @@
         .listarDespesasGerais(!!forcarRecarregar);
     }
 
+    function setInboxStatus(mensagem = '', tipo = '') {
+      const f = el();
+      if (!f.despesasInboxStatus) return;
+      const texto = String(mensagem || '').trim();
+      f.despesasInboxStatus.textContent = texto;
+      f.despesasInboxStatus.className = `despesas-inbox-status ${tipo ? `despesas-inbox-status-${tipo}` : ''}`.trim();
+      f.despesasInboxStatus.classList.toggle('hidden', !texto);
+    }
+
+    function setCarregandoInboxDespesas(ativo) {
+      carregandoInboxDespesas = !!ativo;
+      const f = el();
+      if (f.btnAtualizarInboxDespesas) {
+        f.btnAtualizarInboxDespesas.disabled = carregandoInboxDespesas || processandoComprovanteDespesa;
+        if (window.AppLoading?.setButtonLoading) {
+          window.AppLoading.setButtonLoading(
+            f.btnAtualizarInboxDespesas,
+            carregandoInboxDespesas,
+            'Atualizar',
+            'Atualizando'
+          );
+        } else {
+          f.btnAtualizarInboxDespesas.textContent = carregandoInboxDespesas ? 'Atualizando...' : 'Atualizar';
+        }
+      }
+    }
+
+    function setProcessandoComprovanteDespesa(ativo) {
+      processandoComprovanteDespesa = !!ativo;
+      const f = el();
+      [f.inputComprovanteDespesa, f.btnUploadComprovanteDespesa, f.btnAtualizarInboxDespesas].forEach(input => {
+        if (input) input.disabled = processandoComprovanteDespesa;
+      });
+      if (f.btnUploadComprovanteDespesa) {
+        if (window.AppLoading?.setButtonLoading) {
+          window.AppLoading.setButtonLoading(
+            f.btnUploadComprovanteDespesa,
+            processandoComprovanteDespesa,
+            'Enviar comprovante',
+            'Processando'
+          );
+        } else {
+          f.btnUploadComprovanteDespesa.textContent = processandoComprovanteDespesa
+            ? 'Processando...'
+            : 'Enviar comprovante';
+        }
+      }
+      if (!processandoComprovanteDespesa) {
+        setCarregandoInboxDespesas(carregandoInboxDespesas);
+      }
+    }
+
+    function bindInboxDespesas() {
+      const f = el();
+      if (!f.despesasInbox || f.despesasInbox.dataset.boundInboxDespesas === '1') return;
+      f.despesasInbox.dataset.boundInboxDespesas = '1';
+
+      if (f.btnUploadComprovanteDespesa) {
+        f.btnUploadComprovanteDespesa.addEventListener('click', abrirSeletorComprovanteDespesa);
+      }
+      if (f.inputComprovanteDespesa) {
+        f.inputComprovanteDespesa.addEventListener('change', handleArquivoComprovanteDespesa);
+      }
+      if (f.btnAtualizarInboxDespesas) {
+        f.btnAtualizarInboxDespesas.addEventListener('click', () => carregarInboxDespesas());
+      }
+      if (f.btnToggleInboxDespesas) {
+        f.btnToggleInboxDespesas.addEventListener('click', () => {
+          setInboxDespesasExpandida(!inboxDespesasExpandida);
+        });
+      }
+    }
+
+    function setInboxDespesasExpandida(ativa) {
+      inboxDespesasExpandida = !!ativa;
+      const f = el();
+      f.despesasInboxConteudo?.classList.toggle('hidden', !inboxDespesasExpandida);
+      if (f.btnToggleInboxDespesas) {
+        f.btnToggleInboxDespesas.setAttribute('aria-expanded', inboxDespesasExpandida ? 'true' : 'false');
+        f.btnToggleInboxDespesas.textContent = inboxDespesasExpandida ? 'Recolher' : 'Ver comprovantes';
+      }
+    }
+
+    function abrirSeletorComprovanteDespesa() {
+      if (!podeAlterarDados('Upload bloqueado em modo somente leitura')) return;
+      if (processandoComprovanteDespesa) return;
+      const f = el();
+      f.inputComprovanteDespesa?.click();
+    }
+
+    function lerArquivoComoDataUrl(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result || ''));
+        reader.onerror = () => reject(new Error('Nao foi possivel ler a imagem.'));
+        reader.readAsDataURL(file);
+      });
+    }
+
+    function nomeJpegComprovante(nomeOriginal) {
+      const nome = String(nomeOriginal || `comprovante-${Date.now()}`).trim();
+      if (/\.[a-z0-9]{2,5}$/i.test(nome)) {
+        return nome.replace(/\.[a-z0-9]{2,5}$/i, '.jpg');
+      }
+      return `${nome}.jpg`;
+    }
+
+    function compactarImagemComprovante(file, dataUrlOriginal) {
+      return new Promise(resolve => {
+        const img = new Image();
+        img.onload = () => {
+          try {
+            const larguraOriginal = Number(img.naturalWidth || img.width || 0);
+            const alturaOriginal = Number(img.naturalHeight || img.height || 0);
+            if (!larguraOriginal || !alturaOriginal) {
+              resolve({
+                nome: file.name,
+                mime_type: file.type || 'image/jpeg',
+                data_url: dataUrlOriginal
+              });
+              return;
+            }
+
+            const escala = Math.min(1, COMPROVANTE_MAX_DIMENSION / Math.max(larguraOriginal, alturaOriginal));
+            const largura = Math.max(1, Math.round(larguraOriginal * escala));
+            const altura = Math.max(1, Math.round(alturaOriginal * escala));
+            const canvas = document.createElement('canvas');
+            canvas.width = largura;
+            canvas.height = altura;
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = '#fff';
+            ctx.fillRect(0, 0, largura, altura);
+            ctx.drawImage(img, 0, 0, largura, altura);
+            const dataUrlJpeg = canvas.toDataURL('image/jpeg', COMPROVANTE_JPEG_QUALITY);
+            const usarCompactada = dataUrlOriginal.length > COMPROVANTE_MAX_DATA_URL_LENGTH ||
+              dataUrlJpeg.length < dataUrlOriginal.length;
+            resolve({
+              nome: usarCompactada ? nomeJpegComprovante(file.name) : file.name,
+              mime_type: usarCompactada ? 'image/jpeg' : (file.type || 'image/jpeg'),
+              data_url: usarCompactada ? dataUrlJpeg : dataUrlOriginal
+            });
+          } catch (error) {
+            resolve({
+              nome: file.name,
+              mime_type: file.type || 'image/jpeg',
+              data_url: dataUrlOriginal
+            });
+          }
+        };
+        img.onerror = () => {
+          resolve({
+            nome: file.name,
+            mime_type: file.type || 'image/jpeg',
+            data_url: dataUrlOriginal
+          });
+        };
+        img.src = dataUrlOriginal;
+      });
+    }
+
+    async function prepararComprovanteDespesa(file) {
+      if (!file) {
+        throw new Error('Selecione uma imagem.');
+      }
+      const mime = String(file.type || '').toLowerCase();
+      if (mime && !mime.startsWith('image/')) {
+        throw new Error('Apenas imagens sao aceitas nesta fase.');
+      }
+
+      const dataUrlOriginal = await lerArquivoComoDataUrl(file);
+      const preparado = await compactarImagemComprovante(file, dataUrlOriginal);
+      if (String(preparado.data_url || '').length > COMPROVANTE_MAX_DATA_URL_LENGTH) {
+        throw new Error('Imagem muito grande. Tente recortar ou reduzir a foto.');
+      }
+      return preparado;
+    }
+
+    function handleArquivoComprovanteDespesa(event) {
+      const input = event?.target;
+      const file = input?.files?.[0] || null;
+      if (!file) return;
+      if (!podeAlterarDados('Upload bloqueado em modo somente leitura')) {
+        if (input) input.value = '';
+        return;
+      }
+
+      setProcessandoComprovanteDespesa(true);
+      setInboxDespesasExpandida(true);
+      setInboxStatus('Processando comprovante...', 'info');
+
+      prepararComprovanteDespesa(file)
+        .then(payload => {
+          if (!window.AppRequest?.call) {
+            throw new Error('google.script.run indisponivel');
+          }
+          return window.AppRequest.call('processarComprovanteDespesaUpload', [{
+            ...payload,
+            _db_env: getAmbienteBancoAtivoInbox()
+          }], {
+            context: 'despesas.inbox.upload',
+            errorMessage: 'Erro ao processar comprovante'
+          });
+        })
+        .then(item => {
+          if (String(item?.status || '').toUpperCase() === 'ERRO') {
+            mostrarToast(item?.erro || 'Comprovante recebido, mas a IA falhou', 'erro');
+          } else {
+            mostrarToast('Comprovante adicionado a Inbox.');
+          }
+          return carregarInboxDespesas();
+        })
+        .catch(error => {
+          mostrarToast(error?.message || 'Erro ao enviar comprovante', 'erro');
+          setInboxStatus(error?.message || 'Erro ao enviar comprovante', 'erro');
+        })
+        .finally(() => {
+          if (input) input.value = '';
+          setProcessandoComprovanteDespesa(false);
+        });
+    }
+
+    function carregarInboxDespesas(onDone) {
+      if (!window.AppRequest?.call) {
+        inboxDespesas = [];
+        renderInboxDespesas();
+        if (typeof onDone === 'function') onDone();
+        return Promise.resolve([]);
+      }
+
+      setCarregandoInboxDespesas(true);
+      return window.AppRequest.call('listarInboxDespesas', ['', getAmbienteBancoAtivoInbox()], {
+        context: 'despesas.inbox.list',
+        errorMessage: 'Erro ao carregar Inbox de despesas'
+      })
+        .then(lista => {
+          inboxDespesas = Array.isArray(lista) ? lista : [];
+          setCarregandoInboxDespesas(false);
+          renderInboxDespesas();
+          if (typeof onDone === 'function') onDone();
+          return inboxDespesas;
+        })
+        .catch(error => {
+          setCarregandoInboxDespesas(false);
+          mostrarToast(error?.message || 'Erro ao carregar Inbox de despesas', 'erro');
+          setInboxStatus(error?.message || 'Erro ao carregar Inbox de despesas', 'erro');
+          if (typeof onDone === 'function') onDone();
+          return [];
+        });
+    }
+
+    function montarOptionsInboxDespesa(valores, atual, placeholder = 'Selecione', incluirAtual = true) {
+      const lista = ordenarValoresUnicos(valores);
+      const atualTexto = String(atual || '').trim();
+      const atualKey = normalizarTexto(atualTexto);
+      const temAtual = atualTexto && lista.some(v => normalizarTexto(v) === atualKey);
+      const opcoes = [];
+      opcoes.push(`<option value="">${escapeHtml(placeholder)}</option>`);
+      if (incluirAtual && atualTexto && !temAtual) {
+        opcoes.push(`<option value="${escapeHtml(atualTexto)}" selected>${escapeHtml(atualTexto)}</option>`);
+      }
+      lista.forEach(valor => {
+        const selected = normalizarTexto(valor) === atualKey ? ' selected' : '';
+        opcoes.push(`<option value="${escapeHtml(valor)}"${selected}>${escapeHtml(valor)}</option>`);
+      });
+      return opcoes.join('');
+    }
+
+    function montarAlertasInboxDespesa(item) {
+      const alertas = Array.isArray(item?.alertas) ? item.alertas : [];
+      const erro = String(item?.erro || '').trim();
+      const partes = [
+        ...alertas.map(v => String(v || '').trim()).filter(Boolean),
+        ...(erro ? [erro] : [])
+      ];
+      if (partes.length === 0) return '';
+      return `
+        <div class="despesas-inbox-alertas">
+          ${partes.map(msg => `<span>${escapeHtml(msg)}</span>`).join('')}
+        </div>
+      `;
+    }
+
+    function montarCardInboxDespesa(item) {
+      const id = String(item?.ID || '').trim();
+      const status = String(item?.status || '').trim().toUpperCase() || 'PENDENTE';
+      const busy = inboxDespesasBusyIds.has(id);
+      const confianca = Math.round(Number(item?.confianca || 0) * 100);
+      const card = document.createElement('div');
+      card.className = `despesa-inbox-item despesa-inbox-item-${status.toLowerCase()}`;
+      card.dataset.inboxId = id;
+      card.innerHTML = `
+        <div class="despesa-inbox-item-topo">
+          <div>
+            <span class="despesa-card-resumo-label">Comprovante</span>
+            <strong>${escapeHtml(item?.arquivo_nome || item?.descricao || id || '-')}</strong>
+          </div>
+          <span class="despesa-inbox-badge">${escapeHtml(status === 'ERRO' ? 'Revisar' : 'Pendente')}</span>
+        </div>
+
+        <div class="despesa-inbox-meta">
+          <span>Confianca: ${Number.isFinite(confianca) ? confianca : 0}%</span>
+          ${item?.arquivo_url ? `<a href="${escapeHtml(item.arquivo_url)}" target="_blank" rel="noopener">Arquivo</a>` : ''}
+        </div>
+
+        ${montarAlertasInboxDespesa(item)}
+
+        <div class="despesa-inbox-grid">
+          <label class="campo-ajuda-wrap">
+            <span class="campo-ajuda-tag">Descricao</span>
+            <input data-campo="descricao" value="${escapeHtml(item?.descricao || '')}">
+          </label>
+
+          <label class="campo-ajuda-wrap">
+            <span class="campo-ajuda-tag">Categoria</span>
+            <select data-campo="categoria">${montarOptionsInboxDespesa(validacoes?.categoriasDespesas, item?.categoria, 'Selecione')}</select>
+          </label>
+
+          <label class="campo-ajuda-wrap">
+            <span class="campo-ajuda-tag">Fornecedor</span>
+            <input data-campo="fornecedor" value="${escapeHtml(item?.fornecedor || '')}">
+          </label>
+
+          <label class="campo-ajuda-wrap">
+            <span class="campo-ajuda-tag">Pago por</span>
+            <select data-campo="pago_por">${montarOptionsInboxDespesa(validacoes?.pagosPor, item?.pago_por, 'Selecione')}</select>
+          </label>
+
+          <label class="campo-ajuda-wrap">
+            <span class="campo-ajuda-tag">Valor total (R$)</span>
+            <input data-campo="valor_total" type="number" min="0" step="0.01" value="${escapeHtml(item?.valor_total || '')}">
+          </label>
+
+          <label class="campo-ajuda-wrap">
+            <span class="campo-ajuda-tag">Competencia</span>
+            <input data-campo="data_competencia" type="date" value="${escapeHtml(item?.data_competencia || '')}">
+          </label>
+
+          <label class="campo-ajuda-wrap">
+            <span class="campo-ajuda-tag">Vencimento</span>
+            <input data-campo="data_vencimento" type="date" value="${escapeHtml(item?.data_vencimento || '')}">
+          </label>
+
+          <label class="campo-ajuda-wrap">
+            <span class="campo-ajuda-tag">Pagamento</span>
+            <input data-campo="data_pagamento" type="date" value="${escapeHtml(item?.data_pagamento || '')}">
+          </label>
+
+          <label class="campo-ajuda-wrap">
+            <span class="campo-ajuda-tag">Forma de pagamento</span>
+            <select data-campo="forma_pagamento">${montarOptionsInboxDespesa(validacoes?.formasPagamento, item?.forma_pagamento, 'Selecione')}</select>
+          </label>
+
+          <label class="campo-ajuda-wrap">
+            <span class="campo-ajuda-tag">Parcelas</span>
+            <input data-campo="parcelas" type="number" min="1" step="1" value="${escapeHtml(item?.parcelas || 1)}">
+          </label>
+        </div>
+
+        <label class="campo-ajuda-wrap despesas-inbox-observacao">
+          <span class="campo-ajuda-tag">Observacao</span>
+          <textarea data-campo="observacao">${escapeHtml(item?.observacao || '')}</textarea>
+        </label>
+
+        <div class="despesas-inbox-card-acoes">
+          <button type="button" onclick="DespesasController.confirmarInboxDespesa('${escapeHtml(id)}')" ${busy ? 'disabled' : ''}>${busy ? 'Confirmando...' : 'Confirmar despesa'}</button>
+          <button type="button" onclick="DespesasController.descartarInboxDespesa('${escapeHtml(id)}')" ${busy ? 'disabled' : ''}>Descartar</button>
+        </div>
+      `;
+      return card;
+    }
+
+    function renderInboxDespesas() {
+      const f = el();
+      if (!f.listaInboxDespesas) return;
+
+      const itens = Array.isArray(inboxDespesas) ? inboxDespesas : [];
+      const pendentes = itens.filter(item => String(item?.status || '').toUpperCase() === 'PENDENTE').length;
+      const erros = itens.filter(item => String(item?.status || '').toUpperCase() === 'ERRO').length;
+      if (!inboxDespesasEstadoInicialDefinido) {
+        inboxDespesasEstadoInicialDefinido = true;
+        setInboxDespesasExpandida(itens.length > 0);
+      }
+      if (f.despesasInboxResumo) {
+        const partes = [];
+        partes.push(`${pendentes} pendente${pendentes === 1 ? '' : 's'}`);
+        if (erros > 0) partes.push(`${erros} para revisar`);
+        f.despesasInboxResumo.textContent = partes.join(' | ');
+      }
+
+      f.listaInboxDespesas.innerHTML = '';
+      if (itens.length === 0) {
+        setInboxStatus(carregandoInboxDespesas ? 'Carregando Inbox...' : 'Nenhum comprovante pendente.', carregandoInboxDespesas ? 'info' : '');
+        return;
+      }
+
+      setInboxStatus('', '');
+      const fragment = document.createDocumentFragment();
+      itens.forEach(item => fragment.appendChild(montarCardInboxDespesa(item)));
+      f.listaInboxDespesas.appendChild(fragment);
+    }
+
+    function getInboxCard(id) {
+      const alvo = String(id || '').trim();
+      if (!alvo) return null;
+      const f = el();
+      return [...(f.listaInboxDespesas?.querySelectorAll('.despesa-inbox-item') || [])]
+        .find(card => String(card.dataset.inboxId || '').trim() === alvo) || null;
+    }
+
+    function lerPayloadInboxDespesa(id) {
+      const card = getInboxCard(id);
+      if (!card) {
+        throw new Error('Item da Inbox nao encontrado na tela.');
+      }
+
+      const campo = nome => card.querySelector(`[data-campo="${nome}"]`);
+      const payload = {
+        descricao: String(campo('descricao')?.value || '').trim(),
+        categoria: String(campo('categoria')?.value || '').trim(),
+        fornecedor: String(campo('fornecedor')?.value || '').trim(),
+        pago_por: String(campo('pago_por')?.value || '').trim(),
+        valor_total: parseNumeroInput(campo('valor_total')?.value || ''),
+        data_competencia: String(campo('data_competencia')?.value || '').trim(),
+        data_vencimento: String(campo('data_vencimento')?.value || '').trim(),
+        data_pagamento: String(campo('data_pagamento')?.value || '').trim(),
+        forma_pagamento: String(campo('forma_pagamento')?.value || '').trim(),
+        parcelas: Math.max(1, Math.floor(parseNumeroInput(campo('parcelas')?.value || '1') || 1)),
+        observacao: String(campo('observacao')?.value || '').trim(),
+        _db_env: getAmbienteBancoAtivoInbox()
+      };
+
+      if (!payload.descricao) {
+        throw new Error('Descricao da despesa e obrigatoria.');
+      }
+      if (!payload.categoria) {
+        throw new Error('Categoria da despesa e obrigatoria.');
+      }
+      if (!isFinite(payload.valor_total) || payload.valor_total <= 0) {
+        throw new Error('Valor total invalido.');
+      }
+      if (!payload.data_competencia) {
+        throw new Error('Data de competencia e obrigatoria.');
+      }
+      return payload;
+    }
+
+    function setInboxItemBusy(id, ativo) {
+      const alvo = String(id || '').trim();
+      if (!alvo) return;
+      if (ativo) inboxDespesasBusyIds.add(alvo);
+      else inboxDespesasBusyIds.delete(alvo);
+      renderInboxDespesas();
+    }
+
+    function confirmarInboxDespesa(id) {
+      if (!podeAlterarDados('Confirmacao bloqueada em modo somente leitura')) return;
+      const inboxId = String(id || '').trim();
+      if (!inboxId || inboxDespesasBusyIds.has(inboxId)) return;
+
+      let payload;
+      try {
+        payload = lerPayloadInboxDespesa(inboxId);
+      } catch (error) {
+        mostrarToast(error?.message || 'Revise os dados da Inbox', 'erro');
+        return;
+      }
+
+      setInboxItemBusy(inboxId, true);
+      window.AppRequest.call('confirmarInboxDespesa', [inboxId, payload], {
+        context: 'despesas.inbox.confirm',
+        errorMessage: 'Erro ao confirmar despesa da Inbox'
+      })
+        .then(resultado => {
+          const despesaId = String(
+            resultado?.despesa_id ||
+            resultado?.despesa?.ID ||
+            resultado?.inbox?.despesa_id_confirmada ||
+            ''
+          ).trim();
+          const diagnosticoResposta = {
+            inbox_id: inboxId,
+            resultado_tipo: resultado === null ? 'null' : typeof resultado,
+            resultado_chaves: resultado && typeof resultado === 'object'
+              ? Object.keys(resultado).sort()
+              : [],
+            ok: resultado?.ok === true,
+            despesa_presente: !!resultado?.despesa,
+            despesa_chaves: resultado?.despesa && typeof resultado.despesa === 'object'
+              ? Object.keys(resultado.despesa).sort()
+              : [],
+            despesa_id: despesaId,
+            servidor: resultado?.diagnostico_confirmacao || null
+          };
+          if (typeof console !== 'undefined' && console.info) {
+            console.info('[inbox-despesas] resposta da confirmacao', diagnosticoResposta);
+          }
+          if (!resultado?.ok) {
+            if (typeof console !== 'undefined' && console.error) {
+              console.error('[inbox-despesas] resposta invalida da confirmacao', diagnosticoResposta);
+            }
+            const traceId = String(resultado?.diagnostico_confirmacao?.trace_id || '').trim();
+            const referencia = traceId ? ` Referencia: ${traceId}.` : '';
+            throw new Error(`Nao foi possivel confirmar a despesa.${referencia}`);
+          }
+          if (!despesaId && typeof console !== 'undefined' && console.warn) {
+            console.warn('[inbox-despesas] confirmacao concluida sem ID na resposta', diagnosticoResposta);
+          }
+          inboxDespesas = inboxDespesas.filter(item => String(item?.ID || '').trim() !== inboxId);
+          if (inboxDespesas.length === 0) {
+            setInboxDespesasExpandida(false);
+          }
+          renderInboxDespesas();
+          mostrarToast(despesaId
+            ? `Despesa ${despesaId} criada a partir da Inbox.`
+            : 'Despesa criada com sucesso.');
+          carregarInboxDespesas();
+          carregarDespesas(true);
+          window.DashboardController?.atualizar?.(true);
+        })
+        .catch(error => {
+          if (typeof console !== 'undefined' && console.error) {
+            console.error('[inbox-despesas] falha na confirmacao', {
+              inbox_id: inboxId,
+              mensagem: String(error?.message || error || '').trim()
+            });
+          }
+          mostrarToast(error?.message || 'Erro ao confirmar despesa da Inbox', 'erro');
+          carregarInboxDespesas();
+        })
+        .finally(() => {
+          setInboxItemBusy(inboxId, false);
+        });
+    }
+
+    function descartarInboxDespesa(id) {
+      if (!podeAlterarDados('Descarte bloqueado em modo somente leitura')) return;
+      const inboxId = String(id || '').trim();
+      if (!inboxId || inboxDespesasBusyIds.has(inboxId)) return;
+      if (!confirm('Descartar este item da Inbox?')) return;
+
+      setInboxItemBusy(inboxId, true);
+      window.AppRequest.call('descartarInboxDespesa', [inboxId, getAmbienteBancoAtivoInbox()], {
+        context: 'despesas.inbox.discard',
+        errorMessage: 'Erro ao descartar item da Inbox'
+      })
+        .then(() => {
+          mostrarToast('Item da Inbox descartado.');
+          carregarInboxDespesas();
+        })
+        .catch(error => {
+          mostrarToast(error?.message || 'Erro ao descartar item da Inbox', 'erro');
+          carregarInboxDespesas();
+        })
+        .finally(() => {
+          setInboxItemBusy(inboxId, false);
+        });
+    }
+
     function init() {
       registrarListenerMutacoesSeNecessario();
       window.AppOptimistic?.process?.();
       if (!iniciado) {
         const f = el();
         bindFiltrosListaDespesas();
+        bindInboxDespesas();
         atualizarRotuloBotaoFiltroTopBar();
         if (f.despesaDataCompetencia && !f.despesaDataCompetencia.value) {
           f.despesaDataCompetencia.value = getHojeISO();
         }
         carregarValidacoes(() => {
           carregarDespesas(false);
+          carregarInboxDespesas();
         });
         iniciado = true;
         return;
@@ -950,7 +1534,13 @@
     }
 
     function syncFromBackend(onDone) {
-      carregarDespesas(true, onDone);
+      let concluidos = 0;
+      const done = () => {
+        concluidos += 1;
+        if (concluidos >= 2 && typeof onDone === 'function') onDone();
+      };
+      carregarDespesas(true, done);
+      carregarInboxDespesas(done);
     }
 
     function setFiltroTexto(texto) {
@@ -1614,6 +2204,9 @@
       excluirDespesa,
       retryDespesaMutation,
       descartarFalhaDespesa,
+      carregarInboxDespesas,
+      confirmarInboxDespesa,
+      descartarInboxDespesa,
       registrarPagamento,
       registrarPagamentoDespesa,
       confirmarPagamentoDespesa,
