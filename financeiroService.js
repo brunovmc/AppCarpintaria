@@ -511,7 +511,11 @@ function salvarCachePagamentos(lista) {
 }
 
 function limparCacheDashboardFinanceiro() {
-  return appCacheRemove(DASHBOARD_FINANCEIRO_CACHE_SCOPE);
+  const resultado = appCacheRemove(DASHBOARD_FINANCEIRO_CACHE_SCOPE);
+  if (typeof limparCacheDashboardExecutivoFinanceiro === 'function') {
+    limparCacheDashboardExecutivoFinanceiro();
+  }
+  return resultado;
 }
 
 function lerCacheDashboardFinanceiro() {

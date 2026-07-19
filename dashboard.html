@@ -1,45 +1,199 @@
-<div class="dashboard-toolbar">
-  <div class="campo-ajuda-wrap dashboard-mes-wrap">
-    <span class="campo-ajuda-tag">Mes de referencia</span>
-    <input id="dashMesReferencia" type="month">
-  </div>
-  <button id="btnDashboardAtualizar" class="dashboard-btn-inline" onclick="DashboardController.atualizar(true)">Atualizar</button>
-</div>
-<div class="dashboard-statusbar">
-  <span id="dashUltimaAtualizacao" class="dashboard-status-text">Ultima atualizacao: -</span>
-  <span id="dashModoSomenteLeitura" class="dashboard-readonly hidden">Sem conexao com backend • modo somente leitura</span>
-</div>
-
-<div id="dashboardCards" class="dash-cards"></div>
-
-<div class="dash-grid">
-  <div class="card">
-    <strong>Gasto pago por categoria</strong>
-    <div id="dashGastoPorCategoria" class="dash-lista"></div>
-  </div>
-
-  <div class="card">
-    <strong>Gasto pago por fornecedor</strong>
-    <div id="dashGastoPorFornecedor" class="dash-lista"></div>
-  </div>
-
-  <div class="card">
-    <strong>Valor de estoque por tipo</strong>
-    <div id="dashEstoquePorTipo" class="dash-lista"></div>
-  </div>
-
-  <div class="card dash-card-wide">
-    <strong>Evolucao mensal (pagamentos)</strong>
-    <div id="dashEvolucaoMensal" class="dash-lista"></div>
-  </div>
-</div>
-
-<div id="modalObservabilidadeCard" class="modal hidden">
-  <div class="modal-content dash-modal-observabilidade">
-    <button class="modal-close-square" onclick="DashboardController.fecharObservabilidadeCard()" aria-label="Fechar">X</button>
-    <div class="dash-obs-header">
-      <h3 id="obsCardTitulo">Composicao do card</h3>
+<section id="dashboardExecutive" class="dashx-shell" aria-labelledby="dashExecutiveTitle">
+  <header class="dashx-header">
+    <div class="dashx-header-copy">
+      <span class="dashx-eyebrow">Visao financeira</span>
+      <h2 id="dashExecutiveTitle">Painel executivo</h2>
+      <p>Resultados realizados, compromissos futuros e capital aplicado em uma unica leitura.</p>
     </div>
+
+    <div class="dashx-toolbar" aria-label="Controles do painel">
+      <label class="dashx-month-field" for="dashMesReferencia">
+        <span>Mes de referencia</span>
+        <input id="dashMesReferencia" type="month">
+      </label>
+      <button id="btnDashboardAtualizar" type="button" class="dashx-refresh" onclick="DashboardController.atualizar(true)">
+        Atualizar dados
+      </button>
+    </div>
+  </header>
+
+  <div class="dashx-statusbar" role="status" aria-live="polite">
+    <span id="dashUltimaAtualizacao">Ultima atualizacao: -</span>
+    <span id="dashModoSomenteLeitura" class="dashx-readonly hidden">Sem conexao com backend &bull; modo somente leitura</span>
+  </div>
+
+  <div id="dashboardLoading" class="dashx-loading" aria-live="polite">
+    <span class="dashx-loading-bar" aria-hidden="true"></span>
+    <span>Preparando a visao financeira...</span>
+  </div>
+
+  <div id="dashboardContent" class="dashx-content hidden">
+    <section class="dashx-section" aria-labelledby="dashKpiTitle">
+      <div class="dashx-section-heading dashx-section-heading-compact">
+        <div>
+          <span class="dashx-section-kicker">Resultado do periodo</span>
+          <h3 id="dashKpiTitle">Indicadores principais</h3>
+        </div>
+        <p id="dashKpiPeriodLabel" class="dashx-section-note">Comparacao com o mes anterior</p>
+      </div>
+      <div id="dashboardCards" class="dashx-kpi-grid"></div>
+    </section>
+
+    <section class="dashx-section" aria-labelledby="dashHistoryTitle">
+      <div class="dashx-section-heading">
+        <div>
+          <span class="dashx-section-kicker">Visao realizada</span>
+          <h3 id="dashHistoryTitle">Desempenho dos ultimos 12 meses</h3>
+        </div>
+        <p>Colunas mostram entradas e saidas; as linhas mostram fluxo liquido e sua media movel de 3 meses.</p>
+      </div>
+      <article class="dashx-panel dashx-panel-wide">
+        <div id="dashChartHistory" class="dashx-chart dashx-chart-tall" aria-label="Grafico do desempenho financeiro dos ultimos 12 meses"></div>
+        <details id="dashFallbackHistory" class="dashx-data-details">
+          <summary>Ver dados do grafico</summary>
+          <div class="dashx-table-scroll"><table><thead><tr><th>Mes</th><th>Vendas</th><th>Recebimentos</th><th>Pagamentos</th><th>Fluxo liquido</th><th>Media movel</th></tr></thead><tbody></tbody></table></div>
+        </details>
+      </article>
+    </section>
+
+    <section class="dashx-section" aria-labelledby="dashForecastTitle">
+      <div class="dashx-section-heading">
+        <div>
+          <span class="dashx-section-kicker">Proximos 90 dias</span>
+          <h3 id="dashForecastTitle">Movimento projetado</h3>
+        </div>
+        <p>Considera somente parcelas em aberto com data prevista. Nao representa saldo bancario.</p>
+      </div>
+      <article class="dashx-panel dashx-panel-wide">
+        <div id="dashChartForecast" class="dashx-chart dashx-chart-tall" aria-label="Grafico do movimento financeiro projetado para 13 semanas"></div>
+        <details id="dashFallbackForecast" class="dashx-data-details">
+          <summary>Ver dados do grafico</summary>
+          <div class="dashx-table-scroll"><table><thead><tr><th>Semana</th><th>A receber</th><th>A pagar</th><th>Liquido</th><th>Acumulado</th></tr></thead><tbody></tbody></table></div>
+        </details>
+      </article>
+    </section>
+
+    <section class="dashx-section" aria-labelledby="dashPositionTitle">
+      <div class="dashx-section-heading">
+        <div>
+          <span class="dashx-section-kicker">Posicao atual</span>
+          <h3 id="dashPositionTitle">Contas a receber e a pagar</h3>
+        </div>
+        <p id="dashPositionDate">Valores em aberto na data de atualizacao.</p>
+      </div>
+      <div id="dashPositionCards" class="dashx-position-grid"></div>
+      <article class="dashx-panel dashx-panel-wide">
+        <div class="dashx-panel-heading">
+          <div>
+            <h4>Vencimentos por faixa</h4>
+            <p>Separe atrasos das obrigacoes futuras para priorizar cobrancas e pagamentos.</p>
+          </div>
+        </div>
+        <div id="dashChartAging" class="dashx-chart dashx-chart-tall" aria-label="Grafico de contas a receber e pagar por faixa de vencimento"></div>
+        <details id="dashFallbackAging" class="dashx-data-details">
+          <summary>Ver dados do grafico</summary>
+          <div class="dashx-table-scroll"><table><thead><tr><th>Faixa</th><th>A receber</th><th>A pagar</th></tr></thead><tbody></tbody></table></div>
+        </details>
+      </article>
+    </section>
+
+    <section class="dashx-section" aria-labelledby="dashDriversTitle">
+      <div class="dashx-section-heading">
+        <div>
+          <span class="dashx-section-kicker">Direcionadores do mes</span>
+          <h3 id="dashDriversTitle">O que explica o resultado</h3>
+        </div>
+        <p>Ranking pelo valor realizado no mes selecionado.</p>
+      </div>
+      <div class="dashx-two-column">
+        <article class="dashx-panel">
+          <div class="dashx-panel-heading">
+            <div><h4>Pagamentos por categoria</h4><p>Saidas efetivamente pagas.</p></div>
+          </div>
+          <div id="dashChartExpenses" class="dashx-chart dashx-chart-bars" aria-label="Grafico de pagamentos por categoria"></div>
+          <details id="dashFallbackExpenses" class="dashx-data-details">
+            <summary>Ver dados do grafico</summary>
+            <div class="dashx-table-scroll"><table><thead><tr><th>Categoria</th><th>Valor</th><th>Participacao</th></tr></thead><tbody></tbody></table></div>
+          </details>
+        </article>
+        <article class="dashx-panel">
+          <div class="dashx-panel-heading">
+            <div><h4>Vendas por produto</h4><p>Vendas registradas no periodo.</p></div>
+            <span id="dashSalesAverage" class="dashx-reference-chip">Media: -</span>
+          </div>
+          <div id="dashChartSales" class="dashx-chart dashx-chart-bars" aria-label="Grafico de vendas por produto"></div>
+          <details id="dashFallbackSales" class="dashx-data-details">
+            <summary>Ver dados do grafico</summary>
+            <div class="dashx-table-scroll"><table><thead><tr><th>Produto</th><th>Valor</th><th>Participacao</th></tr></thead><tbody></tbody></table></div>
+          </details>
+        </article>
+      </div>
+    </section>
+
+    <section class="dashx-section" aria-labelledby="dashCapitalTitle">
+      <div class="dashx-section-heading">
+        <div>
+          <span class="dashx-section-kicker">Recursos operacionais</span>
+          <h3 id="dashCapitalTitle">Capital aplicado e producao</h3>
+        </div>
+        <p>Custos aplicados e potencial de venda sao apresentados separadamente.</p>
+      </div>
+      <div class="dashx-capital-layout">
+        <article class="dashx-panel">
+          <div class="dashx-panel-heading"><div><h4>Estoque a custo por tipo</h4><p>Quantidade atual multiplicada pelo custo unitario cadastrado.</p></div></div>
+          <div id="dashChartCapital" class="dashx-chart dashx-chart-bars" aria-label="Grafico do estoque avaliado a custo por tipo"></div>
+          <details id="dashFallbackCapital" class="dashx-data-details">
+            <summary>Ver dados do grafico</summary>
+            <div class="dashx-table-scroll"><table><thead><tr><th>Tipo</th><th>Custo aplicado</th><th>Participacao</th></tr></thead><tbody></tbody></table></div>
+          </details>
+        </article>
+        <aside class="dashx-capital-summary" aria-label="Resumo de capital operacional">
+          <div id="dashCapitalMetrics" class="dashx-metric-stack"></div>
+          <div class="dashx-production-block">
+            <div class="dashx-production-title"><h4>Ordens em andamento</h4><span id="dashProductionAlert"></span></div>
+            <div id="dashProductionStatus" class="dashx-status-list"></div>
+          </div>
+        </aside>
+      </div>
+    </section>
+
+    <section class="dashx-section" aria-labelledby="dashPartnersTitle">
+      <div class="dashx-section-heading">
+        <div>
+          <span class="dashx-section-kicker">Composicao das saidas</span>
+          <h3 id="dashPartnersTitle">Responsabilidade pelos pagamentos</h3>
+        </div>
+        <p>Distribuicao conforme o campo “pago por” das compras e despesas.</p>
+      </div>
+      <div class="dashx-partners-layout">
+        <article class="dashx-panel dashx-donut-panel">
+          <div class="dashx-donut-wrap">
+            <div id="dashChartPartners" class="dashx-chart dashx-chart-donut" aria-label="Grafico da distribuicao dos pagamentos por responsavel"></div>
+            <div id="dashPartnersCenter" class="dashx-donut-center" aria-hidden="true"></div>
+          </div>
+          <details id="dashFallbackPartners" class="dashx-data-details">
+            <summary>Ver dados do grafico</summary>
+            <div class="dashx-table-scroll"><table><thead><tr><th>Responsavel</th><th>Valor</th><th>Participacao</th></tr></thead><tbody></tbody></table></div>
+          </details>
+        </article>
+        <aside id="dashPartnersSummary" class="dashx-partner-summary"></aside>
+      </div>
+    </section>
+
+    <aside id="dashQualityNotice" class="dashx-quality hidden" role="note"></aside>
+  </div>
+
+  <div id="dashboardError" class="dashx-error hidden" role="alert">
+    <strong>Nao foi possivel montar o painel.</strong>
+    <p id="dashboardErrorMessage">Tente atualizar os dados.</p>
+    <button type="button" onclick="DashboardController.atualizar(true)">Tentar novamente</button>
+  </div>
+</section>
+
+<div id="modalObservabilidadeCard" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="obsCardTitulo">
+  <div class="modal-content dash-modal-observabilidade dashx-detail-modal">
+    <button class="modal-close-square" type="button" onclick="DashboardController.fecharObservabilidadeCard()" aria-label="Fechar">X</button>
+    <div class="dash-obs-header"><span class="dashx-section-kicker">Origem dos valores</span><h3 id="obsCardTitulo">Detalhes</h3></div>
     <div id="obsCardResumo" class="dash-obs-resumo"></div>
     <div id="obsCardLista" class="dash-obs-lista"></div>
   </div>
