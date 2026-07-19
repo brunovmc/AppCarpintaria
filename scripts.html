@@ -4593,14 +4593,10 @@
     function dashboardPronto() {
       const cards = document.querySelectorAll('#dashboardCards .dash-card');
       if (cards.length > 0) return true;
-      const refs = [
-        document.getElementById('dashGastoPorTipo'),
-        document.getElementById('dashGastoPorCategoria'),
-        document.getElementById('dashGastoPorFornecedor'),
-        document.getElementById('dashEstoquePorTipo'),
-        document.getElementById('dashEvolucaoMensal')
-      ];
-      return refs.some(el => String(el?.textContent || '').trim() !== '');
+      const content = document.getElementById('dashboardContent');
+      const error = document.getElementById('dashboardError');
+      return (!!content && !content.classList.contains('hidden')) ||
+        (!!error && !error.classList.contains('hidden'));
     }
 
     function abaPronta(tab) {

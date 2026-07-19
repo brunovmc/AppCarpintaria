@@ -87,12 +87,20 @@ function atualizarCachesManualmente() {
   const dashboard = executar("obterResumoDashboardFinanceiro", () =>
     obterResumoDashboardFinanceiro(referenciaAtual, true),
   );
+  const dashboardExecutivo = executar("obterDashboardExecutivoFinanceiro", () =>
+    obterDashboardExecutivoFinanceiro(referenciaAtual, true),
+  );
 
   resultado.caches.dashboard = {
     limpeza: limparDashboard,
     recarregado: {
       ok: !dashboard?.erro,
       referencia: dashboard?.referencia || referenciaAtual,
+    },
+    executivo: {
+      ok: !dashboardExecutivo?.erro,
+      referencia: dashboardExecutivo?.referencia || referenciaAtual,
+      versao: dashboardExecutivo?.version || "",
     },
   };
 
@@ -101,7 +109,8 @@ function atualizarCachesManualmente() {
     if (item.limpeza && item.recarregado) {
       const okLimpeza = item.limpeza?.ok !== false;
       const okRecarregado = item.recarregado?.ok !== false;
-      return okLimpeza && okRecarregado;
+      const okExecutivo = item.executivo?.ok !== false;
+      return okLimpeza && okRecarregado && okExecutivo;
     }
     return item.ok !== false;
   });

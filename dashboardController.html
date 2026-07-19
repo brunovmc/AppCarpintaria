@@ -1,1088 +1,49 @@
 <script>
   window.DashboardController = (() => {
+    const STORAGE_PREFIX = 'app:dash:v2:executivo:';
+    const CACHE_TTL_MS = 30000;
+    const DETAIL_CACHE_TTL_MS = 30000;
     let iniciado = false;
-    let validacoes = {};
-    let despesas = [];
-    let despesaEditandoId = null;
-    let salvandoDespesa = false;
-    let despesaPagamentoId = null;
-    let salvandoPagamentoDespesa = false;
-    let despesaPagamentoParcelado = false;
-    let cardObservabilidadeAberto = '';
-    let cardObservabilidadeItens = [];
-    let carregandoObservabilidade = false;
-    let carregandoDashboard = false;
-    let resumoRequestSeq = 0;
-    let despesasVisiveis = false;
-    let cacheResumoLocal = {};
-    let cacheComposicaoLocal = {};
-    let cacheDespesasLocal = { ts: 0, data: null };
+    let carregando = false;
+    let requestSeq = 0;
+    let detailRequestSeq = 0;
+    let cacheMemoria = {};
+    let cacheDetalhes = {};
+    let detalheAberto = null;
+    let itensDetalhe = [];
     let runtimeListenerRegistrado = false;
-    let listenerMutacoesRegistrado = false;
-    let prefetchVizinhoRefTs = {};
+    let focoAntesDoModal = null;
 
-    const DASHBOARD_CACHE_TTL_RESUMO_MS = 30000;
-    const DASHBOARD_CACHE_TTL_COMPOSICAO_MS = 30000;
-    const DASHBOARD_CACHE_TTL_DESPESAS_MS = 30000;
-    const DASHBOARD_STORAGE_VERSION = 'v1';
-    const DASHBOARD_STORAGE_PREFIX = `app:dash:${DASHBOARD_STORAGE_VERSION}:resumo:`;
-    const DASHBOARD_STORAGE_COMP_PREFIX = `app:dash:${DASHBOARD_STORAGE_VERSION}:comp:`;
-    const DASHBOARD_PREFETCH_TTL_MS = 120000;
-    const DASHBOARD_CARD_DEFINICOES = [
-      { key: 'gasto_pago_mes', label: 'Pago no mes', moeda: true },
-      { key: 'compromisso_previsto_mes', label: 'Compromissos previstos (mes)', moeda: true },
-      { key: 'vendas_no_mes', label: 'Vendas no mes', moeda: true },
-      { key: 'recebido_vendas_mes', label: 'Recebido de vendas (mes)', moeda: true },
-      { key: 'pendente_total', label: 'Pendente total', moeda: true },
-      { key: 'vencido_total', label: 'Vencido', moeda: true },
-      { key: 'avencer_7_dias', label: 'A vencer (7 dias)', moeda: true },
-      { key: 'valor_estoque_total', label: 'Valor em estoque', moeda: true },
-      { key: 'valor_produtos_estoque', label: 'Valor de produtos em estoque', moeda: true },
-      { key: 'valor_produtos_producao', label: 'Valor de produtos em producao', moeda: true },
-      { key: 'contador_bruno_mes', label: 'BRUNO (pago no mes)', moeda: true },
-      { key: 'contador_zizu_mes', label: 'ZIZU (pago no mes)', moeda: true },
-      { key: 'contador_investimento_mes', label: 'INVESTIMENTO (pago no mes)', moeda: true },
-      { key: 'contador_investimento_acumulado', label: 'INVESTIMENTO (acumulado)', moeda: true }
-    ];
-    const DASHBOARD_CARD_KEYS_OBSERVABILIDADE = DASHBOARD_CARD_DEFINICOES
-      .map(def => String(def.key || '').trim())
-      .filter(key => key && key !== 'valor_estoque_total');
-    const composicaoInFlight = {};
-
-    function el() {
+    function refs() {
       return {
-        mesReferencia: document.getElementById('dashMesReferencia'),
-        btnAtualizar: document.getElementById('btnDashboardAtualizar'),
-        ultimaAtualizacao: document.getElementById('dashUltimaAtualizacao'),
-        modoSomenteLeitura: document.getElementById('dashModoSomenteLeitura'),
+        root: document.getElementById('dashboardExecutive'),
+        month: document.getElementById('dashMesReferencia'),
+        refresh: document.getElementById('btnDashboardAtualizar'),
+        updated: document.getElementById('dashUltimaAtualizacao'),
+        readonly: document.getElementById('dashModoSomenteLeitura'),
+        loading: document.getElementById('dashboardLoading'),
+        content: document.getElementById('dashboardContent'),
+        error: document.getElementById('dashboardError'),
+        errorMessage: document.getElementById('dashboardErrorMessage'),
         cards: document.getElementById('dashboardCards'),
-        gastoPorTipo: document.getElementById('dashGastoPorTipo'),
-        gastoPorCategoria: document.getElementById('dashGastoPorCategoria'),
-        gastoPorFornecedor: document.getElementById('dashGastoPorFornecedor'),
-        estoquePorTipo: document.getElementById('dashEstoquePorTipo'),
-        evolucaoMensal: document.getElementById('dashEvolucaoMensal'),
-
-        listaDespesas: document.getElementById('listaDespesasGerais'),
-        btnToggleDespesas: document.getElementById('btnToggleDespesas'),
-        formDespesa: document.getElementById('formularioDespesaGeral'),
-        despesaFormTitulo: document.getElementById('despesaFormTitulo'),
-        btnSalvarDespesa: document.getElementById('btnSalvarDespesaGeral'),
-
-        despesaDescricao: document.getElementById('despesaDescricao'),
-        despesaCategoria: document.getElementById('despesaCategoria'),
-        despesaFornecedor: document.getElementById('despesaFornecedor'),
-        despesaPagoPor: document.getElementById('despesaPagoPor'),
-        despesaValorTotal: document.getElementById('despesaValorTotal'),
-        despesaDataCompetencia: document.getElementById('despesaDataCompetencia'),
-        despesaDataVencimento: document.getElementById('despesaDataVencimento'),
-        despesaDataPagamento: document.getElementById('despesaDataPagamento'),
-        despesaFormaPagamento: document.getElementById('despesaFormaPagamento'),
-        despesaParcelasWrap: document.getElementById('despesaParcelasWrap'),
-        despesaParcelas: document.getElementById('despesaParcelas'),
-        despesaParcelasDetalheWrap: document.getElementById('despesaParcelasDetalheWrap'),
-        despesaParcelasDetalheLista: document.getElementById('despesaParcelasDetalheLista'),
-        despesaFixo: document.getElementById('despesaFixo'),
-        despesaObservacao: document.getElementById('despesaObservacao'),
-
-        modalPagamentoDespesa: document.getElementById('modalPagamentoDespesa'),
-        pagDespesaTitulo: document.getElementById('pagDespesaTitulo'),
-        pagDespesaData: document.getElementById('pagDespesaData'),
-        pagDespesaValor: document.getElementById('pagDespesaValor'),
-        pagDespesaParcelaWrap: document.getElementById('pagDespesaParcelaWrap'),
-        pagDespesaParcela: document.getElementById('pagDespesaParcela'),
-        pagDespesaForma: document.getElementById('pagDespesaForma'),
-        pagDespesaObservacao: document.getElementById('pagDespesaObservacao'),
-        btnConfirmarPagDespesa: document.getElementById('btnConfirmarPagDespesa'),
-
-        modalObservabilidadeCard: document.getElementById('modalObservabilidadeCard'),
-        obsCardTitulo: document.getElementById('obsCardTitulo'),
-        obsCardResumo: document.getElementById('obsCardResumo'),
-        obsCardLista: document.getElementById('obsCardLista')
+        periodLabel: document.getElementById('dashKpiPeriodLabel'),
+        positionCards: document.getElementById('dashPositionCards'),
+        positionDate: document.getElementById('dashPositionDate'),
+        salesAverage: document.getElementById('dashSalesAverage'),
+        capitalMetrics: document.getElementById('dashCapitalMetrics'),
+        productionAlert: document.getElementById('dashProductionAlert'),
+        productionStatus: document.getElementById('dashProductionStatus'),
+        partnersCenter: document.getElementById('dashPartnersCenter'),
+        partnersSummary: document.getElementById('dashPartnersSummary'),
+        quality: document.getElementById('dashQualityNotice'),
+        modal: document.getElementById('modalObservabilidadeCard'),
+        detailTitle: document.getElementById('obsCardTitulo'),
+        detailSummary: document.getElementById('obsCardResumo'),
+        detailList: document.getElementById('obsCardLista')
       };
     }
 
-    function getHojeISO() {
-      if (window.AppDomainUtils?.getHojeISO) {
-        return window.AppDomainUtils.getHojeISO();
-      }
-      const d = new Date();
-      const yyyy = d.getFullYear();
-      const mm = String(d.getMonth() + 1).padStart(2, '0');
-      const dd = String(d.getDate()).padStart(2, '0');
-      return `${yyyy}-${mm}-${dd}`;
-    }
-
-    function getMesAtualISO() {
-      const d = new Date();
-      const yyyy = d.getFullYear();
-      const mm = String(d.getMonth() + 1).padStart(2, '0');
-      return `${yyyy}-${mm}`;
-    }
-
-    function referenciaEhValida(referencia) {
-      return /^\d{4}-\d{2}$/.test(String(referencia || '').trim());
-    }
-
-    function deslocarReferenciaMes(referencia, delta) {
-      const ref = String(referencia || '').trim();
-      if (!referenciaEhValida(ref)) return '';
-      const [yyyy, mm] = ref.split('-').map(Number);
-      const d = new Date(yyyy, mm - 1, 1);
-      d.setMonth(d.getMonth() + Number(delta || 0));
-      const y2 = d.getFullYear();
-      const m2 = String(d.getMonth() + 1).padStart(2, '0');
-      return `${y2}-${m2}`;
-    }
-
-    function obterJanelaReferencias(referenciaBase) {
-      const base = referenciaEhValida(referenciaBase) ? referenciaBase : getMesAtualISO();
-      const refs = [];
-      for (let i = -3; i <= 3; i++) {
-        refs.push(deslocarReferenciaMes(base, i));
-      }
-      return refs.filter(Boolean);
-    }
-
-    function getStorageKeyResumo(referencia) {
-      const ref = String(referencia || '').trim();
-      if (!referenciaEhValida(ref)) return '';
-      return `${DASHBOARD_STORAGE_PREFIX}${ref}`;
-    }
-
-    function getStorageKeyComposicao(referencia, cardKey) {
-      const ref = String(referencia || '').trim();
-      const card = String(cardKey || '').trim();
-      if (!referenciaEhValida(ref) || !card) return '';
-      return `${DASHBOARD_STORAGE_COMP_PREFIX}${ref}:${card}`;
-    }
-
-    function getCacheKeyComposicao(referencia, cardKey) {
-      const ref = String(referencia || '').trim();
-      const card = String(cardKey || '').trim();
-      if (!referenciaEhValida(ref) || !card) return '';
-      return `${ref}::${card}`;
-    }
-
-    function storageDisponivel() {
-      try {
-        if (typeof window === 'undefined' || !window.localStorage) return false;
-        const key = `${DASHBOARD_STORAGE_PREFIX}__probe`;
-        window.localStorage.setItem(key, '1');
-        window.localStorage.removeItem(key);
-        return true;
-      } catch (error) {
-        return false;
-      }
-    }
-
-    function storageLerJson(key) {
-      try {
-        if (!key || !storageDisponivel()) return null;
-        const raw = window.localStorage.getItem(key);
-        if (!raw) return null;
-        return JSON.parse(raw);
-      } catch (error) {
-        return null;
-      }
-    }
-
-    function storageSalvarJson(key, value) {
-      try {
-        if (!key || !storageDisponivel()) return false;
-        window.localStorage.setItem(key, JSON.stringify(value || {}));
-        return true;
-      } catch (error) {
-        return false;
-      }
-    }
-
-    function storageRemover(key) {
-      try {
-        if (!key || !storageDisponivel()) return;
-        window.localStorage.removeItem(key);
-      } catch (error) {
-        // sem acao
-      }
-    }
-
-    function gerarResumoHash(resumo) {
-      try {
-        return JSON.stringify(resumo || {});
-      } catch (error) {
-        return '';
-      }
-    }
-
-    function lerResumoPersistido(referencia) {
-      const key = getStorageKeyResumo(referencia);
-      if (!key) return null;
-      const payload = storageLerJson(key);
-      if (!payload || typeof payload !== 'object') return null;
-      return {
-        resumo: payload.resumo || {},
-        hash: String(payload.hash || ''),
-        updatedAt: Number(payload.updatedAt || 0)
-      };
-    }
-
-    function salvarResumoPersistido(referencia, resumo, updatedAt, hashForcado = '') {
-      const key = getStorageKeyResumo(referencia);
-      if (!key) return;
-      const hash = String(hashForcado || gerarResumoHash(resumo));
-      storageSalvarJson(key, {
-        referencia: String(referencia || '').trim(),
-        updatedAt: Number(updatedAt || Date.now()),
-        hash,
-        resumo: resumo || {}
-      });
-    }
-
-    function lerComposicaoPersistida(referencia, cardKey) {
-      const key = getStorageKeyComposicao(referencia, cardKey);
-      if (!key) return null;
-      const payload = storageLerJson(key);
-      if (!payload || typeof payload !== 'object') return null;
-      return {
-        data: payload.data || {},
-        hash: String(payload.hash || ''),
-        updatedAt: Number(payload.updatedAt || 0)
-      };
-    }
-
-    function composicaoPersistidaEhFresca(entry) {
-      if (!entry || typeof entry !== 'object') return false;
-      const ts = Number(entry.updatedAt || 0);
-      if (!ts) return false;
-      return (Date.now() - ts) <= DASHBOARD_CACHE_TTL_COMPOSICAO_MS;
-    }
-
-    function salvarComposicaoPersistida(referencia, cardKey, data, updatedAt, hashForcado = '') {
-      const key = getStorageKeyComposicao(referencia, cardKey);
-      if (!key) return;
-      const hash = String(hashForcado || gerarResumoHash(data));
-      storageSalvarJson(key, {
-        referencia: String(referencia || '').trim(),
-        card: String(cardKey || '').trim(),
-        updatedAt: Number(updatedAt || Date.now()),
-        hash,
-        data: data || {}
-      });
-    }
-
-    function lerComposicaoCacheLocal(referencia, cardKey) {
-      const cacheKey = getCacheKeyComposicao(referencia, cardKey);
-      if (!cacheKey) return null;
-      const entry = cacheComposicaoLocal[cacheKey];
-      if (!entry) return null;
-      if ((Date.now() - Number(entry.ts || 0)) > DASHBOARD_CACHE_TTL_COMPOSICAO_MS) return null;
-      return entry.data || null;
-    }
-
-    function salvarComposicaoCacheLocal(referencia, cardKey, data) {
-      const cacheKey = getCacheKeyComposicao(referencia, cardKey);
-      if (!cacheKey) return;
-      cacheComposicaoLocal[cacheKey] = {
-        ts: Date.now(),
-        data: data || {}
-      };
-    }
-
-    function obterEstadoCacheComposicao(referencia, cardKey) {
-      const ref = String(referencia || '').trim();
-      const key = String(cardKey || '').trim();
-      if (!referenciaEhValida(ref) || !key) {
-        return {
-          payloadCache: null,
-          cacheFresco: false,
-          haviaCache: false
-        };
-      }
-
-      const cacheSessao = lerComposicaoCacheLocal(ref, key);
-      const cachePersistido = lerComposicaoPersistida(ref, key);
-      const payloadCache = cacheSessao || cachePersistido?.data || null;
-      const cachePersistidoFresco = composicaoPersistidaEhFresca(cachePersistido);
-      const cacheFresco = !!cacheSessao || cachePersistidoFresco;
-
-      return {
-        payloadCache,
-        cacheFresco,
-        haviaCache: !!payloadCache
-      };
-    }
-
-    function getComposicaoInFlightKey(referencia, cardKey) {
-      const ref = String(referencia || '').trim();
-      const key = String(cardKey || '').trim();
-      if (!referenciaEhValida(ref) || !key) return '';
-      return `${ref}::${key}`;
-    }
-
-    function carregarComposicaoCardRemota(referencia, cardKey) {
-      const ref = String(referencia || '').trim();
-      const key = String(cardKey || '').trim();
-      const inflightKey = getComposicaoInFlightKey(ref, key);
-      if (!inflightKey) {
-        return Promise.reject(new Error('Referencia de composicao invalida'));
-      }
-      if (!window.google?.script?.run) {
-        return Promise.reject(new Error('Sem conexao com backend'));
-      }
-
-      const existente = composicaoInFlight[inflightKey];
-      if (existente) return existente;
-
-      const promise = new Promise((resolve, reject) => {
-        window.AppRequest.runner()
-          .withSuccessHandler(payload => {
-            const data = payload || {};
-            const ts = Date.now();
-            const hashNovo = gerarResumoHash(data);
-            salvarComposicaoCacheLocal(ref, key, data);
-            salvarComposicaoPersistida(ref, key, data, ts, hashNovo);
-            limparComposicaoPersistidaForaDaJanela(ref);
-            resolve(data);
-          })
-          .withFailureHandler(err => {
-            reject(err || new Error('Falha ao carregar composicao do card'));
-          })
-          .obterComposicaoCardDashboardFinanceiro(ref, key);
-      });
-
-      composicaoInFlight[inflightKey] = promise;
-      const limparInFlight = () => {
-        if (composicaoInFlight[inflightKey] === promise) {
-          delete composicaoInFlight[inflightKey];
-        }
-      };
-      promise.then(limparInFlight).catch(limparInFlight);
-      return promise;
-    }
-
-    function prefetchComposicoesCardsDashboard(referencia) {
-      const ref = String(referencia || '').trim();
-      if (!referenciaEhValida(ref)) return;
-      if (!window.google?.script?.run) return;
-
-      DASHBOARD_CARD_KEYS_OBSERVABILIDADE.forEach(cardKey => {
-        const estado = obterEstadoCacheComposicao(ref, cardKey);
-        if (estado.cacheFresco) return;
-        carregarComposicaoCardRemota(ref, cardKey).catch(() => {
-          // Prefetch em background: sem toasts.
-        });
-      });
-    }
-
-    function limparResumoPersistidoForaDaJanela(referenciaBase) {
-      if (!storageDisponivel()) return;
-      const permitidas = new Set(obterJanelaReferencias(referenciaBase).map(r => getStorageKeyResumo(r)).filter(Boolean));
-      try {
-        const keys = [];
-        for (let i = 0; i < window.localStorage.length; i++) {
-          const key = window.localStorage.key(i);
-          if (!key) continue;
-          if (key.startsWith(DASHBOARD_STORAGE_PREFIX)) keys.push(key);
-        }
-        keys.forEach(key => {
-          if (!permitidas.has(key)) storageRemover(key);
-        });
-      } catch (error) {
-        // sem acao
-      }
-    }
-
-    function limparComposicaoPersistidaForaDaJanela(referenciaBase) {
-      if (!storageDisponivel()) return;
-      const refsPermitidas = new Set(obterJanelaReferencias(referenciaBase).map(r => String(r || '').trim()));
-      try {
-        const keys = [];
-        for (let i = 0; i < window.localStorage.length; i++) {
-          const key = window.localStorage.key(i);
-          if (!key) continue;
-          if (key.startsWith(DASHBOARD_STORAGE_COMP_PREFIX)) keys.push(key);
-        }
-        keys.forEach(key => {
-          const semPrefixo = key.slice(DASHBOARD_STORAGE_COMP_PREFIX.length);
-          const ref = semPrefixo.split(':')[0] || '';
-          if (!refsPermitidas.has(ref)) storageRemover(key);
-        });
-      } catch (error) {
-        // sem acao
-      }
-    }
-
-    function limparComposicaoPersistidaMes(referencia) {
-      const ref = String(referencia || '').trim();
-      if (!referenciaEhValida(ref) || !storageDisponivel()) return;
-      try {
-        const keys = [];
-        const prefixoRef = `${DASHBOARD_STORAGE_COMP_PREFIX}${ref}:`;
-        for (let i = 0; i < window.localStorage.length; i++) {
-          const key = window.localStorage.key(i);
-          if (!key) continue;
-          if (key.startsWith(prefixoRef)) keys.push(key);
-        }
-        keys.forEach(storageRemover);
-      } catch (error) {
-        // sem acao
-      }
-    }
-
-    function formatarDataHora(ts) {
-      const n = Number(ts || 0);
-      if (!n) return '-';
-      const d = new Date(n);
-      if (Number.isNaN(d.getTime())) return '-';
-      return d.toLocaleString('pt-BR', {
-        day: '2-digit',
-        month: '2-digit',
-        hour: '2-digit',
-        minute: '2-digit'
-      });
-    }
-
-    function atualizarTextoUltimaAtualizacao(ts) {
-      const f = el();
-      if (!f.ultimaAtualizacao) return;
-      f.ultimaAtualizacao.textContent = `Ultima atualizacao: ${formatarDataHora(ts)}`;
-    }
-
-    function atualizarIndicadorSomenteLeitura() {
-      const f = el();
-      if (!f.modoSomenteLeitura) return;
-      const ativo = !!window.AppRuntime?.isReadOnly?.();
-      f.modoSomenteLeitura.classList.toggle('hidden', !ativo);
-    }
-
-    function setModoSomenteLeitura(ativo, motivo = '') {
-      if (window.AppRuntime?.setReadOnly) {
-        window.AppRuntime.setReadOnly(!!ativo, motivo);
-      }
-      atualizarIndicadorSomenteLeitura();
-    }
-
-    function registrarListenerRuntimeSeNecessario() {
-      if (runtimeListenerRegistrado) return;
-      if (typeof window === 'undefined' || typeof window.addEventListener !== 'function') return;
-      window.addEventListener('app:runtime:readonly-changed', () => {
-        atualizarIndicadorSomenteLeitura();
-      });
-      runtimeListenerRegistrado = true;
-    }
-
-    function podeAlterarDados(contexto = 'Operacao') {
-      if (window.AppDomainUtils?.ensureWritable) {
-        return window.AppDomainUtils.ensureWritable(contexto);
-      }
-      return !!window.AppRuntime?.ensureWritable
-        ? window.AppRuntime.ensureWritable(contexto)
-        : true;
-    }
-
-    function getMesReferenciaAtiva() {
-      const ref = String(el().mesReferencia?.value || getMesAtualISO()).trim();
-      return referenciaEhValida(ref) ? ref : getMesAtualISO();
-    }
-
-    function extrairMesReferencia(valor) {
-      const s = String(valor || '').trim();
-      if (!s) return '';
-      if (/^\d{4}-\d{2}$/.test(s)) return s;
-      const match = s.match(/^(\d{4}-\d{2})-\d{2}/);
-      if (match && match[1]) return match[1];
-      if (s.includes('T')) {
-        const m2 = s.split('T')[0].match(/^(\d{4}-\d{2})-\d{2}/);
-        if (m2 && m2[1]) return m2[1];
-      }
-      return '';
-    }
-
-    function coletarMesesImpactados() {
-      const refs = new Set();
-
-      const addMes = valor => {
-        const ref = extrairMesReferencia(valor);
-        if (referenciaEhValida(ref)) refs.add(ref);
-      };
-
-      const percorrer = valor => {
-        if (!valor) return;
-        if (Array.isArray(valor)) {
-          valor.forEach(percorrer);
-          return;
-        }
-        if (typeof valor === 'string') {
-          addMes(valor);
-          return;
-        }
-        if (typeof valor !== 'object') return;
-
-        addMes(valor.referencia);
-        addMes(valor.data);
-        addMes(valor.data_pagamento);
-        addMes(valor.data_venda);
-        addMes(valor.data_competencia);
-        addMes(valor.data_vencimento);
-        addMes(valor.data_prevista);
-        addMes(valor.data_prevista_termino);
-        addMes(valor.data_ultimo_pagamento);
-        addMes(valor.comprado_em);
-
-        if (Array.isArray(valor.parcelas_detalhe)) {
-          valor.parcelas_detalhe.forEach(p => {
-            addMes(p?.data_prevista);
-            addMes(p?.data);
-            addMes(p?.data_pagamento);
-          });
-        }
-      };
-
-      for (let i = 0; i < arguments.length; i++) {
-        percorrer(arguments[i]);
-      }
-
-      if (refs.size === 0) {
-        refs.add(getMesReferenciaAtiva());
-      }
-      return Array.from(refs);
-    }
-
-    function invalidarCacheMeses(referencias) {
-      const lista = (Array.isArray(referencias) ? referencias : [])
-        .map(r => String(r || '').trim())
-        .filter(referenciaEhValida);
-      const refs = lista.length > 0 ? [...new Set(lista)] : [getMesReferenciaAtiva()];
-      if (window.AppTabRefresh?.markDirty) {
-        window.AppTabRefresh.markDirty('dashboard');
-      }
-
-      refs.forEach(ref => {
-        delete cacheResumoLocal[ref];
-        const prefixoCache = `${ref}::`;
-        Object.keys(cacheComposicaoLocal).forEach(key => {
-          if (key.startsWith(prefixoCache)) delete cacheComposicaoLocal[key];
-        });
-        storageRemover(getStorageKeyResumo(ref));
-        limparComposicaoPersistidaMes(ref);
-      });
-    }
-
-    function limparCacheDashboardLocal(referencias = []) {
-      cacheDespesasLocal = { ts: 0, data: null };
-      const refs = (Array.isArray(referencias) && referencias.length > 0)
-        ? referencias
-        : obterJanelaReferencias(getMesReferenciaAtiva());
-      invalidarCacheMeses(refs);
-    }
-
-    function lerResumoCacheLocal(referencia) {
-      const ref = String(referencia || '').trim();
-      if (!ref) return null;
-      const entry = cacheResumoLocal[ref];
-      if (!entry) return null;
-      if ((Date.now() - Number(entry.ts || 0)) > DASHBOARD_CACHE_TTL_RESUMO_MS) return null;
-      return entry.data || null;
-    }
-
-    function salvarResumoCacheLocal(referencia, resumo) {
-      const ref = String(referencia || '').trim();
-      if (!ref) return;
-      cacheResumoLocal[ref] = {
-        ts: Date.now(),
-        data: resumo || {}
-      };
-    }
-
-    function lerDespesasCacheLocal() {
-      if (!cacheDespesasLocal?.data) return null;
-      if ((Date.now() - Number(cacheDespesasLocal.ts || 0)) > DASHBOARD_CACHE_TTL_DESPESAS_MS) return null;
-      return cacheDespesasLocal.data;
-    }
-
-    function salvarDespesasCacheLocal(lista) {
-      cacheDespesasLocal = {
-        ts: Date.now(),
-        data: Array.isArray(lista) ? lista : []
-      };
-    }
-
-    function listarMutacoesDespesaAtivas() {
-      if (!window.AppOptimistic?.list) return [];
-      return window.AppOptimistic.list({
-        scope: 'despesa',
-        domain: 'despesa'
-      });
-    }
-
-    function reconciliarListaDespesasComMutacoes(listaBase) {
-      if (!window.AppDespesaMutations?.mergeFetchedList) {
-        return Array.isArray(listaBase) ? [...listaBase] : [];
-      }
-      return window.AppDespesaMutations.mergeFetchedList(listaBase, listarMutacoesDespesaAtivas());
-    }
-
-    function cloneJson(valor) {
-      if (valor == null) return valor;
-      try {
-        return JSON.parse(JSON.stringify(valor));
-      } catch (error) {
-        return valor;
-      }
-    }
-
-    function parseDataISO(valor) {
-      const raw = String(valor || '').trim();
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return null;
-      const data = new Date(`${raw}T00:00:00`);
-      return Number.isNaN(data.getTime()) ? null : data;
-    }
-
-    function obterIntervaloReferencia(referencia) {
-      const ref = referenciaEhValida(referencia) ? referencia : getMesAtualISO();
-      const [ano, mes] = ref.split('-').map(Number);
-      const inicio = new Date(ano, mes - 1, 1);
-      const fim = new Date(ano, mes, 1);
-      const hoje = new Date();
-      hoje.setHours(0, 0, 0, 0);
-      const limite7 = new Date(hoje.getTime());
-      limite7.setDate(limite7.getDate() + 7);
-      return { inicio, fim, hoje, limite7 };
-    }
-
-    function chaveMesData(valor) {
-      const raw = String(valor || '').trim();
-      if (/^\d{4}-\d{2}$/.test(raw)) return raw;
-      const match = raw.match(/^(\d{4}-\d{2})-\d{2}/);
-      return match && match[1] ? match[1] : '';
-    }
-
-    function normalizarMapaAgregado(lista) {
-      const mapa = {};
-      (Array.isArray(lista) ? lista : []).forEach(item => {
-        const label = String(item?.label || '').trim();
-        if (!label) return;
-        mapa[label] = round2(parseNumeroInput(item?.valor || 0));
-      });
-      return mapa;
-    }
-
-    function serializarMapaAgregado(mapa) {
-      return Object.keys(mapa || {})
-        .map(label => ({
-          label,
-          valor: round2(parseNumeroInput(mapa[label] || 0))
-        }))
-        .filter(item => item.valor > 0.009)
-        .sort((a, b) => {
-          if (b.valor !== a.valor) return b.valor - a.valor;
-          return a.label.localeCompare(b.label, 'pt-BR', { sensitivity: 'base' });
-        });
-    }
-
-    function ajustarMapaAgregado(mapa, label, delta) {
-      const chave = String(label || '').trim() || 'SEM_DADO';
-      const valorAtual = round2(parseNumeroInput(mapa[chave] || 0));
-      const proximo = round2(valorAtual + round2(delta));
-      if (proximo <= 0.009) {
-        delete mapa[chave];
-        return;
-      }
-      mapa[chave] = proximo;
-    }
-
-    function normalizarResumoBase(resumo) {
-      const base = cloneJson(resumo) || {};
-      base.cards = {
-        gasto_pago_mes: 0,
-        compromisso_previsto_mes: 0,
-        vendas_no_mes: 0,
-        recebido_vendas_mes: 0,
-        pendente_total: 0,
-        vencido_total: 0,
-        avencer_7_dias: 0,
-        valor_estoque_total: 0,
-        valor_produtos_estoque: 0,
-        valor_produtos_producao: 0,
-        contador_bruno_mes: 0,
-        contador_zizu_mes: 0,
-        contador_investimento_mes: 0,
-        contador_investimento_acumulado: 0,
-        ...(base.cards || {})
-      };
-      base.agregados = {
-        ...(base.agregados || {}),
-        gasto_por_categoria: serializarMapaAgregado(normalizarMapaAgregado(base?.agregados?.gasto_por_categoria)),
-        gasto_por_fornecedor: serializarMapaAgregado(normalizarMapaAgregado(base?.agregados?.gasto_por_fornecedor))
-      };
-      return base;
-    }
-
-    function calcularRateioPagoPor(pagoPor, valor) {
-      const total = round2(parseNumeroInput(valor || 0));
-      const resultado = { bruno: 0, zizu: 0, investimento: 0 };
-      if (total <= 0.009) return resultado;
-      const bruto = String(pagoPor || '')
-        .normalize('NFD')
-        .replace(/[\u0300-\u036f]/g, '')
-        .trim()
-        .toUpperCase();
-
-      if (bruto === 'AMBOS') {
-        const metade = round2(total / 2);
-        resultado.bruno = metade;
-        resultado.zizu = metade;
-        return resultado;
-      }
-      if (bruto === 'BRUNO') {
-        resultado.bruno = total;
-        return resultado;
-      }
-      if (bruto === 'ZIZU') {
-        resultado.zizu = total;
-        return resultado;
-      }
-      if (bruto === 'INVESTIMENTO') {
-        resultado.investimento = total;
-      }
-      return resultado;
-    }
-
-    function calcularPendenciasResumoDespesa(item, referencia) {
-      const despesa = item || {};
-      const { inicio, fim, hoje, limite7 } = obterIntervaloReferencia(referencia);
-      const totalPendenteItem = round2(parseNumeroInput(despesa.total_pendente || 0));
-      const parcelas = Array.isArray(despesa.parcelas_detalhe) ? despesa.parcelas_detalhe : [];
-      let compromissoPendenteMes = 0;
-      let pendenteMes = 0;
-
-      if (parcelas.length > 0) {
-        parcelas.forEach(parcela => {
-          const dataPrevista = parseDataISO(parcela?.data_prevista || parcela?.data);
-          if (!dataPrevista) return;
-          const valorPendente = round2(parcela?.valor_pendente ?? Math.max(0, parseNumeroInput(parcela?.valor_previsto) - parseNumeroInput(parcela?.valor_pago)));
-          if (valorPendente <= 0.009) return;
-          if (dataPrevista >= inicio && dataPrevista < fim) {
-            pendenteMes = round2(pendenteMes + valorPendente);
-          }
-          if (dataPrevista < fim) {
-            compromissoPendenteMes = round2(compromissoPendenteMes + valorPendente);
-          }
-        });
-      } else {
-        const vencimento = parseDataISO(despesa.data_vencimento);
-        if (vencimento && totalPendenteItem > 0.009) {
-          if (vencimento < fim) {
-            compromissoPendenteMes = round2(compromissoPendenteMes + totalPendenteItem);
-          }
-          if (vencimento >= inicio && vencimento < fim) {
-            pendenteMes = round2(pendenteMes + totalPendenteItem);
-          }
-        }
-      }
-
-      let vencido = 0;
-      let aVencer = 0;
-      const dataVencimento = parseDataISO(despesa.data_vencimento);
-      if (dataVencimento && totalPendenteItem > 0.009) {
-        if (dataVencimento.getTime() < hoje.getTime()) {
-          vencido = totalPendenteItem;
-        } else if (dataVencimento.getTime() <= limite7.getTime()) {
-          aVencer = totalPendenteItem;
-        }
-      }
-
-      return {
-        compromissoPendenteMes,
-        pendenteMes,
-        vencido,
-        aVencer
-      };
-    }
-
-    function aplicarPatchResumoDespesa(resumoBase, referencia, beforeItem, afterItem, options = {}) {
-      const resumo = normalizarResumoBase(resumoBase);
-      const cards = { ...(resumo.cards || {}) };
-      const categoriaMap = normalizarMapaAgregado(resumo?.agregados?.gasto_por_categoria);
-      const fornecedorMap = normalizarMapaAgregado(resumo?.agregados?.gasto_por_fornecedor);
-      const before = beforeItem ? calcularPendenciasResumoDespesa(beforeItem, referencia) : {
-        compromissoPendenteMes: 0,
-        pendenteMes: 0,
-        vencido: 0,
-        aVencer: 0
-      };
-      const after = afterItem ? calcularPendenciasResumoDespesa(afterItem, referencia) : {
-        compromissoPendenteMes: 0,
-        pendenteMes: 0,
-        vencido: 0,
-        aVencer: 0
-      };
-
-      const deltaCompromissoPendencia = round2(after.compromissoPendenteMes - before.compromissoPendenteMes);
-      const deltaPendenteMes = round2(after.pendenteMes - before.pendenteMes);
-      const deltaVencido = round2(after.vencido - before.vencido);
-      const deltaAVencer = round2(after.aVencer - before.aVencer);
-
-      cards.compromisso_previsto_mes = round2(parseNumeroInput(cards.compromisso_previsto_mes || 0) + deltaCompromissoPendencia);
-      cards.pendente_total = round2(parseNumeroInput(cards.pendente_total || 0) + deltaPendenteMes);
-      cards.vencido_total = round2(parseNumeroInput(cards.vencido_total || 0) + deltaVencido);
-      cards.avencer_7_dias = round2(parseNumeroInput(cards.avencer_7_dias || 0) + deltaAVencer);
-
-      if (options.includePaymentDelta) {
-        const valorPago = round2(parseNumeroInput(options.paymentValue || 0));
-        const referenciaPagamento = chaveMesData(options.paymentDate);
-        if (valorPago > 0.009 && referenciaPagamento === referencia) {
-          cards.gasto_pago_mes = round2(parseNumeroInput(cards.gasto_pago_mes || 0) + valorPago);
-          cards.compromisso_previsto_mes = round2(parseNumeroInput(cards.compromisso_previsto_mes || 0) + valorPago);
-
-          const rateio = calcularRateioPagoPor(afterItem?.pago_por || beforeItem?.pago_por, valorPago);
-          cards.contador_bruno_mes = round2(parseNumeroInput(cards.contador_bruno_mes || 0) + rateio.bruno);
-          cards.contador_zizu_mes = round2(parseNumeroInput(cards.contador_zizu_mes || 0) + rateio.zizu);
-          cards.contador_investimento_mes = round2(parseNumeroInput(cards.contador_investimento_mes || 0) + rateio.investimento);
-          cards.contador_investimento_acumulado = round2(parseNumeroInput(cards.contador_investimento_acumulado || 0) + rateio.investimento);
-
-          ajustarMapaAgregado(categoriaMap, afterItem?.categoria || beforeItem?.categoria || 'SEM_CATEGORIA', valorPago);
-          ajustarMapaAgregado(fornecedorMap, afterItem?.fornecedor || beforeItem?.fornecedor || 'SEM_FORNECEDOR', valorPago);
-        }
-      }
-
-      resumo.cards = cards;
-      resumo.agregados = {
-        ...(resumo.agregados || {}),
-        gasto_por_categoria: serializarMapaAgregado(categoriaMap),
-        gasto_por_fornecedor: serializarMapaAgregado(fornecedorMap)
-      };
-      return resumo;
-    }
-
-    function obterResumoBaseCache(referencia) {
-      const ref = String(referencia || '').trim();
-      if (!referenciaEhValida(ref)) return null;
-      return lerResumoCacheLocal(ref) || lerResumoPersistido(ref)?.resumo || null;
-    }
-
-    function renderResumoCacheComMutacoes(referencia, updatedAt = Date.now()) {
-      const ref = String(referencia || '').trim();
-      const resumoBase = obterResumoBaseCache(ref);
-      if (!resumoBase) return false;
-      const resumoVisual = reconciliarResumoComMutacoes(resumoBase, ref);
-      if (!resumoVisual) return false;
-      renderResumoCompleto(resumoVisual);
-      atualizarTextoUltimaAtualizacao(updatedAt);
-      return true;
-    }
-
-    function aplicarResumoMutacaoDespesa(detail) {
-      const entry = detail?.entry || {};
-      const meta = entry.meta || {};
-      if (String(meta.domain || '').trim() !== 'despesa') return;
-
-      const tipo = String(detail?.type || '').trim().toLowerCase();
-      const tiposQueAlteramPrevia = ['queued', 'discarded', 'retry', 'sending', 'paused', 'offline', 'error', 'conflict'];
-      if (!tiposQueAlteramPrevia.includes(tipo)) return;
-
-      const refs = coletarMesesImpactados(
-        meta.before_item,
-        meta.optimistic_item,
-        detail?.result?.despesaAtualizada,
-        entry?.payload?.data_pagamento
-      );
-
-      refs.forEach(ref => {
-        if (ref === getMesReferenciaAtiva()) {
-          renderResumoCacheComMutacoes(ref);
-        }
-      });
-    }
-
-    function reconciliarResumoComMutacoes(resumoBase, referencia) {
-      const entries = listarMutacoesDespesaAtivas();
-      if (!resumoBase) return null;
-      let resumo = normalizarResumoBase(resumoBase);
-      entries.forEach(entry => {
-        const meta = entry.meta || {};
-        if (String(meta.domain || '').trim() !== 'despesa') return;
-        resumo = aplicarPatchResumoDespesa(
-          resumo,
-          referencia,
-          meta.before_item || null,
-          meta.action === 'delete' ? null : (meta.optimistic_item || null),
-          {
-            includePaymentDelta: meta.action === 'payment',
-            paymentValue: entry?.payload?.valor_pago,
-            paymentDate: entry?.payload?.data_pagamento
-          }
-        );
-      });
-      return resumo;
-    }
-
-    function agendarSyncSilenciosoDashboard() {
-      if (window.AppTabRefresh?.requestSync) {
-        window.AppTabRefresh.requestSync('dashboard', {
-          delayMs: 900,
-          prefetch: true
-        });
-        return;
-      }
-      setTimeout(() => {
-        atualizar(true);
-      }, 900);
-    }
-
-    function tratarEventoMutacaoDespesaDashboard(detail) {
-      const entry = detail?.entry;
-      if (!entry || String(entry.scope || '').trim() !== 'despesa') return;
-      if (String(entry?.meta?.domain || '').trim() !== 'despesa') return;
-
-      if (window.AppDespesaMutations?.applyEntryToList) {
-        despesas = window.AppDespesaMutations.applyEntryToList(despesas, detail);
-        salvarDespesasCacheLocal(despesas);
-        if (despesasVisiveis) {
-          renderDespesas();
-        }
-      }
-
-      aplicarResumoMutacaoDespesa(detail);
-
-      if (String(detail?.type || '').trim() === 'success') {
-        agendarSyncSilenciosoDashboard();
-      }
-    }
-
-    function registrarListenerMutacoesSeNecessario() {
-      if (listenerMutacoesRegistrado) return;
-      if (typeof window === 'undefined' || typeof window.addEventListener !== 'function') return;
-      window.addEventListener('app:optimistic-mutation', evento => {
-        tratarEventoMutacaoDespesaDashboard(evento?.detail || {});
-      });
-      listenerMutacoesRegistrado = true;
-    }
-
-    function setCarregandoDashboard(ativo) {
-      carregandoDashboard = !!ativo;
-      const f = el();
-      if (!f.btnAtualizar) return;
-      f.btnAtualizar.disabled = carregandoDashboard;
-      if (window.AppLoading?.setButtonLoading) {
-        window.AppLoading.setButtonLoading(
-          f.btnAtualizar,
-          carregandoDashboard,
-          'Atualizar',
-          'Atualizando'
-        );
-      } else {
-        f.btnAtualizar.textContent = carregandoDashboard ? 'Atualizando...' : 'Atualizar';
-      }
-    }
-
-    function parseNumeroInput(valor) {
-      if (window.AppDomainUtils?.parseNumeroZero) {
-        return window.AppDomainUtils.parseNumeroZero(valor);
-      }
-      const s = String(valor ?? '').trim();
-      if (!s) return 0;
-      const n = Number(s.replace(',', '.'));
-      return isNaN(n) ? 0 : n;
-    }
-
-    function round2(valor) {
-      return Math.round(parseNumeroInput(valor) * 100) / 100;
-    }
-
-    function parseBooleanInput(valor) {
-      const s = String(valor ?? '').trim().toLowerCase();
-      return s === 'true' || s === '1' || s === 'sim' || s === 'yes';
-    }
-
-    function formatarMoeda(valor) {
-      const n = Number(valor || 0);
-      const seguro = isNaN(n) ? 0 : n;
-      return `R$ ${seguro.toFixed(2)}`;
-    }
-
-    function formatarNumeroInteiro(valor) {
-      const n = Number(valor || 0);
-      const seguro = isNaN(n) ? 0 : n;
-      return `${Math.round(seguro)}`;
-    }
-
-    function formaExigeParcelas(valor) {
-      if (window.AppDomainUtils?.formaExigeParcelas) {
-        return window.AppDomainUtils.formaExigeParcelas(valor);
-      }
-      return false;
-    }
-
-    function getDataBaseParcelasDespesa() {
-      const f = el();
-      return String(f.despesaDataPagamento?.value || f.despesaDataCompetencia?.value || getHojeISO()).trim();
-    }
-
-    function gerarParcelasPadrao(valorTotal, parcelas, dataBase) {
-      const total = Number(valorTotal || 0);
-      const qtd = Math.max(1, Math.floor(Number(parcelas || 1)));
-      const inicioRaw = String(dataBase || getHojeISO()).trim();
-      const inicio = /^\d{4}-\d{2}-\d{2}$/.test(inicioRaw) ? new Date(`${inicioRaw}T00:00:00`) : new Date();
-      const base = qtd > 0 ? Number((total / qtd).toFixed(2)) : 0;
-      const lista = [];
-      for (let i = 0; i < qtd; i++) {
-        const d = new Date(inicio);
-        d.setMonth(d.getMonth() + i);
-        const yyyy = d.getFullYear();
-        const mm = String(d.getMonth() + 1).padStart(2, '0');
-        const dd = String(d.getDate()).padStart(2, '0');
-        const valor = i === qtd - 1
-          ? Number((total - (base * (qtd - 1))).toFixed(2))
-          : base;
-        lista.push({
-          numero: i + 1,
-          data: `${yyyy}-${mm}-${dd}`,
-          valor: Number(valor.toFixed(2))
-        });
-      }
-      return lista;
-    }
-
-    function lerParcelasDetalheDespesa() {
-      const f = el();
-      if (!f.despesaParcelasDetalheLista) return [];
-      const linhas = [...f.despesaParcelasDetalheLista.querySelectorAll('.parcela-detalhe-linha')];
-      return linhas.map((linha, idx) => ({
-        numero: idx + 1,
-        data: String(linha.querySelector('input[data-campo="data"]')?.value || '').trim(),
-        valor: parseNumeroInput(linha.querySelector('input[data-campo="valor"]')?.value || '')
-      }));
-    }
-
-    function renderParcelasDetalheDespesa(listaForcada) {
-      const f = el();
-      if (!f.despesaParcelasDetalheWrap || !f.despesaParcelasDetalheLista) return;
-
-      const exibir = formaExigeParcelas(String(f.despesaFormaPagamento?.value || '').trim());
-      if (!exibir) {
-        f.despesaParcelasDetalheWrap.classList.add('hidden');
-        f.despesaParcelasDetalheLista.innerHTML = '';
-        return;
-      }
-
-      const parcelas = Math.max(1, Math.floor(parseNumeroInput(f.despesaParcelas?.value) || 1));
-      const valorTotal = parseNumeroInput(f.despesaValorTotal?.value || 0);
-      const dataBase = getDataBaseParcelasDespesa();
-      const atuais = Array.isArray(listaForcada) ? listaForcada : lerParcelasDetalheDespesa();
-      const usarAtuais = atuais.length === parcelas && atuais.every(p => String(p.data || '').trim() !== '');
-      const lista = usarAtuais ? atuais : gerarParcelasPadrao(valorTotal, parcelas, dataBase);
-
-      f.despesaParcelasDetalheLista.innerHTML = lista.map((p, idx) => `
-        <div class="parcela-detalhe-linha">
-          <span class="parcela-detalhe-num">#${idx + 1}</span>
-          <input type="date" data-campo="data" value="${escapeHtml(p.data || '')}">
-          <input type="number" data-campo="valor" min="0" step="0.01" value="${Number(p.valor || 0).toFixed(2)}">
-        </div>
-      `).join('');
-      f.despesaParcelasDetalheWrap.classList.remove('hidden');
-    }
-
-    function escapeHtml(valor) {
+    function escapar(valor) {
       return String(valor ?? '')
         .replace(/&/g, '&amp;')
         .replace(/</g, '&lt;')
@@ -1091,1173 +52,614 @@
         .replace(/'/g, '&#39;');
     }
 
-    function renderSelect(selectEl, valores, placeholder = 'Selecione') {
-      if (!selectEl || selectEl.tagName !== 'SELECT') return;
-
-      const lista = (Array.isArray(valores) ? valores : [])
-        .map(v => String(v || '').trim())
-        .filter(v => v !== '');
-      const atual = String(selectEl.value || '').trim().toUpperCase();
-
-      selectEl.innerHTML = '';
-      const o0 = document.createElement('option');
-      o0.value = '';
-      o0.textContent = placeholder;
-      selectEl.appendChild(o0);
-
-      lista.forEach(v => {
-        const o = document.createElement('option');
-        o.value = v;
-        o.textContent = v;
-        selectEl.appendChild(o);
+    function moeda(valor) {
+      return Number(valor || 0).toLocaleString('pt-BR', {
+        style: 'currency',
+        currency: 'BRL',
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
       });
-
-      const match = [...selectEl.options].find(o => String(o.value || '').trim().toUpperCase() === atual);
-      selectEl.value = match ? match.value : '';
     }
 
-    function carregarValidacoes(onDone) {
-      const loader = window.AppValidacoes?.get
-        ? window.AppValidacoes.get({ maxAgeMs: 1000 * 60 * 60 * 12 })
-        : Promise.reject(new Error('cache de validacoes indisponivel'));
-
-      loader
-        .then(({ data }) => {
-          validacoes = data || {};
-          validacoes.categoriasDespesas ||= [];
-          validacoes.fornecedores ||= [];
-          validacoes.formasPagamento ||= [];
-          validacoes.pagosPor ||= [];
-
-          const f = el();
-          renderSelect(f.despesaCategoria, validacoes.categoriasDespesas);
-          renderSelect(f.despesaFornecedor, validacoes.fornecedores);
-          renderSelect(f.despesaPagoPor, validacoes.pagosPor);
-          renderSelect(f.despesaFormaPagamento, validacoes.formasPagamento);
-          renderSelect(f.pagDespesaForma, validacoes.formasPagamento);
-          handleDespesaFormaPagamentoChange();
-
-          if (typeof onDone === 'function') onDone();
-        })
-        .catch(() => {
-          mostrarToast('Falha ao carregar validacoes', 'erro');
-          if (typeof onDone === 'function') onDone();
-        });
+    function numero(valor) {
+      return Number(valor || 0).toLocaleString('pt-BR', { maximumFractionDigits: 0 });
     }
 
-    function init() {
-      registrarListenerRuntimeSeNecessario();
-      registrarListenerMutacoesSeNecessario();
-      window.AppOptimistic?.process?.();
-      atualizarIndicadorSomenteLeitura();
-      bindEventosDashboard();
+    function dataBr(valor) {
+      const texto = String(valor || '').trim();
+      const match = texto.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      return match ? `${match[3]}/${match[2]}/${match[1]}` : (texto || '-');
+    }
 
-      if (!iniciado) {
-        const f = el();
-        if (f.mesReferencia && !String(f.mesReferencia.value || '').trim()) {
-          f.mesReferencia.value = getMesAtualISO();
+    function mesAtual() {
+      const hoje = new Date();
+      return `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, '0')}`;
+    }
+
+    function referenciaValida(valor) {
+      return /^\d{4}-\d{2}$/.test(String(valor || '').trim());
+    }
+
+    function referenciaAtiva() {
+      const valor = String(refs().month?.value || '').trim();
+      return referenciaValida(valor) ? valor : mesAtual();
+    }
+
+    function mesLabel(valor) {
+      const match = String(valor || '').match(/^(\d{4})-(\d{2})$/);
+      if (!match) return String(valor || '-');
+      const nomes = ['janeiro', 'fevereiro', 'marco', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'];
+      return `${nomes[Number(match[2]) - 1]} de ${match[1]}`;
+    }
+
+    function ambienteAtual() {
+      const contexto = window.AppDbEnv?.getContext?.() || {};
+      return String(contexto.effective_env || contexto.selected_env || 'prod').trim().toLowerCase() === 'dev'
+        ? 'dev'
+        : 'prod';
+    }
+
+    function storageKey(referencia) {
+      return `${STORAGE_PREFIX}${ambienteAtual()}:${referencia}`;
+    }
+
+    function lerSnapshot(referencia) {
+      const memoria = cacheMemoria[referencia];
+      if (memoria?.data) return memoria;
+      try {
+        const raw = window.localStorage?.getItem(storageKey(referencia));
+        if (!raw) return null;
+        const parsed = JSON.parse(raw);
+        if (!parsed?.data || parsed.data.version !== 'v2') return null;
+        cacheMemoria[referencia] = parsed;
+        return parsed;
+      } catch (error) {
+        return null;
+      }
+    }
+
+    function salvarSnapshot(referencia, data) {
+      const entry = { ts: Date.now(), data };
+      cacheMemoria[referencia] = entry;
+      try {
+        window.localStorage?.setItem(storageKey(referencia), JSON.stringify(entry));
+      } catch (error) {
+        // O cache persistente e opcional.
+      }
+      return entry;
+    }
+
+    function limparSnapshots() {
+      cacheMemoria = {};
+      cacheDetalhes = {};
+      try {
+        const chaves = [];
+        for (let i = 0; i < window.localStorage.length; i += 1) {
+          const chave = window.localStorage.key(i);
+          if (String(chave || '').startsWith(STORAGE_PREFIX)) chaves.push(chave);
         }
-        atualizar(false);
-        iniciado = true;
-        return;
-      }
-
-      atualizar(false);
-    }
-
-    function bindEventosDashboard() {
-      const f = el();
-      if (!f.mesReferencia) return;
-      if (f.mesReferencia.dataset.boundAutoRefresh === '1') return;
-      f.mesReferencia.dataset.boundAutoRefresh = '1';
-
-      const onMesChange = () => {
-        const ref = String(f.mesReferencia?.value || '').trim();
-        if (!referenciaEhValida(ref)) return;
-        atualizar(false);
-      };
-
-      f.mesReferencia.addEventListener('change', onMesChange);
-      f.mesReferencia.addEventListener('input', onMesChange);
-    }
-
-    function setDespesasVisiveis(visivel) {
-      despesasVisiveis = !!visivel;
-      const f = el();
-      if (f.listaDespesas) {
-        f.listaDespesas.classList.toggle('hidden', !despesasVisiveis);
-      }
-      if (f.btnToggleDespesas) {
-        f.btnToggleDespesas.textContent = despesasVisiveis ? 'Ocultar despesas' : 'Ver despesas';
-        f.btnToggleDespesas.setAttribute('aria-expanded', despesasVisiveis ? 'true' : 'false');
+        chaves.forEach(chave => window.localStorage.removeItem(chave));
+      } catch (error) {
+        // O cache persistente e opcional.
       }
     }
 
-    function toggleDespesas() {
-      setDespesasVisiveis(!despesasVisiveis);
+    function atualizarReadonly() {
+      const f = refs();
+      f.readonly?.classList.toggle('hidden', !window.AppRuntime?.isReadOnly?.());
     }
 
-    function renderListaAgregada(container, itens) {
-      if (!container) return;
-      const lista = Array.isArray(itens) ? itens : [];
-      if (lista.length === 0) {
-        container.innerHTML = '<p class="dash-empty">Sem dados no periodo.</p>';
-        return;
+    function setOffline(ativo, motivo) {
+      window.AppRuntime?.setReadOnly?.(!!ativo, String(motivo || ''));
+      atualizarReadonly();
+    }
+
+    function setLoading(ativo, manterConteudo) {
+      carregando = !!ativo;
+      const f = refs();
+      if (f.refresh) {
+        f.refresh.disabled = carregando;
+        f.refresh.textContent = carregando ? 'Atualizando...' : 'Atualizar dados';
       }
-
-      container.innerHTML = lista.map(i => `
-        <div class="dash-lista-linha">
-          <span>${escapeHtml(i.label || '-')}</span>
-          <strong>${formatarMoeda(i.valor || 0)}</strong>
-        </div>
-      `).join('');
+      f.loading?.classList.toggle('hidden', !carregando || !!manterConteudo);
+      f.content?.classList.toggle('dashx-content-refreshing', carregando && !!manterConteudo);
     }
 
-    function renderEvolucaoMensal(container, itens) {
-      if (!container) return;
-      const lista = Array.isArray(itens) ? itens : [];
-      if (lista.length === 0) {
-        container.innerHTML = '<p class="dash-empty">Sem dados de pagamentos.</p>';
-        return;
+    function mostrarEstadoErro(mensagem) {
+      const f = refs();
+      f.loading?.classList.add('hidden');
+      f.content?.classList.add('hidden');
+      f.error?.classList.remove('hidden');
+      if (f.errorMessage) f.errorMessage.textContent = String(mensagem || 'Tente atualizar os dados.');
+    }
+
+    function atualizarHora(ts) {
+      const f = refs();
+      if (!f.updated) return;
+      const data = new Date(Number(ts || Date.now()));
+      f.updated.textContent = `Ultima atualizacao: ${data.toLocaleString('pt-BR', {
+        day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit'
+      })}`;
+    }
+
+    function filtroAttr(filtro) {
+      return escapar(encodeURIComponent(JSON.stringify(filtro || {})));
+    }
+
+    function botaoDetalhe(conteudo, contexto, filtro, classe) {
+      return `<button type="button" class="${escapar(classe || '')}" data-dash-context="${escapar(contexto)}" data-dash-filter="${filtroAttr(filtro)}">${conteudo}</button>`;
+    }
+
+    function tendenciaHtml(kpi, tipo) {
+      const percentual = kpi?.variacao_percentual;
+      const anterior = Number(kpi?.valor_anterior || 0);
+      if (percentual === null || percentual === undefined || !Number.isFinite(Number(percentual))) {
+        return `<span class="dashx-trend dashx-trend-neutral">Sem base comparavel</span><span class="dashx-previous">Anterior: ${moeda(anterior)}</span>`;
       }
-
-      container.innerHTML = lista.map(i => `
-        <div class="dash-lista-linha">
-          <span>${escapeHtml(i.mes || '-')}</span>
-          <strong>${formatarMoeda(i.valor || 0)}</strong>
-        </div>
-      `).join('');
+      const variacao = Number(percentual || 0);
+      const sinal = variacao > 0 ? 'up' : (variacao < 0 ? 'down' : 'flat');
+      const classeImpacto = tipo === 'pagamentos'
+        ? (sinal === 'up' ? 'negative' : (sinal === 'down' ? 'positive' : 'neutral'))
+        : (sinal === 'up' ? 'positive' : (sinal === 'down' ? 'negative' : 'neutral'));
+      const icone = sinal === 'up' ? '&uarr;' : (sinal === 'down' ? '&darr;' : '&rarr;');
+      return `<span class="dashx-trend dashx-trend-${classeImpacto}">${icone} ${Math.abs(variacao).toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%</span><span class="dashx-previous">Anterior: ${moeda(anterior)}</span>`;
     }
 
-    function renderCards(cards) {
-      const f = el();
+    function renderKpis(payload) {
+      const f = refs();
       if (!f.cards) return;
-      const c = cards || {};
-      const definicoes = DASHBOARD_CARD_DEFINICOES.map(def => ({
-        ...def,
-        valor: c?.[def.key] || 0
-      }));
-
-      f.cards.innerHTML = definicoes.map(def => `
-        <div
-          class="dash-card dash-card-click card-ficha"
-          role="button"
-          tabindex="0"
-          onclick="DashboardController.handleCardClick('${escapeHtml(def.key)}')"
-          onkeydown="DashboardController.handleCardKeydown(event, '${escapeHtml(def.key)}')"
-        >
-          <div class="card-ficha-topo dash-card-topo">${escapeHtml(def.label)}</div>
-          <div class="card-ficha-corpo dash-card-corpo">
-            <div class="dash-card-valor">${def.moeda ? formatarMoeda(def.valor) : formatarNumeroInteiro(def.valor)}</div>
-          </div>
-        </div>
-      `).join('');
+      const definicoes = [
+        { id: 'vendas', label: 'Vendas registradas', context: 'kpi_vendas', help: 'Negocios lancados no mes, independentemente do recebimento.' },
+        { id: 'recebimentos', label: 'Recebimentos realizados', context: 'kpi_recebimentos', help: 'Entradas efetivamente recebidas no mes.' },
+        { id: 'pagamentos', label: 'Pagamentos realizados', context: 'kpi_pagamentos', help: 'Saidas efetivamente pagas no mes.' },
+        { id: 'fluxo_liquido', label: 'Fluxo liquido realizado', context: 'kpi_fluxo', help: 'Recebimentos menos pagamentos; nao e saldo bancario.' }
+      ];
+      f.cards.innerHTML = definicoes.map(def => {
+        const kpi = payload?.kpis?.[def.id] || {};
+        const valor = Number(kpi.valor || 0);
+        const estado = def.id === 'fluxo_liquido' ? (valor < 0 ? 'negative' : 'positive') : 'default';
+        return botaoDetalhe(`
+          <span class="dashx-kpi-label">${escapar(def.label)}</span>
+          <strong class="dashx-kpi-value dashx-value-${estado}">${moeda(valor)}</strong>
+          <span class="dashx-kpi-comparison">${tendenciaHtml(kpi, def.id)}</span>
+          <span class="dashx-kpi-help">${escapar(def.help)}</span>
+          <span class="dashx-kpi-action">Ver composicao <span aria-hidden="true">&rarr;</span></span>
+        `, def.context, {}, 'dash-card dashx-kpi-card');
+      }).join('');
+      if (f.periodLabel) f.periodLabel.textContent = `${mesLabel(payload.referencia)} comparado ao mes anterior`;
     }
 
-    function renderResumoCompleto(resumo) {
-      const f = el();
-      const data = resumo || {};
-      renderCards(data?.cards || {});
-      renderListaAgregada(f.gastoPorTipo, data?.agregados?.gasto_por_tipo);
-      renderListaAgregada(f.gastoPorCategoria, data?.agregados?.gasto_por_categoria);
-      renderListaAgregada(f.gastoPorFornecedor, data?.agregados?.gasto_por_fornecedor);
-      renderListaAgregada(f.estoquePorTipo, data?.agregados?.valor_estoque_por_tipo);
-      renderEvolucaoMensal(f.evolucaoMensal, data?.evolucao_mensal);
-    }
-
-    function devePrefetchResumoVizinho(referencia) {
-      const ref = String(referencia || '').trim();
-      if (!referenciaEhValida(ref)) return false;
-      const now = Date.now();
-      const last = Number(prefetchVizinhoRefTs[ref] || 0);
-      if ((now - last) < DASHBOARD_PREFETCH_TTL_MS) return false;
-      prefetchVizinhoRefTs[ref] = now;
-      return true;
-    }
-
-    function prefetchResumosVizinhos(referenciaBase) {
-      const refs = obterJanelaReferencias(referenciaBase);
-      refs.forEach(ref => {
-        if (ref === referenciaBase) return;
-        if (!devePrefetchResumoVizinho(ref)) return;
-
-        window.AppRequest.runner()
-          .withSuccessHandler(resumo => {
-            const resumoSeguro = resumo || {};
-            const hash = gerarResumoHash(resumoSeguro);
-            salvarResumoCacheLocal(ref, resumoSeguro);
-            salvarResumoPersistido(ref, resumoSeguro, Date.now(), hash);
-          })
-          .withFailureHandler(() => {
-            // prefetch nao deve poluir UX
-          })
-          .obterResumoDashboardFinanceiro(ref, false);
-      });
-    }
-
-    function carregarResumo(forcarRecarregar = false, onDone) {
-      const requestSeq = ++resumoRequestSeq;
-      const f = el();
-      const referencia = String(f.mesReferencia?.value || getMesAtualISO()).trim() || getMesAtualISO();
-      const refValida = referenciaEhValida(referencia) ? referencia : getMesAtualISO();
-      const cacheSessao = !forcarRecarregar ? lerResumoCacheLocal(refValida) : null;
-      const cachePersistido = !forcarRecarregar ? lerResumoPersistido(refValida) : null;
-      const hadCache = !!cacheSessao || !!cachePersistido;
-      const resumoBaseCache = cacheSessao || cachePersistido?.resumo || null;
-      const resumoCache = reconciliarResumoComMutacoes(resumoBaseCache, refValida);
-      const hashCache = cachePersistido?.hash || gerarResumoHash(resumoBaseCache || {});
-
-      if (resumoCache) {
-        renderResumoCompleto(resumoCache);
-        atualizarTextoUltimaAtualizacao(cachePersistido?.updatedAt || Date.now());
-      } else {
-        atualizarTextoUltimaAtualizacao(0);
+    function renderPosicao(payload) {
+      const f = refs();
+      const posicao = payload?.posicao || {};
+      const cards = [
+        { label: 'A receber', valor: posicao.receber_total, vencido: posicao.receber_vencido, context: 'posicao_receber', tone: 'receive' },
+        { label: 'A pagar', valor: posicao.pagar_total, vencido: posicao.pagar_vencido, context: 'posicao_pagar', tone: 'pay' }
+      ];
+      if (f.positionCards) {
+        f.positionCards.innerHTML = cards.map(item => botaoDetalhe(`
+          <span class="dashx-position-label">${escapar(item.label)}</span>
+          <strong>${moeda(item.valor)}</strong>
+          <span class="dashx-position-overdue">Vencido: ${moeda(item.vencido)}</span>
+          <span class="dashx-kpi-action">Ver titulos <span aria-hidden="true">&rarr;</span></span>
+        `, item.context, {}, `dashx-position-card dashx-position-${item.tone}`)).join('');
       }
+      if (f.positionDate) f.positionDate.textContent = `Posicao em ${dataBr(payload.posicao_em)}. Valores em aberto, independentemente do mes selecionado.`;
+    }
 
-      window.AppRequest.runner()
-        .withSuccessHandler(resumo => {
-          if (requestSeq !== resumoRequestSeq) return;
+    function renderCapital(payload) {
+      const f = refs();
+      const capital = payload?.capital || {};
+      const metricas = [
+        { label: 'Capital operacional a custo', valor: capital.capital_operacional_total, context: 'capital_operacional', help: 'Estoque mais custos consumidos nas ordens ativas.' },
+        { label: 'Estoque a custo', valor: capital.estoque_custo_total, context: 'capital_estoque', help: 'Produtos e insumos ao custo cadastrado.' },
+        { label: 'Custo em producao', valor: capital.producao_custo_em_andamento, context: 'capital_producao', help: 'Materiais consumidos nas ordens em andamento.' },
+        { label: 'Potencial de venda', valor: capital.potencial_venda_total, context: 'capital_potencial', help: 'Estimativa separada; nao representa receita realizada.' }
+      ];
+      if (f.capitalMetrics) {
+        f.capitalMetrics.innerHTML = metricas.map(item => botaoDetalhe(`
+          <span>${escapar(item.label)}</span><strong>${moeda(item.valor)}</strong><small>${escapar(item.help)}</small>
+        `, item.context, {}, 'dashx-metric-card')).join('');
+      }
+      if (f.productionAlert) {
+        f.productionAlert.className = Number(capital.ordens_atrasadas || 0) > 0 ? 'dashx-alert-chip' : 'dashx-ok-chip';
+        f.productionAlert.textContent = Number(capital.ordens_atrasadas || 0) > 0
+          ? `${numero(capital.ordens_atrasadas)} atrasada(s)`
+          : 'Sem atrasos';
+      }
+      if (f.productionStatus) {
+        const status = Array.isArray(capital.producao_por_status) ? capital.producao_por_status : [];
+        f.productionStatus.innerHTML = status.length
+          ? status.map(item => botaoDetalhe(`<span>${escapar(item.label)}</span><strong>${numero(item.quantidade)}</strong>`, 'producao_status', item, 'dashx-status-row')).join('')
+          : '<p class="dashx-empty">Nenhuma ordem em andamento.</p>';
+      }
+    }
 
-          const resumoSeguro = resumo || {};
-          const resumoVisual = reconciliarResumoComMutacoes(resumoSeguro, refValida);
-          const hashNovo = gerarResumoHash(resumoSeguro);
-          const mudou = !!forcarRecarregar || !hadCache || hashNovo !== hashCache;
-          const tsAtualizacao = Date.now();
+    function renderSocios(payload) {
+      const f = refs();
+      const socios = payload?.socios || {};
+      if (f.partnersCenter) {
+        f.partnersCenter.innerHTML = `<span>Total classificado</span><strong>${moeda(socios.total_periodo)}</strong>`;
+      }
+      if (f.partnersSummary) {
+        f.partnersSummary.innerHTML = `
+          <span class="dashx-section-kicker">Historico de aporte</span>
+          <h4>Investimento acumulado</h4>
+          <strong>${moeda(socios.investimento_acumulado)}</strong>
+          <p>Soma dos pagamentos classificados como investimento em todo o historico disponivel.</p>
+          ${botaoDetalhe('Ver composicao <span aria-hidden="true">&rarr;</span>', 'socio_acumulado', { socio: 'investimento', label: 'Investimento' }, 'dashx-text-action')}
+        `;
+      }
+    }
 
-          salvarResumoCacheLocal(refValida, resumoSeguro);
-          salvarResumoPersistido(refValida, resumoSeguro, tsAtualizacao, hashNovo);
-          limparResumoPersistidoForaDaJanela(refValida);
-          limparComposicaoPersistidaForaDaJanela(refValida);
-          prefetchResumosVizinhos(refValida);
-          prefetchComposicoesCardsDashboard(refValida);
+    function renderQualidade(payload) {
+      const f = refs();
+      if (!f.quality) return;
+      const qualidade = payload?.qualidade || {};
+      const avisos = [];
+      if (Number(qualidade.sem_vencimento_receber || 0) > 0) avisos.push(`${moeda(qualidade.sem_vencimento_receber)} a receber sem data prevista`);
+      if (Number(qualidade.sem_vencimento_pagar || 0) > 0) avisos.push(`${moeda(qualidade.sem_vencimento_pagar)} a pagar sem data prevista`);
+      if (Number(qualidade.itens_sem_custo || 0) > 0) avisos.push(`${numero(qualidade.itens_sem_custo)} item(ns) de estoque sem custo cadastrado`);
+      if (Number(qualidade.pagamentos_sem_responsavel || 0) > 0) avisos.push(`${moeda(qualidade.pagamentos_sem_responsavel)} em pagamentos sem responsavel classificado`);
+      f.quality.classList.toggle('hidden', avisos.length === 0);
+      f.quality.innerHTML = avisos.length
+        ? `<strong>Qualidade dos dados</strong><span>${escapar(avisos.join(' • '))}</span>`
+        : '';
+    }
 
-          if (mudou) {
-            renderResumoCompleto(resumoVisual);
-          }
-          atualizarTextoUltimaAtualizacao(tsAtualizacao);
-          setModoSomenteLeitura(false);
-          if (window.AppTabRefresh?.clearDirty) {
-            window.AppTabRefresh.clearDirty('dashboard');
-          }
-          if (typeof onDone === 'function') onDone();
-        })
-        .withFailureHandler(() => {
-          if (requestSeq !== resumoRequestSeq) return;
+    function render(payload) {
+      const f = refs();
+      if (!payload || payload.version !== 'v2') {
+        mostrarEstadoErro('A resposta recebida nao corresponde a versao atual do painel.');
+        return;
+      }
+      f.error?.classList.add('hidden');
+      f.loading?.classList.add('hidden');
+      f.content?.classList.remove('hidden');
+      renderKpis(payload);
+      renderPosicao(payload);
+      renderCapital(payload);
+      renderSocios(payload);
+      renderQualidade(payload);
+      if (f.salesAverage) f.salesAverage.textContent = `Media: ${moeda(payload?.direcionadores?.media_vendas_produto)}`;
 
-          setModoSomenteLeitura(true, 'Sem conexao com backend - modo somente leitura');
-          mostrarToast('Erro ao carregar dashboard', 'erro');
-          if (hadCache) {
-            mostrarToast('Exibindo ultimo snapshot em cache', 'erro');
-          }
-          if (typeof onDone === 'function') onDone();
-        })
-        .obterResumoDashboardFinanceiro(refValida, !!forcarRecarregar);
-
-      return requestSeq;
+      requestAnimationFrame(() => {
+        window.DashboardCharts?.renderAll?.(payload, {
+          onSelect: (contexto, filtro) => abrirDetalhes(contexto, filtro)
+        });
+      });
     }
 
     function atualizar(forcarRecarregar = false, onDone) {
-      setCarregandoDashboard(true);
-      const requestSeq = carregarResumo(!!forcarRecarregar, () => {
-        if (requestSeq !== resumoRequestSeq) return;
-        setCarregandoDashboard(false);
+      const referencia = referenciaAtiva();
+      const seq = ++requestSeq;
+      const snapshot = lerSnapshot(referencia);
+      const snapshotFresco = snapshot && (Date.now() - Number(snapshot.ts || 0)) <= CACHE_TTL_MS;
+      if (snapshot?.data) {
+        render(snapshot.data);
+        atualizarHora(snapshot.ts);
+      }
+      if (!forcarRecarregar && snapshotFresco) {
+        setLoading(false, true);
+        window.AppTabRefresh?.clearDirty?.('dashboard');
+        if (typeof onDone === 'function') onDone();
+        return Promise.resolve(snapshot.data);
+      }
+
+      setLoading(true, !!snapshot?.data);
+      return window.AppRequest.call('obterDashboardExecutivoFinanceiro', [referencia, !!forcarRecarregar], {
+        context: 'dashboard.executivo',
+        errorMessage: 'Erro ao carregar o painel financeiro'
+      }).then(payload => {
+        if (seq !== requestSeq) return payload;
+        const entry = salvarSnapshot(referencia, payload || {});
+        render(payload || {});
+        atualizarHora(entry.ts);
+        setOffline(false, '');
+        window.AppTabRefresh?.clearDirty?.('dashboard');
+        return payload;
+      }).catch(error => {
+        if (seq !== requestSeq) return null;
+        if (snapshot?.data) {
+          render(snapshot.data);
+          setOffline(true, 'Sem conexao com backend - exibindo o ultimo snapshot');
+          mostrarToast('Exibindo o ultimo snapshot salvo', 'erro');
+          return snapshot.data;
+        }
+        mostrarEstadoErro(error?.message || 'Nao foi possivel carregar os dados.');
+        setOffline(true, 'Sem conexao com backend');
+        mostrarToast(error?.message || 'Erro ao carregar dashboard', 'erro');
+        return null;
+      }).finally(() => {
+        if (seq === requestSeq) setLoading(false, true);
         if (typeof onDone === 'function') onDone();
       });
     }
 
-    function handleCardKeydown(event, cardKey) {
-      const tecla = String(event?.key || '').toLowerCase();
-      if (tecla !== 'enter' && tecla !== ' ' && tecla !== 'spacebar') return;
-      if (event?.preventDefault) event.preventDefault();
-      handleCardClick(cardKey);
-    }
-
-    function handleCardClick(cardKey) {
-      const key = String(cardKey || '').trim();
-      if (!key) return;
-      window.AppDiag?.mark?.('dashboard.card.click', {
-        card_key: key
-      });
-      if (key === 'valor_estoque_total') {
-        if (typeof window.trocarAba === 'function') {
-          window.trocarAba('estoque');
+    function init() {
+      const f = refs();
+      if (!f.month) return;
+      if (!referenciaValida(f.month.value)) f.month.value = mesAtual();
+      if (!iniciado) {
+        f.month.addEventListener('change', () => atualizar(false));
+        f.root?.addEventListener('click', evento => {
+          const alvo = evento.target?.closest?.('[data-dash-context]');
+          if (!alvo || !f.root?.contains(alvo)) return;
+          let filtro = {};
+          try {
+            filtro = JSON.parse(decodeURIComponent(String(alvo.dataset.dashFilter || '%7B%7D')));
+          } catch (error) {
+            filtro = {};
+          }
+          abrirDetalhes(alvo.dataset.dashContext, filtro);
+        });
+        f.modal?.addEventListener('click', evento => {
+          if (evento.target === f.modal) fecharObservabilidadeCard();
+        });
+        document.addEventListener('keydown', evento => {
+          if (evento.key === 'Escape' && !f.modal?.classList.contains('hidden')) fecharObservabilidadeCard();
+        });
+        if (!runtimeListenerRegistrado) {
+          window.addEventListener('app:runtime:readonly-changed', atualizarReadonly);
+          runtimeListenerRegistrado = true;
         }
-        return;
+        iniciado = true;
       }
-      abrirObservabilidadeCard(key);
+      atualizarReadonly();
+      return atualizar(false);
     }
 
-    function renderObservabilidadeCard(payload, fallbackCardKey) {
-      const f = el();
-      if (!f.obsCardLista || !f.obsCardResumo || !f.obsCardTitulo) return;
-
-      const p = payload || {};
-      const cardLabel = String(p.card_label || fallbackCardKey || 'Card').trim() || 'Card';
-      const referencia = String(p.referencia || '').trim();
-      const campoValor = String(p.campo_valor || 'valor').trim() || 'valor';
-      const total = Number(p.total || 0);
-      const totalItens = Number(p.total_itens || 0);
-
-      const totalFmt = campoValor === 'quantidade_linhas'
-        ? formatarNumeroInteiro(total)
-        : formatarMoeda(total);
-
-      f.obsCardTitulo.textContent = cardLabel;
-      f.obsCardResumo.innerHTML = `
-        <div class="card card-ficha dash-obs-summary-card">
-          <div class="card-ficha-topo dash-obs-item-topo">Resumo do card</div>
-          <div class="card-ficha-corpo dash-obs-summary-body">
-            <div class="dash-obs-summary-line"><strong>Total:</strong> ${escapeHtml(totalFmt)}</div>
-            <div class="dash-obs-summary-line"><strong>Itens:</strong> ${formatarNumeroInteiro(totalItens)}</div>
-            <div class="dash-obs-summary-line"><strong>Referencia:</strong> ${escapeHtml(referencia || '-')}</div>
-          </div>
+    function renderDetalhes(payload) {
+      const f = refs();
+      if (!f.detailTitle || !f.detailSummary || !f.detailList) return;
+      const data = payload || {};
+      itensDetalhe = Array.isArray(data.itens) ? data.itens : [];
+      f.detailTitle.textContent = String(data.card_label || 'Detalhes');
+      f.detailSummary.innerHTML = `
+        <div class="dashx-detail-summary">
+          <div><span>Total</span><strong>${moeda(data.total)}</strong></div>
+          <div><span>Registros</span><strong>${numero(data.total_itens)}</strong></div>
+          <div><span>Referencia</span><strong>${escapar(data.referencia || '-')}</strong></div>
         </div>
       `;
-
-      cardObservabilidadeItens = Array.isArray(p.itens) ? p.itens : [];
-      if (cardObservabilidadeItens.length === 0) {
-        f.obsCardLista.innerHTML = '<p class="dash-empty">Sem composicao para este card no periodo.</p>';
+      if (!itensDetalhe.length) {
+        f.detailList.innerHTML = '<p class="dashx-empty">Nenhum registro compoe este valor.</p>';
         return;
       }
-
-      f.obsCardLista.innerHTML = cardObservabilidadeItens.map((item, idx) => {
-        const ehContagem = !!item.eh_contagem || campoValor === 'quantidade_linhas';
-        const valorBruto = ehContagem ? Number(item[campoValor] || 0) : Number(item.valor || 0);
-        const valorFmt = ehContagem ? formatarNumeroInteiro(valorBruto) : formatarMoeda(valorBruto);
-        const detalhes = [
-          String(item.detalhe || '').trim(),
-          String(item.data || '').trim() ? `Data: ${String(item.data || '').trim()}` : ''
-        ].filter(Boolean).join(' | ');
-
-        const podeEditar = !!item.pode_editar_origem && !!item.origem_id && !!item.origem_aba;
-        const podeExcluir = !!item.pode_excluir_origem && !!item.origem_id && !!item.origem_aba;
-        const podeRemoverPagamento = !!item.pode_remover_pagamento && !!item.pagamento_id;
-
+      f.detailList.innerHTML = itensDetalhe.map((item, index) => {
+        const acoes = [
+          item.pode_editar_origem ? `<button type="button" onclick="DashboardController.editarOrigemObservabilidade(${index})">Editar origem</button>` : '',
+          item.pode_excluir_origem ? `<button type="button" onclick="DashboardController.excluirOrigemObservabilidade(${index})">Excluir origem</button>` : '',
+          item.pode_remover_pagamento ? `<button type="button" class="danger" onclick="DashboardController.removerPagamentoObservabilidade(${index})">Remover pagamento</button>` : ''
+        ].filter(Boolean).join('');
         return `
-          <div class="card card-ficha dash-obs-item">
-            <div class="card-ficha-topo dash-obs-item-topo">${escapeHtml(String(item.titulo || '-'))}</div>
-            <div class="card-ficha-corpo dash-obs-item-corpo">
-              <div class="dash-obs-item-main">
-                <div class="dash-obs-item-detalhe">${escapeHtml(detalhes || '-')}</div>
-              </div>
-              <div class="dash-obs-item-right">
-                <div class="dash-obs-item-valor">${escapeHtml(valorFmt)}</div>
-                <div class="dash-obs-item-acoes">
-                  ${podeEditar ? `<button onclick="DashboardController.editarOrigemObservabilidade(${idx})">Editar</button>` : ''}
-                  ${podeExcluir ? `<button onclick="DashboardController.excluirOrigemObservabilidade(${idx})">Excluir</button>` : ''}
-                  ${podeRemoverPagamento ? `<button onclick="DashboardController.removerPagamentoObservabilidade(${idx})">Remover pagamento</button>` : ''}
-                </div>
-              </div>
+          <article class="dashx-detail-item">
+            <div class="dashx-detail-copy">
+              <strong>${escapar(item.titulo || '-')}</strong>
+              <span>${escapar(item.detalhe || '-')}</span>
+              <time>${escapar(dataBr(item.data))}</time>
             </div>
-          </div>
+            <div class="dashx-detail-value">
+              <strong class="${Number(item.valor || 0) < 0 ? 'negative' : ''}">${moeda(item.valor)}</strong>
+              ${acoes ? `<div class="dashx-detail-actions">${acoes}</div>` : ''}
+            </div>
+          </article>
         `;
       }).join('');
     }
 
+    function abrirDetalhes(contexto, filtro = {}, options = {}) {
+      const chave = String(contexto || '').trim();
+      if (!chave) return;
+      const f = refs();
+      const referencia = referenciaAtiva();
+      const cacheKey = `${referencia}|${chave}|${JSON.stringify(filtro || {})}`;
+      const cache = cacheDetalhes[cacheKey];
+      detalheAberto = { contexto: chave, filtro: filtro || {} };
+      focoAntesDoModal = document.activeElement;
+      f.modal?.classList.remove('hidden');
+      document.body.classList.add('modal-open');
+      setTimeout(() => f.modal?.querySelector?.('.modal-close-square')?.focus?.(), 0);
+      if (cache?.data && !options.force && (Date.now() - cache.ts) <= DETAIL_CACHE_TTL_MS) {
+        renderDetalhes(cache.data);
+        return;
+      }
+      if (f.detailTitle) f.detailTitle.textContent = 'Buscando composicao';
+      if (f.detailSummary) f.detailSummary.innerHTML = '<span class="loading-inline">Carregando...</span>';
+      if (f.detailList) f.detailList.innerHTML = '<p class="dashx-empty">Consultando os registros de origem.</p>';
+      const seq = ++detailRequestSeq;
+      window.AppRequest.call('obterDetalhesDashboardExecutivoFinanceiro', [referencia, chave, filtro || {}], {
+        context: 'dashboard.detalhes',
+        errorMessage: 'Erro ao carregar a composicao'
+      }).then(payload => {
+        if (seq !== detailRequestSeq || f.modal?.classList.contains('hidden')) return;
+        cacheDetalhes[cacheKey] = { ts: Date.now(), data: payload || {} };
+        renderDetalhes(payload || {});
+      }).catch(error => {
+        if (seq !== detailRequestSeq) return;
+        if (f.detailTitle) f.detailTitle.textContent = 'Detalhes indisponiveis';
+        if (f.detailSummary) f.detailSummary.innerHTML = '';
+        if (f.detailList) f.detailList.innerHTML = `<p class="dashx-empty">${escapar(error?.message || 'Nao foi possivel carregar os registros.')}</p>`;
+        mostrarToast(error?.message || 'Erro ao carregar composicao', 'erro');
+      });
+    }
+
     function abrirObservabilidadeCard(cardKey) {
-      if (carregandoObservabilidade) {
-        window.AppDiag?.mark?.('dashboard.obs.open.skipped_loading', {
-          card_key: String(cardKey || '').trim()
-        });
-        return;
-      }
-
-      const key = String(cardKey || '').trim();
-      if (!key) return;
-      window.AppDiag?.mark?.('dashboard.obs.open.request', {
-        card_key: key
-      });
-      cardObservabilidadeAberto = key;
-
-      const f = el();
-      if (!f.modalObservabilidadeCard || !f.obsCardLista || !f.obsCardResumo || !f.obsCardTitulo) return;
-
-      f.modalObservabilidadeCard.classList.remove('hidden');
-      window.AppDiag?.mark?.('dashboard.obs.modal.opened', {
-        card_key: key
-      });
-      const referencia = String(f.mesReferencia?.value || getMesAtualISO()).trim() || getMesAtualISO();
-      const estadoCache = obterEstadoCacheComposicao(referencia, key);
-      const payloadCache = estadoCache.payloadCache;
-      const cacheFresco = estadoCache.cacheFresco;
-      const haviaCache = estadoCache.haviaCache;
-
-      if (payloadCache) {
-        renderObservabilidadeCard(payloadCache, key);
-        setModoSomenteLeitura(false);
-        window.AppDiag?.mark?.('dashboard.obs.cache.rendered', {
-          card_key: key,
-          cache_fresh: !!cacheFresco
-        });
-      }
-
-      if (haviaCache && cacheFresco) {
-        window.AppDiag?.mark?.('dashboard.obs.open.done_cache_only', {
-          card_key: key
-        });
-        return;
-      }
-
-      if (!haviaCache) {
-        f.obsCardTitulo.textContent = 'Buscando dados';
-        const loadingHtml = window.AppLoading?.inlineHtml
-          ? window.AppLoading.inlineHtml('Carregando')
-          : 'Carregando...';
-        f.obsCardResumo.innerHTML = `<span>${loadingHtml}</span>`;
-        f.obsCardLista.innerHTML = `<p class="dash-empty">${loadingHtml}</p>`;
-      }
-
-      carregandoObservabilidade = true;
-      window.AppDiag?.mark?.('dashboard.obs.rpc.start', {
-        card_key: key
-      });
-      carregarComposicaoCardRemota(referencia, key)
-        .then(data => {
-          carregandoObservabilidade = false;
-          setModoSomenteLeitura(false);
-          renderObservabilidadeCard(data, key);
-          window.AppDiag?.mark?.('dashboard.obs.rpc.success', {
-            card_key: key,
-            itens: Array.isArray(data?.itens) ? data.itens.length : 0
-          });
-        })
-        .catch(err => {
-          carregandoObservabilidade = false;
-          window.AppDiag?.mark?.('dashboard.obs.rpc.failure', {
-            card_key: key,
-            message: String(err?.message || '')
-          }, true);
-          if (haviaCache) {
-            setModoSomenteLeitura(true, 'Sem conexao com backend - exibindo cache local');
-            mostrarToast('Exibindo ultimo snapshot em cache', 'erro');
-            return;
-          }
-          f.obsCardTitulo.textContent = 'Buscando dados';
-          f.obsCardResumo.innerHTML = '<span>Falha ao carregar.</span>';
-          f.obsCardLista.innerHTML = '<p class="dash-empty">Nao foi possivel carregar os dados deste card.</p>';
-          mostrarToast(err?.message || 'Erro ao carregar composicao do card', 'erro');
-        });
+      const mapaLegado = {
+        vendas_no_mes: 'kpi_vendas',
+        recebido_vendas_mes: 'kpi_recebimentos',
+        gasto_pago_mes: 'kpi_pagamentos'
+      };
+      abrirDetalhes(mapaLegado[String(cardKey || '').trim()] || String(cardKey || '').trim(), {});
     }
 
     function fecharObservabilidadeCard() {
-      const f = el();
-      window.AppDiag?.mark?.('dashboard.obs.modal.close', {
-        card_key: String(cardObservabilidadeAberto || '').trim()
-      });
-      cardObservabilidadeAberto = '';
-      cardObservabilidadeItens = [];
-      carregandoObservabilidade = false;
-      if (f.modalObservabilidadeCard) f.modalObservabilidadeCard.classList.add('hidden');
+      detailRequestSeq += 1;
+      detalheAberto = null;
+      itensDetalhe = [];
+      const f = refs();
+      f.modal?.classList.add('hidden');
+      document.body.classList.remove('modal-open');
+      focoAntesDoModal?.focus?.();
+      focoAntesDoModal = null;
     }
 
-    function getItemObservabilidade(index) {
-      const idx = Number(index);
-      if (!isFinite(idx) || idx < 0) return null;
-      if (!Array.isArray(cardObservabilidadeItens)) return null;
-      return cardObservabilidadeItens[idx] || null;
+    function itemDetalhe(index) {
+      const indice = Number(index);
+      return Number.isInteger(indice) && indice >= 0 ? itensDetalhe[indice] || null : null;
     }
 
-    function abrirAbaEExecutarAcao(aba, callback) {
-      const destino = String(aba || '').trim();
-      if (!destino || typeof callback !== 'function') return;
-      const maxTentativas = 12;
+    function podeAlterar(contexto) {
+      if (window.AppDomainUtils?.ensureWritable) return window.AppDomainUtils.ensureWritable(contexto);
+      return window.AppRuntime?.ensureWritable?.(contexto) ?? true;
+    }
+
+    function abrirAbaEExecutar(aba, callback) {
+      if (!aba || typeof callback !== 'function') return;
       let tentativas = 0;
-
       const tentar = () => {
-        const concluido = !!callback();
-        if (concluido) return;
+        if (callback()) return;
         tentativas += 1;
-        if (tentativas >= maxTentativas) {
+        if (tentativas >= 12) {
           mostrarToast('Nao foi possivel abrir a origem agora. Tente novamente.', 'erro');
           return;
         }
         setTimeout(tentar, 140);
       };
-
-      if (typeof trocarAba === 'function') {
-        trocarAba(destino);
-      }
+      if (typeof trocarAba === 'function') trocarAba(aba);
       setTimeout(tentar, 120);
     }
 
     function editarOrigemObservabilidade(index) {
-      if (!podeAlterarDados('Edicao bloqueada em modo somente leitura')) return;
-      const item = getItemObservabilidade(index);
-      if (!item) {
-        mostrarToast('Linha de composicao nao encontrada', 'erro');
-        return;
-      }
-
-      const aba = String(item.origem_aba || '').trim();
-      const id = String(item.origem_id || '').trim();
-      if (!aba || !id) {
+      if (!podeAlterar('Edicao bloqueada em modo somente leitura')) return;
+      const item = itemDetalhe(index);
+      if (!item?.origem_aba || !item?.origem_id) {
         mostrarToast('Origem desta linha nao esta disponivel', 'erro');
         return;
       }
-
+      const aba = String(item.origem_aba);
+      const id = String(item.origem_id);
       fecharObservabilidadeCard();
-      abrirAbaEExecutarAcao(aba, () => {
-        if (aba === 'compras' && window.ComprasController?.editar) {
-          const existe = window.ComprasStore?.getById ? window.ComprasStore.getById(id) : null;
-          if (!existe) return false;
-          window.ComprasController.editar(id);
-          return true;
+      abrirAbaEExecutar(aba, () => {
+        if (aba === 'compras' && window.ComprasController?.editar && window.ComprasStore?.getById?.(id)) {
+          window.ComprasController.editar(id); return true;
         }
         if (aba === 'despesas' && window.DespesasController?.editar) {
-          const existe = window.DespesasController?.getById ? window.DespesasController.getById(id) : null;
-          if (!existe && window.DespesasController?.syncFromBackend) {
-            if (window.AppTabRefresh?.requestSync) {
-              window.AppTabRefresh.requestSync('despesas', {
-                immediate: true,
-                prefetch: true
-              });
-            } else {
-              window.DespesasController.syncFromBackend();
-            }
+          const existe = window.DespesasController?.getById?.(id);
+          if (!existe) {
+            window.AppTabRefresh?.requestSync?.('despesas', { immediate: true, prefetch: true });
             return false;
           }
-          window.DespesasController.editar(id);
-          return true;
+          window.DespesasController.editar(id); return true;
         }
-        if (aba === 'vendas' && window.VendasController?.editar) {
-          const existe = window.VendasStore?.getById ? window.VendasStore.getById(id) : null;
-          if (!existe) return false;
-          window.VendasController.editar(id);
-          return true;
+        if (aba === 'vendas' && window.VendasController?.editar && window.VendasStore?.getById?.(id)) {
+          window.VendasController.editar(id); return true;
         }
-        if (aba === 'estoque' && window.EstoqueController?.editar) {
-          const existe = window.EstoqueStore?.getById ? window.EstoqueStore.getById(id) : null;
-          if (!existe) return false;
-          window.EstoqueController.editar(id);
-          return true;
+        if (aba === 'estoque' && window.EstoqueController?.editar && window.EstoqueStore?.getById?.(id)) {
+          window.EstoqueController.editar(id); return true;
         }
         return false;
       });
     }
 
     function excluirOrigemObservabilidade(index) {
-      if (!podeAlterarDados('Exclusao bloqueada em modo somente leitura')) return;
-      const item = getItemObservabilidade(index);
-      if (!item) {
-        mostrarToast('Linha de composicao nao encontrada', 'erro');
-        return;
-      }
-
-      const aba = String(item.origem_aba || '').trim();
-      const id = String(item.origem_id || '').trim();
-      if (!aba || !id) {
+      if (!podeAlterar('Exclusao bloqueada em modo somente leitura')) return;
+      const item = itemDetalhe(index);
+      if (!item?.origem_aba || !item?.origem_id) {
         mostrarToast('Origem desta linha nao esta disponivel', 'erro');
         return;
       }
-
+      const aba = String(item.origem_aba);
+      const id = String(item.origem_id);
       fecharObservabilidadeCard();
-      abrirAbaEExecutarAcao(aba, () => {
-        if (aba === 'compras' && window.ComprasController?.excluir) {
-          const existe = window.ComprasStore?.getById ? window.ComprasStore.getById(id) : null;
-          if (!existe) return false;
-          window.ComprasController.excluir(id);
-          return true;
+      abrirAbaEExecutar(aba, () => {
+        if (aba === 'compras' && window.ComprasController?.excluir && window.ComprasStore?.getById?.(id)) {
+          window.ComprasController.excluir(id); return true;
         }
         if (aba === 'despesas' && window.DespesasController?.excluir) {
-          const existe = window.DespesasController?.getById ? window.DespesasController.getById(id) : null;
-          if (!existe && window.DespesasController?.syncFromBackend) {
-            if (window.AppTabRefresh?.requestSync) {
-              window.AppTabRefresh.requestSync('despesas', {
-                immediate: true,
-                prefetch: true
-              });
-            } else {
-              window.DespesasController.syncFromBackend();
-            }
+          const existe = window.DespesasController?.getById?.(id);
+          if (!existe) {
+            window.AppTabRefresh?.requestSync?.('despesas', { immediate: true, prefetch: true });
             return false;
           }
-          window.DespesasController.excluir(id);
-          return true;
+          window.DespesasController.excluir(id); return true;
         }
-        if (aba === 'vendas' && window.VendasController?.excluir) {
-          const existe = window.VendasStore?.getById ? window.VendasStore.getById(id) : null;
-          if (!existe) return false;
-          window.VendasController.excluir(id);
-          return true;
+        if (aba === 'vendas' && window.VendasController?.excluir && window.VendasStore?.getById?.(id)) {
+          window.VendasController.excluir(id); return true;
         }
-        if (aba === 'estoque' && window.EstoqueController?.excluir) {
-          const existe = window.EstoqueStore?.getById ? window.EstoqueStore.getById(id) : null;
-          if (!existe) return false;
-          window.EstoqueController.excluir(id);
-          return true;
+        if (aba === 'estoque' && window.EstoqueController?.excluir && window.EstoqueStore?.getById?.(id)) {
+          window.EstoqueController.excluir(id); return true;
         }
         return false;
       });
     }
 
     function removerPagamentoObservabilidade(index) {
-      if (!podeAlterarDados('Remocao de pagamento bloqueada em modo somente leitura')) return;
-      const item = getItemObservabilidade(index);
-      if (!item) {
-        mostrarToast('Linha de composicao nao encontrada', 'erro');
-        return;
-      }
-      const pagamentoId = String(item.pagamento_id || '').trim();
+      if (!podeAlterar('Remocao bloqueada em modo somente leitura')) return;
+      const item = itemDetalhe(index);
+      const pagamentoId = String(item?.pagamento_id || '').trim();
       if (!pagamentoId) {
         mostrarToast('Pagamento nao encontrado para esta linha', 'erro');
         return;
       }
       if (!confirm('Deseja remover este pagamento?')) return;
-
-      const cardAtual = String(cardObservabilidadeAberto || '').trim();
-      window.AppRequest.runner()
-        .withFailureHandler(err => {
-          mostrarToast(err?.message || 'Erro ao remover pagamento', 'erro');
-        })
-        .withSuccessHandler(ok => {
-          if (!ok) {
-            mostrarToast('Nao foi possivel remover o pagamento', 'erro');
+      const reabrir = detalheAberto ? { ...detalheAberto } : null;
+      window.AppRequest.call('removerPagamento', [pagamentoId], {
+        context: 'dashboard.remover_pagamento',
+        errorMessage: 'Erro ao remover pagamento'
+      }).then(ok => {
+        if (!ok) throw new Error('Nao foi possivel remover o pagamento');
+        invalidarCacheMeses();
+        fecharObservabilidadeCard();
+        return atualizar(true).then(resultado => {
+          if (!resultado) {
+            mostrarToast('Pagamento removido, mas o painel nao pode ser atualizado agora', 'erro');
             return;
           }
-          const concluirSync = window.AppSyncFeedback?.iniciar
-            ? window.AppSyncFeedback.iniciar('Pagamento removido. Atualizando dados...')
-            : null;
-          invalidarCacheMeses(coletarMesesImpactados(item, getMesReferenciaAtiva()));
-          if (window.AppTabRefresh?.requestSync) {
-            window.AppTabRefresh.requestSync('dashboard', {
-              delayMs: 220,
-              prefetch: true,
-              onDone: () => {
-                if (concluirSync) {
-                  concluirSync('Dados atualizados');
-                } else {
-                  mostrarToast('Dados atualizados');
-                }
-                if (cardAtual) abrirObservabilidadeCard(cardAtual);
-              }
-            });
-          } else {
-            atualizar(true, () => {
-              if (concluirSync) {
-                concluirSync('Dados atualizados');
-              } else {
-                mostrarToast('Dados atualizados');
-              }
-              if (cardAtual) abrirObservabilidadeCard(cardAtual);
-            });
-          }
-        })
-        .removerPagamento(pagamentoId);
+          mostrarToast('Pagamento removido e painel atualizado');
+          if (reabrir) abrirDetalhes(reabrir.contexto, reabrir.filtro, { force: true });
+        });
+      }).catch(error => mostrarToast(error?.message || 'Erro ao remover pagamento', 'erro'));
     }
 
-    function limparFormularioDespesa() {
-      const f = el();
-      if (f.despesaDescricao) f.despesaDescricao.value = '';
-      if (f.despesaCategoria) f.despesaCategoria.value = '';
-      if (f.despesaFornecedor) f.despesaFornecedor.value = '';
-      if (f.despesaPagoPor) f.despesaPagoPor.value = '';
-      if (f.despesaValorTotal) f.despesaValorTotal.value = '';
-      if (f.despesaDataCompetencia) f.despesaDataCompetencia.value = getHojeISO();
-      if (f.despesaDataVencimento) f.despesaDataVencimento.value = '';
-      if (f.despesaDataPagamento) f.despesaDataPagamento.value = '';
-      if (f.despesaFormaPagamento) f.despesaFormaPagamento.value = '';
-      if (f.despesaParcelas) f.despesaParcelas.value = '1';
-      if (f.despesaParcelasDetalheLista) f.despesaParcelasDetalheLista.innerHTML = '';
-      if (f.despesaParcelasDetalheWrap) f.despesaParcelasDetalheWrap.classList.add('hidden');
-      if (f.despesaFixo) f.despesaFixo.checked = false;
-      if (f.despesaObservacao) f.despesaObservacao.value = '';
-      despesaEditandoId = null;
-      handleDespesaFormaPagamentoChange();
-      setModoFormularioDespesa(false);
+    function extrairMes(valor) {
+      const match = String(valor || '').trim().match(/^(\d{4}-\d{2})(?:-\d{2})?/);
+      return match?.[1] || '';
     }
 
-    function setModoFormularioDespesa(editando) {
-      const f = el();
-      const ehEdicao = !!editando;
-      if (f.despesaFormTitulo) {
-        f.despesaFormTitulo.textContent = ehEdicao ? 'Editar despesa' : 'Nova despesa';
-      }
-      if (f.btnSalvarDespesa && !salvandoDespesa) {
-        f.btnSalvarDespesa.textContent = ehEdicao ? 'Salvar alteracoes' : 'Salvar despesa';
-      }
-    }
-
-    function preencherFormularioDespesa(item) {
-      const f = el();
-      if (!item) return;
-
-      if (f.despesaDescricao) f.despesaDescricao.value = item.descricao || '';
-      if (f.despesaCategoria) f.despesaCategoria.value = item.categoria || '';
-      if (f.despesaFornecedor) f.despesaFornecedor.value = item.fornecedor || '';
-      if (f.despesaPagoPor) f.despesaPagoPor.value = item.pago_por || '';
-      if (f.despesaValorTotal) f.despesaValorTotal.value = item.valor_total || '';
-      if (f.despesaDataCompetencia) f.despesaDataCompetencia.value = item.data_competencia || '';
-      if (f.despesaDataVencimento) f.despesaDataVencimento.value = item.data_vencimento || '';
-      if (f.despesaDataPagamento) f.despesaDataPagamento.value = item.data_pagamento || '';
-      if (f.despesaFormaPagamento) f.despesaFormaPagamento.value = item.forma_pagamento || item.forma_pagamento_padrao || '';
-      if (f.despesaParcelas) f.despesaParcelas.value = item.parcelas || '1';
-      if (f.despesaFixo) f.despesaFixo.checked = parseBooleanInput(item.fixo);
-      if (f.despesaObservacao) f.despesaObservacao.value = item.observacao || '';
-      handleDespesaFormaPagamentoChange();
-      renderParcelasDetalheDespesa(
-        Array.isArray(item.parcelas_detalhe)
-          ? item.parcelas_detalhe.map((p, idx) => ({
-            numero: idx + 1,
-            data: String(p.data_prevista || p.data || '').trim(),
-            valor: Number(p.valor_previsto ?? p.valor ?? 0)
-          }))
-          : []
-      );
-    }
-
-    function abrirFormularioDespesa() {
-      if (!podeAlterarDados('Adicao bloqueada em modo somente leitura')) return;
-      const f = el();
-      if (!f.formDespesa) return;
-      limparFormularioDespesa();
-      f.formDespesa.classList.remove('hidden');
-    }
-
-    function editarDespesa(id) {
-      if (!podeAlterarDados('Edicao bloqueada em modo somente leitura')) return;
-      const despesaId = String(id || '').trim();
-      const item = despesas.find(d => String(d.ID || '').trim() === despesaId);
-      if (!item) {
-        mostrarToast('Despesa nao encontrada', 'erro');
-        return;
-      }
-
-      despesaEditandoId = despesaId;
-      preencherFormularioDespesa(item);
-      setModoFormularioDespesa(true);
-      const f = el();
-      if (f.formDespesa) {
-        f.formDespesa.classList.remove('hidden');
-      }
-    }
-
-    function cancelarFormularioDespesa() {
-      const f = el();
-      if (!f.formDespesa) return;
-      f.formDespesa.classList.add('hidden');
-      limparFormularioDespesa();
-    }
-
-    function setSalvandoDespesa(ativo) {
-      salvandoDespesa = !!ativo;
-      const f = el();
-      if (f.btnSalvarDespesa) {
-        f.btnSalvarDespesa.disabled = salvandoDespesa;
-        if (salvandoDespesa) {
-          if (window.AppLoading?.setButtonLoading) {
-            window.AppLoading.setButtonLoading(
-              f.btnSalvarDespesa,
-              true,
-              despesaEditandoId ? 'Salvar alteracoes' : 'Salvar despesa',
-              'Salvando'
-            );
-          } else {
-            f.btnSalvarDespesa.textContent = 'Salvando...';
-          }
-        } else {
-          if (window.AppLoading?.setButtonLoading) {
-            window.AppLoading.setButtonLoading(
-              f.btnSalvarDespesa,
-              false,
-              despesaEditandoId ? 'Salvar alteracoes' : 'Salvar despesa'
-            );
-          } else {
-            f.btnSalvarDespesa.textContent = despesaEditandoId ? 'Salvar alteracoes' : 'Salvar despesa';
-          }
-        }
-      }
-    }
-
-    function salvarDespesa() {
-      if (!podeAlterarDados('Salvamento bloqueado em modo somente leitura')) return;
-      if (salvandoDespesa) return;
-      const f = el();
-
-      const descricao = String(f.despesaDescricao?.value || '').trim();
-      const categoria = String(f.despesaCategoria?.value || '').trim();
-      const valorTotal = parseNumeroInput(f.despesaValorTotal?.value);
-      if (!descricao) {
-        mostrarToast('Descricao da despesa e obrigatoria', 'erro');
-        return;
-      }
-      if (!categoria) {
-        mostrarToast('Categoria da despesa e obrigatoria', 'erro');
-        return;
-      }
-      if (!isFinite(valorTotal) || valorTotal <= 0) {
-        mostrarToast('Valor total invalido', 'erro');
-        return;
-      }
-      const formaPagamento = String(f.despesaFormaPagamento?.value || '').trim();
-      const parcelasBruto = parseNumeroInput(f.despesaParcelas?.value);
-      const parcelas = formaExigeParcelas(formaPagamento)
-        ? Math.floor(Number(parcelasBruto || 0))
-        : 1;
-      if (formaExigeParcelas(formaPagamento) && (!isFinite(parcelas) || parcelas < 1)) {
-        mostrarToast('Parcelas deve ser um numero inteiro maior ou igual a 1', 'erro');
-        return;
-      }
-      const parcelasDetalhe = formaExigeParcelas(formaPagamento)
-        ? lerParcelasDetalheDespesa()
-        : gerarParcelasPadrao(valorTotal, 1, getDataBaseParcelasDespesa());
-      if (formaExigeParcelas(formaPagamento)) {
-        if (parcelasDetalhe.length !== parcelas) {
-          mostrarToast('Revise as parcelas detalhadas', 'erro');
+    function coletarMesesImpactados() {
+      const meses = new Set();
+      const visitar = valor => {
+        if (!valor) return;
+        if (Array.isArray(valor)) { valor.forEach(visitar); return; }
+        if (typeof valor === 'string') {
+          const mes = extrairMes(valor);
+          if (mes) meses.add(mes);
           return;
         }
-        const algumaDataInvalida = parcelasDetalhe.some(p => !String(p.data || '').trim());
-        if (algumaDataInvalida) {
-          mostrarToast('Preencha a data de todas as parcelas', 'erro');
-          return;
-        }
-        const algumValorInvalido = parcelasDetalhe.some(p => Number(p.valor || 0) <= 0);
-        if (algumValorInvalido) {
-          mostrarToast('Valor de parcela deve ser maior que zero', 'erro');
-          return;
-        }
-      }
-
-      const payload = {
-        descricao,
-        categoria,
-        fornecedor: String(f.despesaFornecedor?.value || '').trim(),
-        pago_por: String(f.despesaPagoPor?.value || '').trim(),
-        valor_total: valorTotal,
-        data_competencia: String(f.despesaDataCompetencia?.value || '').trim(),
-        data_vencimento: String(f.despesaDataVencimento?.value || '').trim(),
-        data_pagamento: String(f.despesaDataPagamento?.value || '').trim(),
-        forma_pagamento: formaPagamento,
-        parcelas,
-        parcelas_detalhe: parcelasDetalhe,
-        fixo: !!f.despesaFixo?.checked,
-        observacao: String(f.despesaObservacao?.value || '').trim()
+        if (typeof valor !== 'object') return;
+        ['referencia', 'data', 'data_pagamento', 'data_venda', 'data_competencia', 'data_vencimento', 'data_prevista', 'data_prevista_termino', 'comprado_em']
+          .forEach(campo => visitar(valor[campo]));
+        visitar(valor.parcelas_detalhe);
       };
-      const despesaAnterior = despesaEditandoId ? getById(despesaEditandoId) : null;
-
-      setSalvandoDespesa(true);
-      const runner = window.AppRequest.runner()
-        .withFailureHandler(err => {
-          setSalvandoDespesa(false);
-          mostrarToast(err?.message || 'Erro ao salvar despesa', 'erro');
-        })
-        .withSuccessHandler(() => {
-          setSalvandoDespesa(false);
-          cancelarFormularioDespesa();
-          window.AppModalUI?.closeAll?.();
-          const concluirSync = window.AppSyncFeedback?.iniciar
-            ? window.AppSyncFeedback.iniciar('Despesa salva. Atualizando dados...')
-            : null;
-          invalidarCacheMeses(coletarMesesImpactados(despesaAnterior, payload));
-          if (window.AppTabRefresh?.requestSync) {
-            window.AppTabRefresh.requestSync('dashboard', {
-              delayMs: 220,
-              prefetch: true,
-              onDone: () => {
-                if (concluirSync) {
-                  concluirSync('Dados atualizados');
-                } else {
-                  mostrarToast('Dados atualizados');
-                }
-              }
-            });
-          } else {
-            atualizar(true, () => {
-              if (concluirSync) {
-                concluirSync('Dados atualizados');
-              } else {
-                mostrarToast('Dados atualizados');
-              }
-            });
-          }
-        });
-
-      if (despesaEditandoId) {
-        runner.atualizarDespesaGeral(despesaEditandoId, payload);
-      } else {
-        runner.criarDespesaGeral(payload);
-      }
+      Array.from(arguments).forEach(visitar);
+      if (!meses.size) meses.add(referenciaAtiva());
+      return Array.from(meses);
     }
 
-    function carregarDespesas(forcarRecarregar = false, onDone) {
-      const despesasCache = !forcarRecarregar ? lerDespesasCacheLocal() : null;
-      if (Array.isArray(despesasCache)) {
-        despesas = reconciliarListaDespesasComMutacoes(despesasCache);
-        renderDespesas();
-        if (typeof onDone === 'function') onDone();
-        return;
-      }
-
-      window.AppRequest.runner()
-        .withFailureHandler(() => {
-          mostrarToast('Erro ao carregar despesas gerais', 'erro');
-          if (typeof onDone === 'function') onDone();
-        })
-        .withSuccessHandler(lista => {
-          despesas = reconciliarListaDespesasComMutacoes(Array.isArray(lista) ? lista : []);
-          salvarDespesasCacheLocal(despesas);
-          renderDespesas();
-          if (typeof onDone === 'function') onDone();
-        })
-        .listarDespesasGerais(!!forcarRecarregar);
+    function invalidarCacheMeses() {
+      limparSnapshots();
+      window.AppTabRefresh?.markDirty?.('dashboard');
     }
 
-    function renderDespesas() {
-      const f = el();
-      if (!f.listaDespesas) return;
-      if (!Array.isArray(despesas) || despesas.length === 0) {
-        f.listaDespesas.innerHTML = '<p>Nenhuma despesa geral cadastrada.</p>';
-        return;
-      }
-
-      f.listaDespesas.innerHTML = despesas.map(d => {
-        const pendente = Number(d.total_pendente || 0);
-        const podePagar = pendente > 0.009;
-        const fixo = parseBooleanInput(d.fixo);
-        return `
-          <div class="card">
-            <div class="card-resumo">
-              <strong>${escapeHtml(d.descricao || '-')}</strong><br>
-              ${escapeHtml(d.categoria || 'SEM_CATEGORIA')} | ${escapeHtml(d.fornecedor || 'SEM_FORNECEDOR')} | Pago por: ${escapeHtml(d.pago_por || '-')}<br>
-              Previsto: ${formatarMoeda(d.total_previsto || 0)} | Pago: ${formatarMoeda(d.total_pago || 0)} | Pendente: ${formatarMoeda(d.total_pendente || 0)}<br>
-              Status: ${escapeHtml(d.status_pagamento || 'PENDENTE')} | Vencimento: ${escapeHtml(d.data_vencimento || '-')}<br>
-              Pagamento: ${escapeHtml(d.data_pagamento || '-')} | Forma: ${escapeHtml(d.forma_pagamento || '-')} | Parcelas: ${Number(d.parcelas || 1)} | Fixo: ${fixo ? 'SIM' : 'NAO'}
-            </div>
-            <div class="acoes">
-              <button onclick="DashboardController.editarDespesa('${escapeHtml(d.ID)}')">Editar</button>
-              ${podePagar ? `<button onclick="DashboardController.registrarPagamentoDespesa('${escapeHtml(d.ID)}')">Registrar pagamento</button>` : ''}
-              <button onclick="DashboardController.excluirDespesa('${escapeHtml(d.ID)}')">Excluir</button>
-            </div>
-          </div>
-        `;
-      }).join('');
+    function handleCardClick(cardKey) {
+      abrirObservabilidadeCard(cardKey);
     }
 
-    function excluirDespesa(id) {
-      if (!podeAlterarDados('Exclusao bloqueada em modo somente leitura')) return;
-      const despesaId = String(id || '').trim();
-      if (!despesaId) return;
-      if (!confirm('Deseja remover esta despesa geral?')) return;
-      const despesaAtual = getById(despesaId);
-
-      window.AppRequest.runner()
-        .withFailureHandler(() => {
-          mostrarToast('Erro ao remover despesa', 'erro');
-        })
-        .withSuccessHandler(() => {
-          mostrarToast('Despesa removida');
-          invalidarCacheMeses(coletarMesesImpactados(despesaAtual));
-          atualizar(true);
-        })
-        .deletarDespesaGeral(despesaId);
-    }
-
-    function setSalvandoPagamentoDespesa(ativo) {
-      salvandoPagamentoDespesa = !!ativo;
-      const f = el();
-      [f.pagDespesaData, f.pagDespesaValor, f.pagDespesaParcela, f.pagDespesaForma, f.pagDespesaObservacao, f.btnConfirmarPagDespesa]
-        .forEach(input => {
-          if (input) input.disabled = salvandoPagamentoDespesa;
-        });
-      if (f.btnConfirmarPagDespesa) {
-        if (window.AppLoading?.setButtonLoading) {
-          window.AppLoading.setButtonLoading(
-            f.btnConfirmarPagDespesa,
-            salvandoPagamentoDespesa,
-            'Confirmar pagamento',
-            'Salvando'
-          );
-        } else {
-          f.btnConfirmarPagDespesa.textContent = salvandoPagamentoDespesa
-            ? 'Salvando...'
-            : 'Confirmar pagamento';
-        }
-      }
-    }
-
-    function registrarPagamentoDespesa(id) {
-      if (!podeAlterarDados('Pagamento bloqueado em modo somente leitura')) return;
-      if (salvandoPagamentoDespesa) return;
-      const despesaId = String(id || '').trim();
-      const item = despesas.find(d => String(d.ID || '').trim() === despesaId);
-      if (!item) {
-        mostrarToast('Despesa nao encontrada', 'erro');
-        return;
-      }
-
-      const pendente = Number(item.total_pendente || 0);
-      if (pendente <= 0.009) {
-        mostrarToast('Despesa ja esta paga');
-        return;
-      }
-
-      const formas = Array.isArray(validacoes?.formasPagamento) ? validacoes.formasPagamento : [];
-      if (formas.length === 0) {
-        mostrarToast('Cadastre FORMA_PAGAMENTO na aba VALIDACAO', 'erro');
-        return;
-      }
-
-      const f = el();
-      despesaPagamentoId = despesaId;
-      if (f.pagDespesaTitulo) {
-        f.pagDespesaTitulo.textContent = `Registrar pagamento: ${item.descricao || despesaId}`;
-      }
-      if (f.pagDespesaData) f.pagDespesaData.value = item.data_pagamento || getHojeISO();
-
-      const parcelas = Array.isArray(item?.parcelas_detalhe) ? item.parcelas_detalhe : [];
-      const totalParcelas = Math.max(1, Math.floor(parseNumeroInput(item?.parcelas || 1) || 1));
-      despesaPagamentoParcelado = totalParcelas > 1;
-      const proximaParcela = parcelas.find(p => Number(p?.valor_pendente || 0) > 0.009) || null;
-
-      if (f.pagDespesaParcelaWrap && f.pagDespesaParcela) {
-        if (despesaPagamentoParcelado) {
-          if (!proximaParcela?.ID) {
-            despesaPagamentoId = null;
-            mostrarToast('Nao ha parcela pendente para esta despesa', 'erro');
-            return;
-          }
-          const numero = Number(proximaParcela.parcela_numero || 0);
-          const total = Number(proximaParcela.parcelas_total || 0);
-          const data = String(proximaParcela.data_prevista || '-').trim() || '-';
-          const valorPend = Number(proximaParcela.valor_pendente || 0);
-
-          f.pagDespesaParcela.innerHTML = '';
-          const op = document.createElement('option');
-          op.value = String(proximaParcela.ID || '').trim();
-          op.textContent = `Parcela ${numero}/${total} - ${data} - ${formatarMoeda(valorPend)}`;
-          f.pagDespesaParcela.appendChild(op);
-          f.pagDespesaParcela.value = op.value;
-          f.pagDespesaParcelaWrap.classList.remove('hidden');
-
-          if (f.pagDespesaValor) {
-            f.pagDespesaValor.value = valorPend > 0 ? valorPend.toFixed(2) : '';
-            f.pagDespesaValor.readOnly = true;
-          }
-        } else {
-          f.pagDespesaParcela.innerHTML = '<option value="">Parcela unica</option>';
-          f.pagDespesaParcela.value = '';
-          f.pagDespesaParcelaWrap.classList.add('hidden');
-          if (f.pagDespesaValor) {
-            f.pagDespesaValor.value = pendente.toFixed(2);
-            f.pagDespesaValor.readOnly = false;
-          }
-        }
-      } else if (f.pagDespesaValor) {
-        f.pagDespesaValor.value = pendente.toFixed(2);
-      }
-
-      if (f.pagDespesaForma) f.pagDespesaForma.value = item.forma_pagamento || item.forma_pagamento_padrao || '';
-      if (f.pagDespesaObservacao) f.pagDespesaObservacao.value = '';
-      if (f.modalPagamentoDespesa) f.modalPagamentoDespesa.classList.remove('hidden');
-      setSalvandoPagamentoDespesa(false);
-    }
-
-    function handleDespesaFormaPagamentoChange() {
-      const f = el();
-      if (!f.despesaFormaPagamento || !f.despesaParcelasWrap || !f.despesaParcelas) return;
-      const exibir = formaExigeParcelas(f.despesaFormaPagamento.value);
-      f.despesaParcelasWrap.classList.toggle('hidden', !exibir);
-      if (!exibir) {
-        f.despesaParcelas.value = '1';
-      } else if (!String(f.despesaParcelas.value || '').trim() || Number(f.despesaParcelas.value) < 1) {
-        f.despesaParcelas.value = '1';
-      }
-      renderParcelasDetalheDespesa();
-    }
-
-    function handleDespesaParcelasDetalheChange() {
-      renderParcelasDetalheDespesa();
-    }
-
-    function confirmarPagamentoDespesa() {
-      if (!podeAlterarDados('Pagamento bloqueado em modo somente leitura')) return;
-      if (salvandoPagamentoDespesa) return;
-      if (!despesaPagamentoId) {
-        mostrarToast('Despesa nao selecionada', 'erro');
-        return;
-      }
-
-      const f = el();
-      const dataPagamento = String(f.pagDespesaData?.value || '').trim();
-      const valorPago = parseNumeroInput(f.pagDespesaValor?.value);
-      const formaPagamento = String(f.pagDespesaForma?.value || '').trim();
-      const observacao = String(f.pagDespesaObservacao?.value || '').trim();
-
-      if (!dataPagamento) {
-        mostrarToast('Data de pagamento e obrigatoria', 'erro');
-        return;
-      }
-      if (!formaPagamento) {
-        mostrarToast('Forma de pagamento e obrigatoria', 'erro');
-        return;
-      }
-      if (despesaPagamentoParcelado && !String(f.pagDespesaParcela?.value || '').trim()) {
-        mostrarToast('Selecione a parcela pendente', 'erro');
-        return;
-      }
-      if (!isFinite(valorPago) || valorPago <= 0) {
-        mostrarToast('Valor pago invalido', 'erro');
-        return;
-      }
-      const despesaAtual = getById(despesaPagamentoId);
-
-      setSalvandoPagamentoDespesa(true);
-      window.AppRequest.runner()
-        .withFailureHandler(err => {
-          setSalvandoPagamentoDespesa(false);
-          mostrarToast(err?.message || 'Erro ao registrar pagamento', 'erro');
-        })
-        .withSuccessHandler(() => {
-          setSalvandoPagamentoDespesa(false);
-          cancelarPagamentoDespesa();
-          window.AppModalUI?.closeAll?.();
-          const concluirSync = window.AppSyncFeedback?.iniciar
-            ? window.AppSyncFeedback.iniciar('Pagamento registrado. Atualizando dados...')
-            : null;
-          invalidarCacheMeses(coletarMesesImpactados(despesaAtual, {
-            data_pagamento: dataPagamento
-          }));
-          if (window.AppTabRefresh?.requestSync) {
-            window.AppTabRefresh.requestSync('dashboard', {
-              delayMs: 220,
-              prefetch: true,
-              onDone: () => {
-                if (concluirSync) {
-                  concluirSync('Dados atualizados');
-                } else {
-                  mostrarToast('Dados atualizados');
-                }
-              }
-            });
-          } else {
-            atualizar(true, () => {
-              if (concluirSync) {
-                concluirSync('Dados atualizados');
-              } else {
-                mostrarToast('Dados atualizados');
-              }
-            });
-          }
-        })
-        .registrarPagamentoDespesaGeral(despesaPagamentoId, {
-          data_pagamento: dataPagamento,
-          valor_pago: valorPago,
-          parcela_alvo_id: despesaPagamentoParcelado ? String(f.pagDespesaParcela?.value || '').trim() : '',
-          forma_pagamento: formaPagamento,
-          observacao
-        });
-    }
-
-    function cancelarPagamentoDespesa() {
-      despesaPagamentoId = null;
-      despesaPagamentoParcelado = false;
-      setSalvandoPagamentoDespesa(false);
-      const f = el();
-      if (f.pagDespesaValor) f.pagDespesaValor.readOnly = false;
-      if (f.pagDespesaParcelaWrap) f.pagDespesaParcelaWrap.classList.add('hidden');
-      if (f.pagDespesaParcela) f.pagDespesaParcela.innerHTML = '<option value="">Selecione</option>';
-      if (f.modalPagamentoDespesa) {
-        f.modalPagamentoDespesa.classList.add('hidden');
-      }
+    function handleCardKeydown(event, cardKey) {
+      if (event?.key !== 'Enter' && event?.key !== ' ') return;
+      event.preventDefault();
+      abrirObservabilidadeCard(cardKey);
     }
 
     return {
@@ -2265,24 +667,14 @@
       atualizar,
       invalidarCacheMeses,
       coletarMesesImpactados,
-      handleCardClick,
-      handleCardKeydown,
+      abrirDetalhes,
       abrirObservabilidadeCard,
       fecharObservabilidadeCard,
       editarOrigemObservabilidade,
       excluirOrigemObservabilidade,
       removerPagamentoObservabilidade,
-      toggleDespesas,
-      abrirFormularioDespesa,
-      cancelarFormularioDespesa,
-      editarDespesa,
-      salvarDespesa,
-      excluirDespesa,
-      registrarPagamentoDespesa,
-      confirmarPagamentoDespesa,
-      cancelarPagamentoDespesa,
-      handleDespesaFormaPagamentoChange,
-      handleDespesaParcelasDetalheChange
+      handleCardClick,
+      handleCardKeydown
     };
   })();
 </script>

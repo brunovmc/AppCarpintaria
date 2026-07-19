@@ -1,0 +1,422 @@
+<script>
+  window.DashboardCharts = (() => {
+    const GOOGLE_CHARTS_URL = 'https://www.gstatic.com/charts/loader.js';
+    const CORES = {
+      recebimentos: '#167d68',
+      pagamentos: '#c9564a',
+      vendas: '#326f8f',
+      fluxo: '#233746',
+      media: '#c38a2d',
+      projecao: '#755aa8',
+      neutra: '#77909d'
+    };
+    let loaderPromise = null;
+    let ultimoPayload = null;
+    let ultimosCallbacks = null;
+    let resizeObserver = null;
+    let resizeTimer = null;
+    let renderToken = 0;
+    const instancias = {};
+
+    function escapar(valor) {
+      return String(valor ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    function moeda(valor) {
+      return Number(valor || 0).toLocaleString('pt-BR', {
+        style: 'currency',
+        currency: 'BRL',
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+      });
+    }
+
+    function percentual(valor) {
+      return `${Number(valor || 0).toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%`;
+    }
+
+    function dataCurta(valor) {
+      const texto = String(valor || '').trim();
+      const match = texto.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      return match ? `${match[3]}/${match[2]}` : texto;
+    }
+
+    function mesCurto(valor) {
+      const texto = String(valor || '').trim();
+      const match = texto.match(/^(\d{4})-(\d{2})$/);
+      if (!match) return texto;
+      const nomes = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
+      return `${nomes[Number(match[2]) - 1]}/${match[1].slice(2)}`;
+    }
+
+    function obterElemento(id) {
+      return document.getElementById(id);
+    }
+
+    function preencherTabela(detailsId, linhasHtml) {
+      const details = obterElemento(detailsId);
+      const tbody = details?.querySelector('tbody');
+      if (!tbody) return;
+      tbody.innerHTML = linhasHtml || '<tr><td colspan="6" class="dashx-table-empty">Nenhum valor para o periodo.</td></tr>';
+    }
+
+    function marcarFalhaGrafico(id, mensagem) {
+      const el = obterElemento(id);
+      if (el) {
+        el.classList.add('dashx-chart-failed');
+        el.innerHTML = `<div class="dashx-chart-message"><strong>Grafico indisponivel</strong><span>${escapar(mensagem || 'Consulte os dados abaixo.')}</span></div>`;
+      }
+      const details = el?.nextElementSibling?.tagName === 'DETAILS'
+        ? el.nextElementSibling
+        : el?.closest?.('.dashx-panel')?.querySelector?.('.dashx-data-details');
+      if (details?.tagName === 'DETAILS') details.open = true;
+    }
+
+    function carregarGoogleCharts() {
+      if (window.google?.visualization && window.google?.charts) return Promise.resolve(window.google);
+      if (loaderPromise) return loaderPromise;
+      loaderPromise = new Promise((resolve, reject) => {
+        const concluirCarga = () => {
+          if (!window.google?.charts) {
+            reject(new Error('Biblioteca de graficos nao inicializada.'));
+            return;
+          }
+          window.google.charts.load('current', { packages: ['corechart'], language: 'pt-BR' });
+          window.google.charts.setOnLoadCallback(() => {
+            if (window.google?.visualization) resolve(window.google);
+            else reject(new Error('Componentes de graficos indisponiveis.'));
+          });
+        };
+
+        const existente = document.querySelector(`script[src="${GOOGLE_CHARTS_URL}"]`);
+        if (existente) {
+          if (window.google?.charts) concluirCarga();
+          else {
+            existente.addEventListener('load', concluirCarga, { once: true });
+            existente.addEventListener('error', () => reject(new Error('Falha ao carregar Google Charts.')), { once: true });
+          }
+          return;
+        }
+
+        const script = document.createElement('script');
+        script.src = GOOGLE_CHARTS_URL;
+        script.async = true;
+        script.onload = concluirCarga;
+        script.onerror = () => reject(new Error('Falha ao carregar Google Charts.'));
+        document.head.appendChild(script);
+      }).catch(error => {
+        loaderPromise = null;
+        throw error;
+      });
+      return loaderPromise;
+    }
+
+    function opcoesBase(extra) {
+      return {
+        backgroundColor: 'transparent',
+        fontName: 'Source Sans 3',
+        chartArea: { left: 72, top: 34, right: 28, bottom: 54, width: '80%', height: '74%' },
+        legend: { position: 'top', alignment: 'start', textStyle: { color: '#536773', fontSize: 12 } },
+        tooltip: { isHtml: true, textStyle: { fontName: 'Source Sans 3' } },
+        hAxis: {
+          textStyle: { color: '#657985', fontSize: 11 },
+          gridlines: { color: '#e7edef' },
+          minorGridlines: { color: 'transparent' },
+          baselineColor: '#aebcc3'
+        },
+        vAxis: {
+          textStyle: { color: '#657985', fontSize: 11 },
+          gridlines: { color: '#e7edef' },
+          minorGridlines: { color: 'transparent' },
+          baselineColor: '#aebcc3'
+        },
+        animation: { startup: true, duration: 360, easing: 'out' },
+        focusTarget: 'category',
+        ...extra
+      };
+    }
+
+    function formatarColunasMoeda(data, colunas) {
+      const formato = new google.visualization.NumberFormat({
+        prefix: 'R$ ',
+        decimalSymbol: ',',
+        groupingSymbol: '.',
+        fractionDigits: 2
+      });
+      colunas.forEach(coluna => formato.format(data, coluna));
+    }
+
+    function desenhar(id, TipoGrafico, data, opcoes, onSelect) {
+      const container = obterElemento(id);
+      if (!container) return;
+      container.classList.remove('dashx-chart-failed');
+      container.innerHTML = '';
+      const chart = new TipoGrafico(container);
+      instancias[id] = chart;
+      if (typeof onSelect === 'function') {
+        google.visualization.events.addListener(chart, 'select', () => {
+          const selecao = chart.getSelection();
+          if (!selecao?.length || selecao[0].row === null) return;
+          onSelect(selecao[0], data);
+        });
+      }
+      google.visualization.events.addListener(chart, 'error', evento => {
+        marcarFalhaGrafico(id, evento?.message || 'Consulte os dados abaixo.');
+      });
+      chart.draw(data, opcoes);
+    }
+
+    function desenharHistorico(payload, callbacks) {
+      const lista = Array.isArray(payload?.historico_12_meses) ? payload.historico_12_meses : [];
+      preencherTabela('dashFallbackHistory', lista.map(item => `
+        <tr><td>${escapar(mesCurto(item.mes))}</td><td>${moeda(item.vendas)}</td><td>${moeda(item.recebimentos)}</td><td>${moeda(item.pagamentos)}</td><td>${moeda(item.fluxo_liquido)}</td><td>${moeda(item.media_movel_3)}</td></tr>
+      `).join(''));
+      if (!lista.some(item => Number(item.recebimentos || 0) !== 0 || Number(item.pagamentos || 0) !== 0)) {
+        marcarFalhaGrafico('dashChartHistory', 'Nenhum recebimento ou pagamento realizado no intervalo.');
+        return;
+      }
+      const data = new google.visualization.DataTable();
+      data.addColumn('string', 'Mes');
+      data.addColumn('number', 'Recebimentos');
+      data.addColumn('number', 'Pagamentos');
+      data.addColumn('number', 'Fluxo liquido');
+      data.addColumn('number', 'Media movel (3 meses)');
+      data.addRows(lista.map(item => [
+        mesCurto(item.mes), Number(item.recebimentos || 0),
+        Number(item.pagamentos || 0), Number(item.fluxo_liquido || 0), Number(item.media_movel_3 || 0)
+      ]));
+      formatarColunasMoeda(data, [1, 2, 3, 4]);
+      const series = ['mes', 'recebimentos', 'pagamentos', 'fluxo', 'media'];
+      desenhar('dashChartHistory', google.visualization.ComboChart, data, opcoesBase({
+        colors: [CORES.recebimentos, CORES.pagamentos, CORES.fluxo, CORES.media],
+        seriesType: 'bars',
+        series: {
+          2: { type: 'line', lineWidth: 3, pointSize: 4 },
+          3: { type: 'line', lineWidth: 2, lineDashStyle: [5, 3], pointSize: 2 }
+        },
+        bar: { groupWidth: '64%' },
+        vAxis: { format: 'short', gridlines: { color: '#e7edef' }, baseline: 0, baselineColor: '#7d9099' }
+      }), selecao => callbacks?.onSelect?.('historico_mes', {
+        mes: lista[selecao.row]?.mes,
+        serie: series[selecao.column] || 'fluxo',
+        janela: Math.min(3, selecao.row + 1)
+      }));
+    }
+
+    function desenharProjecao(payload, callbacks) {
+      const lista = Array.isArray(payload?.projecao_13_semanas) ? payload.projecao_13_semanas : [];
+      preencherTabela('dashFallbackForecast', lista.map(item => `
+        <tr><td>${dataCurta(item.inicio)} a ${dataCurta(item.fim)}</td><td>${moeda(item.recebimentos)}</td><td>${moeda(item.pagamentos)}</td><td>${moeda(item.liquido)}</td><td>${moeda(item.acumulado)}</td></tr>
+      `).join(''));
+      if (!lista.some(item => Number(item.recebimentos || 0) > 0 || Number(item.pagamentos || 0) > 0)) {
+        marcarFalhaGrafico('dashChartForecast', 'Nenhuma parcela futura encontrada.');
+        return;
+      }
+      const data = new google.visualization.DataTable();
+      data.addColumn('string', 'Semana');
+      data.addColumn('number', 'A receber');
+      data.addColumn('number', 'A pagar');
+      data.addColumn('number', 'Liquido semanal');
+      data.addColumn('number', 'Acumulado projetado');
+      data.addRows(lista.map((item, indice) => [
+        `S${indice + 1}`, Number(item.recebimentos || 0), Number(item.pagamentos || 0),
+        Number(item.liquido || 0), Number(item.acumulado || 0)
+      ]));
+      formatarColunasMoeda(data, [1, 2, 3, 4]);
+      const naturezas = ['', 'RECEBER', 'PAGAR', '', ''];
+      desenhar('dashChartForecast', google.visualization.ComboChart, data, opcoesBase({
+        colors: [CORES.recebimentos, CORES.pagamentos, CORES.neutra, CORES.projecao],
+        seriesType: 'bars',
+        series: {
+          2: { type: 'line', lineWidth: 2, lineDashStyle: [4, 3], pointSize: 3 },
+          3: { type: 'line', lineWidth: 3, pointSize: 4 }
+        },
+        bar: { groupWidth: '66%' },
+        vAxis: { format: 'short', gridlines: { color: '#e7edef' }, baseline: 0, baselineColor: '#7d9099' }
+      }), selecao => {
+        const item = lista[selecao.row] || {};
+        callbacks?.onSelect?.('projecao_semana', {
+          inicio: item.inicio,
+          fim: item.fim,
+          natureza: naturezas[selecao.column] || '',
+          acumulado: selecao.column === 4,
+          label: `S${selecao.row + 1} (${dataCurta(item.inicio)} a ${dataCurta(item.fim)})`
+        });
+      });
+    }
+
+    function desenharAging(payload, callbacks) {
+      const lista = Array.isArray(payload?.posicao?.aging) ? payload.posicao.aging : [];
+      preencherTabela('dashFallbackAging', lista.map(item => `
+        <tr><td>${escapar(item.label)}</td><td>${moeda(item.receber)}</td><td>${moeda(item.pagar)}</td></tr>
+      `).join(''));
+      if (!lista.some(item => Number(item.receber || 0) > 0 || Number(item.pagar || 0) > 0)) {
+        marcarFalhaGrafico('dashChartAging', 'Nenhuma conta em aberto.');
+        return;
+      }
+      const data = new google.visualization.DataTable();
+      data.addColumn('string', 'Faixa');
+      data.addColumn('number', 'A receber');
+      data.addColumn('number', 'A pagar');
+      data.addRows(lista.map(item => [item.label, Number(item.receber || 0), Number(item.pagar || 0)]));
+      formatarColunasMoeda(data, [1, 2]);
+      desenhar('dashChartAging', google.visualization.BarChart, data, opcoesBase({
+        colors: [CORES.recebimentos, CORES.pagamentos],
+        chartArea: { left: 112, top: 34, right: 30, bottom: 45, width: '76%', height: '76%' },
+        hAxis: { format: 'short', minValue: 0, gridlines: { color: '#e7edef' } },
+        vAxis: { textStyle: { color: '#536773', fontSize: 12 } },
+        bar: { groupWidth: '68%' }
+      }), selecao => callbacks?.onSelect?.('aging', {
+        bucket: lista[selecao.row]?.id,
+        label: lista[selecao.row]?.label,
+        natureza: selecao.column === 2 ? 'PAGAR' : 'RECEBER'
+      }));
+    }
+
+    function desenharRanking(id, detailsId, lista, cabecalho, cor, contexto, callbacks) {
+      const segura = Array.isArray(lista) ? lista : [];
+      preencherTabela(detailsId, segura.map(item => `
+        <tr><td>${escapar(item.label)}</td><td>${moeda(item.valor)}</td><td>${percentual(item.percentual)}</td></tr>
+      `).join(''));
+      if (!segura.length) {
+        marcarFalhaGrafico(id, 'Nenhum valor para o periodo selecionado.');
+        return;
+      }
+      const data = new google.visualization.DataTable();
+      data.addColumn('string', cabecalho);
+      data.addColumn('number', 'Valor');
+      data.addRows(segura.map(item => [item.label, Number(item.valor || 0)]));
+      formatarColunasMoeda(data, [1]);
+      desenhar(id, google.visualization.BarChart, data, opcoesBase({
+        colors: [cor],
+        legend: { position: 'none' },
+        chartArea: { left: 122, top: 20, right: 24, bottom: 42, width: '73%', height: '80%' },
+        hAxis: { format: 'short', minValue: 0, gridlines: { color: '#e7edef' } },
+        vAxis: { textStyle: { color: '#536773', fontSize: 12 } },
+        bar: { groupWidth: '62%' }
+      }), selecao => callbacks?.onSelect?.(contexto, segura[selecao.row] || {}));
+    }
+
+    function desenharSocios(payload, callbacks) {
+      const lista = Array.isArray(payload?.socios?.itens) ? payload.socios.itens : [];
+      const centro = obterElemento('dashPartnersCenter');
+      preencherTabela('dashFallbackPartners', lista.map(item => `
+        <tr><td>${escapar(item.label)}</td><td>${moeda(item.valor)}</td><td>${percentual(item.percentual)}</td></tr>
+      `).join(''));
+      if (!lista.some(item => Number(item.valor || 0) > 0)) {
+        centro?.classList.add('hidden');
+        marcarFalhaGrafico('dashChartPartners', 'Nenhum pagamento atribuido no periodo.');
+        return;
+      }
+      centro?.classList.remove('hidden');
+      const data = new google.visualization.DataTable();
+      data.addColumn('string', 'Responsavel');
+      data.addColumn('number', 'Valor');
+      data.addRows(lista.map(item => [item.label, Number(item.valor || 0)]));
+      formatarColunasMoeda(data, [1]);
+      desenhar('dashChartPartners', google.visualization.PieChart, data, {
+        backgroundColor: 'transparent',
+        fontName: 'Source Sans 3',
+        pieHole: 0.62,
+        pieSliceText: 'none',
+        legend: { position: 'right', textStyle: { color: '#536773', fontSize: 13 } },
+        chartArea: { left: 10, top: 10, width: '92%', height: '90%' },
+        colors: ['#326f8f', '#c38a2d', '#755aa8'],
+        tooltip: { isHtml: true },
+        sliceVisibilityThreshold: 0
+      }, selecao => callbacks?.onSelect?.('socio', {
+        socio: lista[selecao.row]?.id,
+        label: lista[selecao.row]?.label
+      }));
+    }
+
+    function observarRedimensionamento() {
+      if (resizeObserver || typeof ResizeObserver !== 'function') return;
+      const raiz = obterElemento('dashboardExecutive');
+      if (!raiz) return;
+      let larguraAnterior = raiz.clientWidth;
+      resizeObserver = new ResizeObserver(entries => {
+        const largura = entries[0]?.contentRect?.width || raiz.clientWidth;
+        if (Math.abs(largura - larguraAnterior) < 16) return;
+        larguraAnterior = largura;
+        clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(() => {
+          if (ultimoPayload) renderAll(ultimoPayload, ultimosCallbacks, { resize: true });
+        }, 180);
+      });
+      resizeObserver.observe(raiz);
+    }
+
+    function preencherFallbacks(payload) {
+      const historico = Array.isArray(payload?.historico_12_meses) ? payload.historico_12_meses : [];
+      preencherTabela('dashFallbackHistory', historico.map(item => `
+        <tr><td>${escapar(mesCurto(item.mes))}</td><td>${moeda(item.vendas)}</td><td>${moeda(item.recebimentos)}</td><td>${moeda(item.pagamentos)}</td><td>${moeda(item.fluxo_liquido)}</td><td>${moeda(item.media_movel_3)}</td></tr>
+      `).join(''));
+      const projecao = Array.isArray(payload?.projecao_13_semanas) ? payload.projecao_13_semanas : [];
+      preencherTabela('dashFallbackForecast', projecao.map(item => `
+        <tr><td>${dataCurta(item.inicio)} a ${dataCurta(item.fim)}</td><td>${moeda(item.recebimentos)}</td><td>${moeda(item.pagamentos)}</td><td>${moeda(item.liquido)}</td><td>${moeda(item.acumulado)}</td></tr>
+      `).join(''));
+      const aging = Array.isArray(payload?.posicao?.aging) ? payload.posicao.aging : [];
+      preencherTabela('dashFallbackAging', aging.map(item => `
+        <tr><td>${escapar(item.label)}</td><td>${moeda(item.receber)}</td><td>${moeda(item.pagar)}</td></tr>
+      `).join(''));
+      const rankings = [
+        ['dashFallbackExpenses', payload?.direcionadores?.gastos_categoria],
+        ['dashFallbackSales', payload?.direcionadores?.vendas_produto],
+        ['dashFallbackCapital', payload?.capital?.estoque_por_tipo],
+        ['dashFallbackPartners', payload?.socios?.itens]
+      ];
+      rankings.forEach(([id, listaInput]) => {
+        const lista = Array.isArray(listaInput) ? listaInput : [];
+        preencherTabela(id, lista.map(item => `
+          <tr><td>${escapar(item.label)}</td><td>${moeda(item.valor)}</td><td>${percentual(item.percentual)}</td></tr>
+        `).join(''));
+      });
+    }
+
+    function renderAll(payload, callbacks, options = {}) {
+      ultimoPayload = payload || {};
+      ultimosCallbacks = callbacks || {};
+      preencherFallbacks(ultimoPayload);
+      const token = ++renderToken;
+      return carregarGoogleCharts()
+        .then(() => {
+          if (token !== renderToken) return;
+          desenharHistorico(ultimoPayload, ultimosCallbacks);
+          desenharProjecao(ultimoPayload, ultimosCallbacks);
+          desenharAging(ultimoPayload, ultimosCallbacks);
+          desenharRanking('dashChartExpenses', 'dashFallbackExpenses', ultimoPayload?.direcionadores?.gastos_categoria, 'Categoria', CORES.pagamentos, 'gasto_categoria', ultimosCallbacks);
+          desenharRanking('dashChartSales', 'dashFallbackSales', ultimoPayload?.direcionadores?.vendas_produto, 'Produto', CORES.vendas, 'venda_produto', ultimosCallbacks);
+          desenharRanking('dashChartCapital', 'dashFallbackCapital', ultimoPayload?.capital?.estoque_por_tipo, 'Tipo', CORES.neutra, 'capital_tipo', ultimosCallbacks);
+          desenharSocios(ultimoPayload, ultimosCallbacks);
+          observarRedimensionamento();
+          return true;
+        })
+        .catch(error => {
+          if (!options.resize) {
+            obterElemento('dashPartnersCenter')?.classList.add('hidden');
+            ['dashChartHistory', 'dashChartForecast', 'dashChartAging', 'dashChartExpenses', 'dashChartSales', 'dashChartCapital', 'dashChartPartners']
+              .forEach(id => marcarFalhaGrafico(id, error?.message || 'Consulte os dados abaixo.'));
+          }
+          return false;
+        });
+    }
+
+    function destroy() {
+      renderToken += 1;
+      ultimoPayload = null;
+      ultimosCallbacks = null;
+      clearTimeout(resizeTimer);
+      if (resizeObserver) resizeObserver.disconnect();
+      resizeObserver = null;
+      Object.keys(instancias).forEach(id => delete instancias[id]);
+    }
+
+    return { renderAll, destroy };
+  })();
+</script>
