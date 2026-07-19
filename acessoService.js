@@ -139,7 +139,9 @@ function carregarUsuariosAcessoConfig(forcarRecarregar) {
 
 function obterEmailUsuarioAtualAcesso() {
   try {
-    return normalizarEmailAcesso(Session.getActiveUser().getEmail());
+    const emailAtivo = normalizarEmailAcesso(Session.getActiveUser().getEmail());
+    if (emailAtivo) return emailAtivo;
+    return normalizarEmailAcesso(Session.getEffectiveUser().getEmail());
   } catch (error) {
     return '';
   }

@@ -7,6 +7,7 @@
     let inboxDespesas = [];
     let carregandoInboxDespesas = false;
     let processandoComprovanteDespesa = false;
+    let importandoComprovantesDrive = false;
     let inboxDespesasExpandida = false;
     let inboxDespesasEstadoInicialDefinido = false;
     const inboxDespesasBusyIds = new Set();
@@ -64,6 +65,7 @@
         inputComprovanteDespesa: document.getElementById('inputComprovanteDespesa'),
         btnUploadComprovanteDespesa: document.getElementById('btnUploadComprovanteDespesa'),
         btnToggleInboxDespesas: document.getElementById('btnToggleInboxDespesas'),
+        btnBuscarComprovantesDrive: document.getElementById('btnBuscarComprovantesDrive'),
         btnAtualizarInboxDespesas: document.getElementById('btnAtualizarInboxDespesas'),
         formDespesa: document.getElementById('formularioDespesaGeral'),
         despesaFormTitulo: document.getElementById('despesaFormTitulo'),
@@ -963,7 +965,7 @@
       carregandoInboxDespesas = !!ativo;
       const f = el();
       if (f.btnAtualizarInboxDespesas) {
-        f.btnAtualizarInboxDespesas.disabled = carregandoInboxDespesas || processandoComprovanteDespesa;
+        f.btnAtualizarInboxDespesas.disabled = carregandoInboxDespesas || processandoComprovanteDespesa || importandoComprovantesDrive;
         if (window.AppLoading?.setButtonLoading) {
           window.AppLoading.setButtonLoading(
             f.btnAtualizarInboxDespesas,
@@ -977,10 +979,32 @@
       }
     }
 
+    function setImportandoComprovantesDrive(ativo) {
+      importandoComprovantesDrive = !!ativo;
+      const f = el();
+      [f.inputComprovanteDespesa, f.btnUploadComprovanteDespesa].forEach(input => {
+        if (input) input.disabled = importandoComprovantesDrive || processandoComprovanteDespesa;
+      });
+      if (f.btnBuscarComprovantesDrive) {
+        f.btnBuscarComprovantesDrive.disabled = importandoComprovantesDrive || processandoComprovanteDespesa;
+        if (window.AppLoading?.setButtonLoading) {
+          window.AppLoading.setButtonLoading(
+            f.btnBuscarComprovantesDrive,
+            importandoComprovantesDrive,
+            'Buscar no Drive',
+            'Buscando'
+          );
+        } else {
+          f.btnBuscarComprovantesDrive.textContent = importandoComprovantesDrive ? 'Buscando...' : 'Buscar no Drive';
+        }
+      }
+      setCarregandoInboxDespesas(carregandoInboxDespesas);
+    }
+
     function setProcessandoComprovanteDespesa(ativo) {
       processandoComprovanteDespesa = !!ativo;
       const f = el();
-      [f.inputComprovanteDespesa, f.btnUploadComprovanteDespesa, f.btnAtualizarInboxDespesas].forEach(input => {
+      [f.inputComprovanteDespesa, f.btnUploadComprovanteDespesa, f.btnAtualizarInboxDespesas, f.btnBuscarComprovantesDrive].forEach(input => {
         if (input) input.disabled = processandoComprovanteDespesa;
       });
       if (f.btnUploadComprovanteDespesa) {
@@ -1015,6 +1039,9 @@
       }
       if (f.btnAtualizarInboxDespesas) {
         f.btnAtualizarInboxDespesas.addEventListener('click', () => carregarInboxDespesas());
+      }
+      if (f.btnBuscarComprovantesDrive) {
+        f.btnBuscarComprovantesDrive.addEventListener('click', importarComprovantesDoDrive);
       }
       if (f.btnToggleInboxDespesas) {
         f.btnToggleInboxDespesas.addEventListener('click', () => {
@@ -1198,6 +1225,33 @@
           if (typeof onDone === 'function') onDone();
           return [];
         });
+    }
+
+    function importarComprovantesDoDrive() {
+      if (!podeAlterarDados('Importacao bloqueada em modo somente leitura')) return;
+      if (importandoComprovantesDrive || !window.AppRequest?.call) return;
+      setImportandoComprovantesDrive(true);
+      setInboxDespesasExpandida(true);
+      setInboxStatus('Buscando novos comprovantes no Drive...', 'info');
+      window.AppRequest.call('importarComprovantesDriveParaInbox', [5, getAmbienteBancoAtivoInbox()], {
+        context: 'despesas.inbox.drive.import',
+        errorMessage: 'Erro ao buscar comprovantes no Drive'
+      })
+        .then(resultado => {
+          const adicionados = Number(resultado?.adicionados || 0);
+          const erros = Number(resultado?.erros || 0);
+          const ignorados = Number(resultado?.ignorados || 0);
+          const partes = [`${adicionados} novo(s)`];
+          if (ignorados) partes.push(`${ignorados} ja importado(s)`);
+          if (erros) partes.push(`${erros} com erro`);
+          mostrarToast(`Busca concluida: ${partes.join(', ')}.`, erros ? 'erro' : 'sucesso');
+          return carregarInboxDespesas();
+        })
+        .catch(error => {
+          mostrarToast(error?.message || 'Erro ao buscar comprovantes no Drive', 'erro');
+          setInboxStatus(error?.message || 'Erro ao buscar comprovantes no Drive', 'erro');
+        })
+        .finally(() => setImportandoComprovantesDrive(false));
     }
 
     function montarOptionsInboxDespesa(valores, atual, placeholder = 'Selecione', incluirAtual = true) {

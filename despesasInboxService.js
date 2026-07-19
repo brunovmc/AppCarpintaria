@@ -90,7 +90,11 @@ function processarComprovanteDespesaUploadNoAmbienteAtual_(payload) {
   };
 
   try {
-    const extraido = extrairDespesaComOpenAI_(upload.dataUrl);
+    const extraido = extrairDespesaComOpenAI_({
+      dataUrl: upload.dataUrl,
+      mime: upload.mime,
+      nome: upload.nome
+    });
     const rascunho = normalizarDespesaExtraidaInbox_(extraido);
     const alertas = [
       ...rascunho.alertas,
@@ -208,6 +212,9 @@ function confirmarInboxDespesaNoAmbienteAtual_(id, payloadOverride) {
         })
       };
       registrarDiagnosticoConfirmacaoInbox_('sucesso_reutilizado', respostaExistente.diagnostico_confirmacao);
+      if (typeof moverArquivoInboxDriveAposConfirmacao_ === 'function') {
+        moverArquivoInboxDriveAposConfirmacao_(item);
+      }
       return respostaExistente;
     }
 
@@ -251,6 +258,10 @@ function confirmarInboxDespesaNoAmbienteAtual_(id, payloadOverride) {
       atualizado_em: agoraAtual,
       confirmado_em: agoraAtual
     }, INBOX_DESPESAS_SCHEMA);
+
+    if (typeof moverArquivoInboxDriveAposConfirmacao_ === 'function') {
+      moverArquivoInboxDriveAposConfirmacao_(item);
+    }
 
     const resposta = {
       ok: true,
@@ -355,6 +366,10 @@ function descartarInboxDespesaNoAmbienteAtual_(id) {
     atualizado_em: agoraAtual,
     descartado_em: agoraAtual
   }, INBOX_DESPESAS_SCHEMA);
+
+  if (typeof moverArquivoInboxDriveAposDescarte_ === 'function') {
+    moverArquivoInboxDriveAposDescarte_(item);
+  }
 
   return {
     ok: true,
@@ -721,10 +736,22 @@ function getSalvarArquivoInboxDespesas_() {
   return valor === 'true' || valor === '1' || valor === 'sim' || valor === 'yes';
 }
 
-function extrairDespesaComOpenAI_(dataUrl) {
+function extrairDespesaComOpenAI_(arquivoEntrada) {
   const apiKey = getOpenAIComprovantesApiKey_();
   const model = getOpenAIComprovantesModel_();
   const reasoning = getOpenAIComprovantesReasoning_(model);
+  const arquivo = normalizarArquivoOpenAIInboxDespesa_(arquivoEntrada);
+  const conteudoArquivo = arquivo.mime === 'application/pdf'
+    ? {
+        type: 'input_file',
+        filename: arquivo.nome || 'comprovante.pdf',
+        file_data: `data:${arquivo.mime};base64,${arquivo.base64}`
+      }
+    : {
+        type: 'input_image',
+        image_url: arquivo.dataUrl,
+        detail: 'high'
+      };
   const payload = {
     model,
     input: [
@@ -735,10 +762,7 @@ function extrairDespesaComOpenAI_(dataUrl) {
             type: 'input_text',
             text: montarPromptOpenAIInboxDespesa_()
           },
-          {
-            type: 'input_image',
-            image_url: dataUrl
-          }
+          conteudoArquivo
         ]
       }
     ],
@@ -804,6 +828,25 @@ function extrairDespesaComOpenAI_(dataUrl) {
     }
     throw new Error('OpenAI retornou dados em formato inesperado.');
   }
+}
+
+function normalizarArquivoOpenAIInboxDespesa_(entrada) {
+  const dados = typeof entrada === 'string' ? { dataUrl: entrada } : (entrada || {});
+  const dataUrl = String(dados.dataUrl || dados.data_url || '').trim();
+  const match = /^data:([^;]+);base64,(.+)$/i.exec(dataUrl);
+  const mime = String(dados.mime || dados.mime_type || match?.[1] || '').trim().toLowerCase();
+  const base64 = String(dados.base64 || match?.[2] || '').trim();
+  const nome = String(dados.nome || dados.name || '').trim();
+  if (!base64) throw new Error('Arquivo sem conteudo para leitura pela OpenAI.');
+  if (!(mime.startsWith('image/') || mime === 'application/pdf')) {
+    throw new Error('Formato nao suportado pela leitura. Use imagem ou PDF.');
+  }
+  return {
+    mime,
+    nome,
+    base64,
+    dataUrl: dataUrl || `data:${mime};base64,${base64}`
+  };
 }
 
 function getOpenAIComprovantesApiKey_() {
