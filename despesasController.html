@@ -21,6 +21,7 @@
     let inboxDespesasExpandida = false;
     let inboxDespesasEstadoInicialDefinido = false;
     const inboxDespesasBusyIds = new Set();
+    const inboxDespesasRequestIds = new Map();
     let filtroTexto = '';
     let filtrosLista = {
       status: '',
@@ -1425,13 +1426,11 @@
         .map(valor => String(valor || '').trim()).join('|');
     }
 
-    function montarOptionsDestinoComprovante(item) {
-      const sugerida = String(item?.sugestoes?.[0]?.chave || '').trim();
+    function montarOptionsDestinoComprovante() {
       const opcoes = ['<option value="">Selecione uma compra ou despesa</option>'];
       destinosComprovantes.forEach(destino => {
         const chave = chaveDestinoComprovante(destino);
-        const selected = sugerida && chave === sugerida ? ' selected' : '';
-        opcoes.push(`<option value="${escapeHtml(chave)}"${selected}>${escapeHtml(destino.label || chave)}</option>`);
+        opcoes.push(`<option value="${escapeHtml(chave)}">${escapeHtml(destino.label || chave)}</option>`);
       });
       return opcoes.join('');
     }
@@ -1482,16 +1481,17 @@
       const saldo = Number(item?.saldo_nao_alocado || 0);
       const alocado = Number(item?.valor_alocado || 0);
       const conciliado = saldo <= 0.009 && Number(item?.valor_total || 0) > 0;
-      const sugestaoInicial = item?.sugestoes?.[0];
-      const valorInicial = sugestaoInicial
-        ? Math.min(saldo, Number(sugestaoInicial.valor_pendente || saldo))
-        : saldo;
+      const valorInicial = Math.max(0, saldo);
+      const sufixoDom = id.replace(/[^a-zA-Z0-9_-]/g, '_');
+      const painelNovaDespesaId = `despesas-inbox-nova-${sufixoDom}`;
+      const painelVinculoId = `despesas-inbox-vinculo-${sufixoDom}`;
       const dataComprovante = window.AppListOrderUI?.formatDate?.(
         item?.data_pagamento || item?.data_competencia || item?.criado_em
       ) || { display: '-' };
       const card = document.createElement('div');
       card.className = `despesa-inbox-item despesa-inbox-item-${statusClasse}`;
       card.dataset.inboxId = id;
+      card.dataset.saldoAtual = String(valorInicial);
       card.innerHTML = `
         <div class="despesa-inbox-item-topo">
           <div>
@@ -1509,9 +1509,9 @@
         </div>
 
         <div class="despesas-inbox-valores">
-          <div><span>Total</span><strong>${escapeHtml(formatarMoeda(item?.valor_total))}</strong></div>
+          <div><span>Total</span><strong data-resumo-valor-total>${escapeHtml(formatarMoeda(item?.valor_total))}</strong></div>
           <div><span>Vinculado</span><strong>${escapeHtml(formatarMoeda(alocado))}</strong></div>
-          <div><span>Saldo livre</span><strong>${escapeHtml(formatarMoeda(saldo))}</strong></div>
+          <div><span>Saldo livre</span><strong data-resumo-saldo-livre>${escapeHtml(formatarMoeda(saldo))}</strong></div>
         </div>
 
         ${montarAlertasInboxDespesa(item)}
@@ -1537,7 +1537,7 @@
             </label>
             <label class="campo-ajuda-wrap">
               <span class="campo-ajuda-tag">Valor total (R$)</span>
-              <input data-campo="valor_total" type="number" min="${Math.max(0, alocado)}" step="0.01" value="${escapeHtml(item?.valor_total || '')}">
+              <input data-campo="valor_total" type="number" min="${Math.max(0, alocado)}" step="0.01" value="${escapeHtml(item?.valor_total || '')}" oninput="DespesasController.atualizarSaldoComprovante('${escapeHtml(id)}')">
             </label>
             <label class="campo-ajuda-wrap">
               <span class="campo-ajuda-tag">Referencia da transacao</span>
@@ -1572,21 +1572,67 @@
         </div>
 
         ${!conciliado ? `
-          ${montarSugestoesComprovante(item)}
-          <div class="despesas-inbox-conciliar">
-            <label class="campo-ajuda-wrap despesas-inbox-destino">
-              <span class="campo-ajuda-tag">Vincular saldo a</span>
-              <select data-campo="destino_vinculo" onchange="DespesasController.atualizarValorDestinoComprovante('${escapeHtml(id)}')">${montarOptionsDestinoComprovante(item)}</select>
-            </label>
-            <label class="campo-ajuda-wrap despesas-inbox-valor-vinculo">
-              <span class="campo-ajuda-tag">Valor deste vinculo (R$)</span>
-              <input data-campo="valor_alocado" type="number" min="0.01" max="${escapeHtml(saldo)}" step="0.01" value="${escapeHtml(valorInicial.toFixed(2))}">
-            </label>
-            <button type="button" onclick="DespesasController.vincularComprovante('${escapeHtml(id)}')">Vincular pagamento</button>
+          <fieldset class="despesas-inbox-modo">
+            <legend>Como deseja registrar este pagamento?</legend>
+            <div class="despesas-inbox-modo-opcoes">
+              <label class="despesas-inbox-modo-opcao is-active">
+                <input
+                  type="radio"
+                  name="modo-comprovante-${escapeHtml(sufixoDom)}"
+                  data-campo="modo_conciliacao"
+                  value="NOVA_DESPESA"
+                  aria-controls="${escapeHtml(painelNovaDespesaId)}"
+                  onchange="DespesasController.selecionarModoComprovante('${escapeHtml(id)}', 'NOVA_DESPESA')"
+                  checked>
+                <span>
+                  <strong>Criar nova despesa</strong>
+                  <small>Cria um novo lancamento com os dados revisados deste comprovante.</small>
+                </span>
+              </label>
+              <label class="despesas-inbox-modo-opcao">
+                <input
+                  type="radio"
+                  name="modo-comprovante-${escapeHtml(sufixoDom)}"
+                  data-campo="modo_conciliacao"
+                  value="VINCULAR_EXISTENTE"
+                  aria-controls="${escapeHtml(painelVinculoId)}"
+                  onchange="DespesasController.selecionarModoComprovante('${escapeHtml(id)}', 'VINCULAR_EXISTENTE')">
+                <span>
+                  <strong>Vincular a lancamento existente</strong>
+                  <small>Usa uma compra ou despesa que ja foi cadastrada.</small>
+                </span>
+              </label>
+            </div>
+          </fieldset>
+
+          <div id="${escapeHtml(painelNovaDespesaId)}" class="despesas-inbox-painel" data-painel-modo="NOVA_DESPESA">
+            <p class="despesas-inbox-painel-ajuda">O comprovante sera associado automaticamente a nova despesa.</p>
+            <div class="despesas-inbox-conciliar despesas-inbox-conciliar-nova">
+              <label class="campo-ajuda-wrap despesas-inbox-valor-vinculo">
+                <span class="campo-ajuda-tag">Valor da nova despesa (R$)</span>
+                <input data-campo="valor_nova_despesa" type="number" min="0.01" max="${escapeHtml(saldo)}" step="0.01" value="${escapeHtml(valorInicial.toFixed(2))}">
+              </label>
+              <button type="button" onclick="DespesasController.registrarComprovanteComoDespesa('${escapeHtml(id)}')">Criar nova despesa</button>
+            </div>
+          </div>
+
+          <div id="${escapeHtml(painelVinculoId)}" class="despesas-inbox-painel" data-painel-modo="VINCULAR_EXISTENTE" hidden>
+            <p class="despesas-inbox-painel-ajuda">Escolha onde registrar este pagamento. Nenhum vinculo sera feito sem sua confirmacao.</p>
+            ${montarSugestoesComprovante(item)}
+            <div class="despesas-inbox-conciliar">
+              <label class="campo-ajuda-wrap despesas-inbox-destino">
+                <span class="campo-ajuda-tag">Vincular saldo a</span>
+                <select data-campo="destino_vinculo" onchange="DespesasController.atualizarValorDestinoComprovante('${escapeHtml(id)}')">${montarOptionsDestinoComprovante()}</select>
+              </label>
+              <label class="campo-ajuda-wrap despesas-inbox-valor-vinculo">
+                <span class="campo-ajuda-tag">Valor deste vinculo (R$)</span>
+                <input data-campo="valor_vinculo" type="number" min="0.01" max="${escapeHtml(saldo)}" step="0.01" value="${escapeHtml(valorInicial.toFixed(2))}">
+              </label>
+              <button type="button" onclick="DespesasController.vincularComprovante('${escapeHtml(id)}')">Vincular pagamento</button>
+            </div>
           </div>
           <div class="despesas-inbox-card-acoes">
             <button type="button" class="btn-secundario" onclick="DespesasController.salvarRevisaoComprovante('${escapeHtml(id)}')">Salvar revisao</button>
-            <button type="button" class="btn-secundario" onclick="DespesasController.registrarComprovanteComoDespesa('${escapeHtml(id)}')">Registrar saldo como despesa simples</button>
             <button type="button" class="btn-perigo" onclick="DespesasController.descartarInboxDespesa('${escapeHtml(id)}')" ${alocado > 0.009 ? 'disabled' : ''}>Descartar</button>
           </div>
         ` : '<div class="despesas-inbox-concluido">Comprovante totalmente conciliado.</div>'}
@@ -1665,6 +1711,11 @@
       if (!isFinite(payload.valor_total) || payload.valor_total <= 0) {
         throw new Error('Valor total do comprovante invalido.');
       }
+      const item = inboxDespesas.find(comprovante => String(comprovante?.ID || '').trim() === String(id || '').trim());
+      const valorJaAlocado = Number(item?.valor_alocado || 0);
+      if (payload.valor_total + 0.009 < valorJaAlocado) {
+        throw new Error('O valor total nao pode ser menor que o valor ja vinculado.');
+      }
       return payload;
     }
 
@@ -1701,29 +1752,95 @@
       return destinosComprovantes.find(destino => chaveDestinoComprovante(destino) === chave) || null;
     }
 
+    function obterSaldoDisponivelComprovante(id) {
+      const inboxId = String(id || '').trim();
+      const item = inboxDespesas.find(comprovante => String(comprovante?.ID || '').trim() === inboxId);
+      const card = getInboxCard(inboxId);
+      if (!item || !card) return 0;
+      const valorTotalCampo = parseNumeroInput(card.querySelector('[data-campo="valor_total"]')?.value || '');
+      const valorTotal = isFinite(valorTotalCampo) ? valorTotalCampo : Number(item.valor_total || 0);
+      const valorJaAlocado = Number(item.valor_alocado || 0);
+      return Math.max(0, Math.round((valorTotal - valorJaAlocado) * 100) / 100);
+    }
+
+    function atualizarSaldoComprovante(id) {
+      const card = getInboxCard(id);
+      if (!card) return;
+      const saldoAnterior = Number(card.dataset.saldoAtual || 0);
+      const saldoAtual = obterSaldoDisponivelComprovante(id);
+      const totalAtual = parseNumeroInput(card.querySelector('[data-campo="valor_total"]')?.value || '');
+      card.dataset.saldoAtual = String(saldoAtual);
+
+      const resumoTotal = card.querySelector('[data-resumo-valor-total]');
+      const resumoSaldo = card.querySelector('[data-resumo-saldo-livre]');
+      if (resumoTotal) resumoTotal.textContent = formatarMoeda(totalAtual);
+      if (resumoSaldo) resumoSaldo.textContent = formatarMoeda(saldoAtual);
+
+      const inputNova = card.querySelector('[data-campo="valor_nova_despesa"]');
+      if (inputNova) {
+        const valorAtual = parseNumeroInput(inputNova.value || '');
+        const acompanhavaSaldo = Math.abs(valorAtual - saldoAnterior) <= 0.009;
+        inputNova.max = String(saldoAtual);
+        if (acompanhavaSaldo || valorAtual > saldoAtual + 0.009) {
+          inputNova.value = saldoAtual > 0 ? saldoAtual.toFixed(2) : '';
+        }
+      }
+
+      const inputVinculo = card.querySelector('[data-campo="valor_vinculo"]');
+      if (inputVinculo) {
+        const destino = obterDestinoSelecionadoComprovante(id);
+        const limiteDestino = destino ? Number(destino.valor_pendente || 0) : saldoAtual;
+        const novoMaximo = Math.max(0, Math.min(saldoAtual, limiteDestino));
+        const maximoAnterior = Number(inputVinculo.max || saldoAnterior);
+        const valorAtual = parseNumeroInput(inputVinculo.value || '');
+        const acompanhavaLimite = Math.abs(valorAtual - maximoAnterior) <= 0.009;
+        inputVinculo.max = String(novoMaximo);
+        if (acompanhavaLimite || valorAtual > novoMaximo + 0.009) {
+          inputVinculo.value = novoMaximo > 0 ? novoMaximo.toFixed(2) : '';
+        }
+      }
+    }
+
     function atualizarValorDestinoComprovante(id) {
       const card = getInboxCard(id);
       const destino = obterDestinoSelecionadoComprovante(id);
-      const item = inboxDespesas.find(comprovante => String(comprovante?.ID || '').trim() === String(id || '').trim());
-      const input = card?.querySelector('[data-campo="valor_alocado"]');
-      if (!input || !item) return;
-      const saldo = Number(item.saldo_nao_alocado || 0);
-      const maximo = Math.max(0, Math.min(saldo, Number(destino?.valor_pendente || saldo)));
+      const input = card?.querySelector('[data-campo="valor_vinculo"]');
+      if (!input) return;
+      const saldo = obterSaldoDisponivelComprovante(id);
+      const pendente = destino ? Number(destino.valor_pendente || 0) : saldo;
+      const maximo = Math.max(0, Math.min(saldo, pendente));
       input.max = String(maximo);
       input.value = maximo > 0 ? maximo.toFixed(2) : '';
+    }
+
+    function selecionarModoComprovante(id, modo) {
+      const card = getInboxCard(id);
+      if (!card) return;
+      const modoAtivo = modo === 'VINCULAR_EXISTENTE' ? 'VINCULAR_EXISTENTE' : 'NOVA_DESPESA';
+      card.querySelectorAll('[data-campo="modo_conciliacao"]').forEach(radio => {
+        const ativo = radio.value === modoAtivo;
+        radio.checked = ativo;
+        radio.closest('.despesas-inbox-modo-opcao')?.classList.toggle('is-active', ativo);
+      });
+      card.querySelectorAll('[data-painel-modo]').forEach(painel => {
+        painel.hidden = painel.dataset.painelModo !== modoAtivo;
+      });
     }
 
     function selecionarSugestaoComprovante(id, chave) {
       const card = getInboxCard(id);
       const select = card?.querySelector('[data-campo="destino_vinculo"]');
       if (!select) return;
+      selecionarModoComprovante(id, 'VINCULAR_EXISTENTE');
       select.value = String(chave || '').trim();
       atualizarValorDestinoComprovante(id);
       select.focus();
     }
 
     function atualizarAposConciliacaoComprovante() {
-      const recarga = carregarInboxDespesas(undefined, '', true);
+      const recarga = new Promise(resolve => {
+        carregarInboxDespesas(resultado => resolve(resultado === true), '', true);
+      });
       carregarDespesas(true);
       window.ComprasController?.syncFromBackend?.();
       notificarDashboardAlterado();
@@ -1736,6 +1853,35 @@
       return `CMP_${comprovante}_${aleatorio}`.replace(/[^a-zA-Z0-9_-]+/g, '').slice(0, 112);
     }
 
+    function obterClientRequestIdComprovante(id, acao, payload) {
+      const inboxId = String(id || '').trim();
+      const tipoAcao = String(acao || '').trim().toUpperCase();
+      const ambiente = String(payload?._db_env || getAmbienteBancoAtivoInbox()).trim().toLowerCase();
+      const chave = `${ambiente}:${inboxId}:${tipoAcao}`;
+      const dadosAssinatura = { ...(payload || {}) };
+      delete dadosAssinatura.client_request_id;
+      const assinatura = JSON.stringify(
+        Object.keys(dadosAssinatura).sort().map(campo => [campo, dadosAssinatura[campo]])
+      );
+      const existente = inboxDespesasRequestIds.get(chave);
+      if (existente?.assinatura === assinatura && existente?.id) return existente.id;
+      const requestId = gerarClientRequestIdComprovante(inboxId);
+      inboxDespesasRequestIds.set(chave, { assinatura, id: requestId });
+      return requestId;
+    }
+
+    function limparClientRequestIdComprovante(id, acao = '', ambiente = '') {
+      const inboxId = String(id || '').trim();
+      const tipoAcao = String(acao || '').trim().toUpperCase();
+      const dbEnv = String(ambiente || getAmbienteBancoAtivoInbox()).trim().toLowerCase();
+      const prefixo = `${dbEnv}:${inboxId}:`;
+      [...inboxDespesasRequestIds.keys()].forEach(chave => {
+        if (chave.startsWith(prefixo) && (!tipoAcao || chave === `${prefixo}${tipoAcao}`)) {
+          inboxDespesasRequestIds.delete(chave);
+        }
+      });
+    }
+
     function vincularComprovante(id) {
       if (!podeAlterarDados('Vinculo bloqueado em modo somente leitura')) return;
       const inboxId = String(id || '').trim();
@@ -1746,17 +1892,22 @@
         payload = lerPayloadInboxDespesa(inboxId);
         const destino = obterDestinoSelecionadoComprovante(inboxId);
         const card = getInboxCard(inboxId);
-        const valor = parseNumeroInput(card?.querySelector('[data-campo="valor_alocado"]')?.value || '');
+        const valor = parseNumeroInput(card?.querySelector('[data-campo="valor_vinculo"]')?.value || '');
+        const saldo = obterSaldoDisponivelComprovante(inboxId);
         if (!destino) throw new Error('Selecione uma compra ou despesa para vincular.');
         if (!isFinite(valor) || valor <= 0) throw new Error('Informe um valor valido para o vinculo.');
+        if (valor > saldo + 0.009) throw new Error('O valor do vinculo e maior que o saldo disponivel do comprovante.');
+        if (valor > Number(destino.valor_pendente || 0) + 0.009) {
+          throw new Error('O valor do vinculo e maior que o saldo pendente do lancamento.');
+        }
         payload = {
           ...payload,
           origem_tipo: destino.origem_tipo,
           origem_id: destino.origem_id,
           parcela_id: destino.parcela_id,
-          valor_alocado: valor,
-          client_request_id: gerarClientRequestIdComprovante(inboxId)
+          valor_alocado: valor
         };
+        payload.client_request_id = obterClientRequestIdComprovante(inboxId, 'VINCULAR_EXISTENTE', payload);
       } catch (error) {
         const detalhes = getInboxCard(inboxId)?.querySelector('.despesas-inbox-dados');
         if (detalhes) detalhes.open = true;
@@ -1772,7 +1923,12 @@
         .then(resultado => {
           if (!resultado?.ok) throw new Error('O vinculo nao foi confirmado pelo servidor.');
           mostrarToast('Pagamento vinculado com sucesso.');
-          return atualizarAposConciliacaoComprovante();
+          return atualizarAposConciliacaoComprovante().then(atualizouInbox => {
+            if (atualizouInbox) {
+              limparClientRequestIdComprovante(inboxId, 'VINCULAR_EXISTENTE', payload._db_env);
+            }
+            return atualizouInbox;
+          });
         })
         .catch(error => {
           mostrarToast(error?.message || 'Erro ao vincular comprovante', 'erro');
@@ -1790,32 +1946,41 @@
       try {
         payload = lerPayloadInboxDespesa(inboxId);
         const card = getInboxCard(inboxId);
-        payload.valor_alocado = parseNumeroInput(card?.querySelector('[data-campo="valor_alocado"]')?.value || '');
-        payload.client_request_id = gerarClientRequestIdComprovante(inboxId);
-        if (!payload.descricao) throw new Error('Preencha a descricao para criar a despesa simples.');
-        if (!payload.categoria) throw new Error('Selecione a categoria da despesa simples.');
+        payload.valor_alocado = parseNumeroInput(card?.querySelector('[data-campo="valor_nova_despesa"]')?.value || '');
+        const saldo = obterSaldoDisponivelComprovante(inboxId);
+        if (!payload.descricao) throw new Error('Preencha a descricao para criar a nova despesa.');
+        if (!payload.categoria) throw new Error('Selecione a categoria da nova despesa.');
         if (!payload.data_competencia) throw new Error('Informe a data de competencia.');
         if (!payload.data_pagamento) throw new Error('Informe a data de pagamento.');
         if (!payload.forma_pagamento) throw new Error('Selecione a forma de pagamento.');
-        if (!isFinite(payload.valor_alocado) || payload.valor_alocado <= 0) throw new Error('Informe o valor da despesa simples.');
+        if (!isFinite(payload.valor_alocado) || payload.valor_alocado <= 0) throw new Error('Informe o valor da nova despesa.');
+        if (payload.valor_alocado > saldo + 0.009) {
+          throw new Error('O valor da nova despesa e maior que o saldo disponivel do comprovante.');
+        }
       } catch (error) {
         const detalhes = getInboxCard(inboxId)?.querySelector('.despesas-inbox-dados');
         if (detalhes) detalhes.open = true;
         mostrarToast(error?.message || 'Revise os dados da despesa', 'erro');
         return;
       }
-      if (!confirm(`Registrar ${formatarMoeda(payload.valor_alocado)} do saldo como despesa simples?`)) return;
+      if (!confirm(`Criar uma nova despesa de ${formatarMoeda(payload.valor_alocado)} com este comprovante?`)) return;
+      payload.client_request_id = obterClientRequestIdComprovante(inboxId, 'NOVA_DESPESA', payload);
       setInboxItemBusy(inboxId, true);
       window.AppRequest.call('registrarSaldoComprovanteComoDespesa', [inboxId, payload], {
-        context: 'despesas.inbox.simple-expense',
-        errorMessage: 'Erro ao registrar despesa simples'
+        context: 'despesas.inbox.new-expense',
+        errorMessage: 'Erro ao criar nova despesa'
       })
         .then(resultado => {
           if (!resultado?.ok) throw new Error('A despesa nao foi confirmada pelo servidor.');
-          mostrarToast('Saldo registrado como despesa simples.');
-          return atualizarAposConciliacaoComprovante();
+          mostrarToast('Nova despesa criada com sucesso.');
+          return atualizarAposConciliacaoComprovante().then(atualizouInbox => {
+            if (atualizouInbox) {
+              limparClientRequestIdComprovante(inboxId, 'NOVA_DESPESA', payload._db_env);
+            }
+            return atualizouInbox;
+          });
         })
-        .catch(error => mostrarToast(error?.message || 'Erro ao registrar despesa simples', 'erro'))
+        .catch(error => mostrarToast(error?.message || 'Erro ao criar nova despesa', 'erro'))
         .finally(() => setInboxItemBusy(inboxId, false));
     }
 
@@ -1854,7 +2019,7 @@
       if (!podeAlterarDados('Remocao bloqueada em modo somente leitura')) return;
       const inboxId = String(id || '').trim();
       if (!inboxId || inboxDespesasBusyIds.has(inboxId)) return;
-      if (!confirm('Desfazer este vinculo? Se ele criou uma despesa simples exclusiva, essa despesa tambem sera removida.')) return;
+      if (!confirm('Desfazer este vinculo? Se ele criou uma nova despesa exclusiva, essa despesa tambem sera removida.')) return;
       setInboxItemBusy(inboxId, true);
       window.AppRequest.call('desfazerAlocacaoComprovanteFinanceiro', [inboxId, pagamentoId, getAmbienteBancoAtivoInbox()], {
         context: 'despesas.inbox.unallocate',
@@ -1881,6 +2046,7 @@
         errorMessage: 'Erro ao descartar item da Inbox'
       })
         .then(() => {
+          limparClientRequestIdComprovante(inboxId);
           mostrarToast('Item da Inbox descartado.');
           return carregarInboxDespesas(undefined, '', true);
         })
@@ -2650,7 +2816,9 @@
       registrarComprovanteComoDespesa,
       salvarRevisaoComprovante,
       desfazerAlocacaoComprovante,
+      selecionarModoComprovante,
       selecionarSugestaoComprovante,
+      atualizarSaldoComprovante,
       atualizarValorDestinoComprovante,
       descartarInboxDespesa,
       registrarPagamento,
