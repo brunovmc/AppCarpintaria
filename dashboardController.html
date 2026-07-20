@@ -1,16 +1,26 @@
 <script>
   window.DashboardController = (() => {
-    const STORAGE_PREFIX = 'app:dash:v2:executivo:';
-    const CACHE_TTL_MS = 30000;
+    const STORAGE_PREFIX = 'app:dash:v3:executivo:';
+    const LEGACY_STORAGE_PREFIX = 'app:dash:v2:executivo:';
+    // O snapshot continua utilizavel enquanto uma nova versao e buscada em
+    // segundo plano. Este TTL representa apenas a janela em que nem sequer
+    // precisamos revalidar o painel.
+    const CACHE_TTL_MS = 120000;
     const DETAIL_CACHE_TTL_MS = 30000;
     let iniciado = false;
     let carregando = false;
-    let requestSeq = 0;
     let detailRequestSeq = 0;
     let cacheMemoria = {};
     let cacheDetalhes = {};
+    const requisicoesEmCurso = new Map();
+    const requisicoesForcadas = new Set();
+    const requisicoesDetalhes = new Map();
+    let versaoCacheSnapshots = 0;
+    let versaoCacheDetalhes = 0;
+    let ultimaRenderizacao = { chave: '', assinatura: '' };
     let itensDetalhe = [];
     let runtimeListenerRegistrado = false;
+    let cacheLegadoLimpo = false;
     let focoAntesDoModal = null;
 
     function refs() {
@@ -98,44 +108,133 @@
         : 'prod';
     }
 
-    function storageKey(referencia) {
-      return `${STORAGE_PREFIX}${ambienteAtual()}:${referencia}`;
+    function usuarioAtualCache() {
+      return String(window.AppClientScope?.get?.()?.user || 'session-only');
     }
 
-    function lerSnapshot(referencia) {
-      const memoria = cacheMemoria[referencia];
-      if (memoria?.data) return memoria;
+    function podePersistirCache() {
+      return window.AppClientScope?.get?.()?.canPersist === true;
+    }
+
+    function limparCacheLegado() {
+      if (cacheLegadoLimpo || !podePersistirCache()) return;
+      cacheLegadoLimpo = true;
       try {
-        const raw = window.localStorage?.getItem(storageKey(referencia));
+        const chaves = [];
+        for (let i = 0; i < window.localStorage.length; i += 1) {
+          const chave = String(window.localStorage.key(i) || '');
+          if (chave.startsWith(LEGACY_STORAGE_PREFIX)) chaves.push(chave);
+        }
+        chaves.forEach(chave => window.localStorage.removeItem(chave));
+      } catch (error) {
+        // Cache legado e opcional.
+      }
+    }
+
+    function painelAtivo() {
+      const aba = document.getElementById('aba-dashboard');
+      return !!aba && !aba.classList.contains('hidden');
+    }
+
+    function cacheKey(referencia, ambiente = ambienteAtual()) {
+      return `${usuarioAtualCache()}:${ambiente}:${referencia}`;
+    }
+
+    function storageKey(referencia, ambiente = ambienteAtual()) {
+      return `${STORAGE_PREFIX}${cacheKey(referencia, ambiente)}`;
+    }
+
+    function assinaturaPayload(payload) {
+      try {
+        // `gerado_em` muda em toda recomputacao, mas nao altera o que o
+        // usuario ve. Ignora-lo evita reconstruir DOM e graficos identicos.
+        const serializado = JSON.stringify(payload || {}, (chave, valor) => chave === 'gerado_em' ? undefined : valor);
+        let hashA = 2166136261;
+        let hashB = 2246822519;
+        for (let i = 0; i < serializado.length; i += 1) {
+          const codigo = serializado.charCodeAt(i);
+          hashA = Math.imul(hashA ^ codigo, 16777619);
+          hashB = Math.imul(hashB ^ codigo, 3266489917);
+        }
+        return `${serializado.length}:${(hashA >>> 0).toString(36)}:${(hashB >>> 0).toString(36)}`;
+      } catch (error) {
+        return '';
+      }
+    }
+
+    function lerSnapshot(referencia, ambiente = ambienteAtual()) {
+      const chave = cacheKey(referencia, ambiente);
+      const memoria = cacheMemoria[chave];
+      if (memoria?.data) return memoria;
+      if (!podePersistirCache()) return null;
+      try {
+        const raw = window.localStorage?.getItem(storageKey(referencia, ambiente));
         if (!raw) return null;
         const parsed = JSON.parse(raw);
         if (!parsed?.data || parsed.data.version !== 'v2') return null;
-        cacheMemoria[referencia] = parsed;
+        if (!parsed.assinatura) parsed.assinatura = assinaturaPayload(parsed.data);
+        cacheMemoria[chave] = parsed;
         return parsed;
       } catch (error) {
         return null;
       }
     }
 
-    function salvarSnapshot(referencia, data) {
-      const entry = { ts: Date.now(), data };
-      cacheMemoria[referencia] = entry;
+    function salvarSnapshot(referencia, data, ambiente = ambienteAtual()) {
+      const entry = { ts: Date.now(), assinatura: assinaturaPayload(data), data };
+      cacheMemoria[cacheKey(referencia, ambiente)] = entry;
+      if (!podePersistirCache()) return entry;
       try {
-        window.localStorage?.setItem(storageKey(referencia), JSON.stringify(entry));
+        window.localStorage?.setItem(storageKey(referencia, ambiente), JSON.stringify(entry));
       } catch (error) {
         // O cache persistente e opcional.
       }
       return entry;
     }
 
-    function limparSnapshots() {
-      cacheMemoria = {};
-      cacheDetalhes = {};
+    function normalizarReferencias(referencias) {
+      const resultado = new Set();
+      const visitar = valor => {
+        if (Array.isArray(valor)) {
+          valor.forEach(visitar);
+          return;
+        }
+        const referencia = String(valor || '').trim();
+        if (referenciaValida(referencia)) resultado.add(referencia);
+      };
+      visitar(referencias);
+      return Array.from(resultado);
+    }
+
+    function limparSnapshots(referencias, ambiente = ambienteAtual()) {
+      // Invalida tambem respostas que ja sairam para o backend. Sem esta
+      // geracao, uma resposta antiga poderia repopular o cache logo depois de
+      // uma mutacao e parecer fresca durante todo o TTL.
+      versaoCacheSnapshots += 1;
+      versaoCacheDetalhes += 1;
+      const refsAlvo = normalizarReferencias(referencias);
+      const todasDoAmbiente = refsAlvo.length === 0;
+      const prefixoMemoria = `${usuarioAtualCache()}:${ambiente}:`;
+      Object.keys(cacheMemoria).forEach(chave => {
+        const referencia = chave.slice(prefixoMemoria.length);
+        if (chave.startsWith(prefixoMemoria) && (todasDoAmbiente || refsAlvo.includes(referencia))) {
+          delete cacheMemoria[chave];
+        }
+      });
+      Object.keys(cacheDetalhes).forEach(chave => {
+        if (!chave.startsWith(prefixoMemoria)) return;
+        const referencia = chave.slice(prefixoMemoria.length).split('|')[0];
+        if (todasDoAmbiente || refsAlvo.includes(referencia)) delete cacheDetalhes[chave];
+      });
+      if (!podePersistirCache()) return;
       try {
         const chaves = [];
+        const prefixoStorage = `${STORAGE_PREFIX}${usuarioAtualCache()}:${ambiente}:`;
         for (let i = 0; i < window.localStorage.length; i += 1) {
           const chave = window.localStorage.key(i);
-          if (String(chave || '').startsWith(STORAGE_PREFIX)) chaves.push(chave);
+          if (!String(chave || '').startsWith(prefixoStorage)) continue;
+          const referencia = String(chave).slice(prefixoStorage.length);
+          if (todasDoAmbiente || refsAlvo.includes(referencia)) chaves.push(chave);
         }
         chaves.forEach(chave => window.localStorage.removeItem(chave));
       } catch (error) {
@@ -162,6 +261,7 @@
       }
       f.loading?.classList.toggle('hidden', !carregando || !!manterConteudo);
       f.content?.classList.toggle('dashx-content-refreshing', carregando && !!manterConteudo);
+      if (f.content) f.content.setAttribute('aria-busy', carregando ? 'true' : 'false');
     }
 
     function mostrarEstadoErro(mensagem) {
@@ -306,78 +406,174 @@
         : '';
     }
 
-    function render(payload) {
+    function render(payload, options = {}) {
       const f = refs();
       if (!payload || payload.version !== 'v2') {
         mostrarEstadoErro('A resposta recebida nao corresponde a versao atual do painel.');
-        return;
+        return false;
       }
+      const ambiente = options.ambiente || ambienteAtual();
+      const referencia = options.referencia || payload.referencia || referenciaAtiva();
+      const chave = cacheKey(referencia, ambiente);
+      const assinatura = options.assinatura || assinaturaPayload(payload);
       f.error?.classList.add('hidden');
       f.loading?.classList.add('hidden');
       f.content?.classList.remove('hidden');
+      if (
+        ultimaRenderizacao.chave === chave &&
+        ultimaRenderizacao.assinatura === assinatura
+      ) {
+        requestAnimationFrame(() => {
+          window.DashboardCharts?.renderAll?.(payload, {
+            onSelect: (contexto, filtro) => abrirDetalhes(contexto, filtro)
+          });
+        });
+        window.AppTabRefresh?.notifyRendered?.('dashboard', { changed: false });
+        return false;
+      }
       renderKpis(payload);
       renderPosicao(payload);
       renderCapital(payload);
       renderSocios(payload);
       renderQualidade(payload);
       if (f.salesAverage) f.salesAverage.textContent = `Media: ${moeda(payload?.direcionadores?.media_vendas_produto)}`;
+      ultimaRenderizacao = { chave, assinatura };
 
       requestAnimationFrame(() => {
         window.DashboardCharts?.renderAll?.(payload, {
           onSelect: (contexto, filtro) => abrirDetalhes(contexto, filtro)
         });
       });
+      window.AppTabRefresh?.notifyRendered?.('dashboard', { changed: true });
+      return true;
     }
 
     function atualizar(forcarRecarregar = false, onDone) {
       const referencia = referenciaAtiva();
-      const seq = ++requestSeq;
-      const snapshot = lerSnapshot(referencia);
+      const ambiente = ambienteAtual();
+      const dirtyGeneration = window.AppTabRefresh?.getDirtyGeneration?.('dashboard') || 0;
+      const versaoAoIniciar = versaoCacheSnapshots;
+      const chave = cacheKey(referencia, ambiente);
+      const snapshot = lerSnapshot(referencia, ambiente);
       const snapshotFresco = snapshot && (Date.now() - Number(snapshot.ts || 0)) <= CACHE_TTL_MS;
       if (snapshot?.data) {
-        render(snapshot.data);
+        if (painelAtivo()) {
+          render(snapshot.data, {
+            ambiente,
+            referencia,
+            assinatura: snapshot.assinatura
+          });
+        } else {
+          window.AppTabRefresh?.markRenderPending?.('dashboard');
+        }
         atualizarHora(snapshot.ts);
+      }
+      const requisicaoExistente = requisicoesEmCurso.get(chave);
+      if (requisicaoExistente) {
+        setLoading(true, !!snapshot?.data);
+        if (forcarRecarregar && !requisicoesForcadas.has(chave)) {
+          return requisicaoExistente.then(() => atualizar(true, onDone));
+        }
+        return requisicaoExistente.then(resultado => {
+          if (resultado?.superseded) return atualizar(true, onDone);
+          if (typeof onDone === 'function') {
+            onDone(resultado?.staleReference ? 'superseded' : resultado?.backendOk === true);
+          }
+          return resultado?.data || null;
+        });
       }
       if (!forcarRecarregar && snapshotFresco) {
         setLoading(false, true);
-        window.AppTabRefresh?.clearDirty?.('dashboard');
-        if (typeof onDone === 'function') onDone();
+        window.AppTabRefresh?.reportResult?.('dashboard', true, dirtyGeneration);
+        if (typeof onDone === 'function') onDone(true);
         return Promise.resolve(snapshot.data);
       }
 
+      if (!snapshot?.data && ultimaRenderizacao.chave !== chave) {
+        const f = refs();
+        f.error?.classList.add('hidden');
+        f.content?.classList.add('hidden');
+      }
       setLoading(true, !!snapshot?.data);
-      return window.AppRequest.call('obterDashboardExecutivoFinanceiro', [referencia, !!forcarRecarregar], {
+      const requisicao = window.AppRequest.call('obterDashboardExecutivoFinanceiro', [
+        referencia,
+        !!forcarRecarregar,
+        ambiente
+      ], {
         context: 'dashboard.executivo',
         errorMessage: 'Erro ao carregar o painel financeiro'
       }).then(payload => {
-        if (seq !== requestSeq) return payload;
-        const entry = salvarSnapshot(referencia, payload || {});
-        render(payload || {});
-        atualizarHora(entry.ts);
-        setOffline(false, '');
-        window.AppTabRefresh?.clearDirty?.('dashboard');
-        return payload;
+        if (!payload || payload.version !== 'v2') {
+          throw new Error('A resposta recebida nao corresponde a versao atual do painel.');
+        }
+        if (versaoAoIniciar !== versaoCacheSnapshots) {
+          return {
+            data: lerSnapshot(referencia, ambiente)?.data || null,
+            backendOk: false,
+            superseded: true
+          };
+        }
+        const entry = salvarSnapshot(referencia, payload, ambiente);
+        const referenciaAindaAtiva = cacheKey(referenciaAtiva(), ambienteAtual()) === chave;
+        if (referenciaAindaAtiva && painelAtivo()) {
+          render(payload, {
+            ambiente,
+            referencia,
+            assinatura: entry.assinatura
+          });
+          atualizarHora(entry.ts);
+          setOffline(false, '');
+        } else if (referenciaAindaAtiva) {
+          window.AppTabRefresh?.markRenderPending?.('dashboard');
+        }
+        if (referenciaAindaAtiva) {
+          window.AppTabRefresh?.reportResult?.('dashboard', true, dirtyGeneration);
+        }
+        return {
+          data: payload,
+          backendOk: true,
+          staleReference: !referenciaAindaAtiva
+        };
       }).catch(error => {
-        if (seq !== requestSeq) return null;
+        if (cacheKey(referenciaAtiva(), ambienteAtual()) !== chave) {
+          return {
+            data: snapshot?.data || null,
+            backendOk: false,
+            staleReference: true
+          };
+        }
+        window.AppTabRefresh?.reportResult?.('dashboard', false, dirtyGeneration);
         if (snapshot?.data) {
-          render(snapshot.data);
           setOffline(true, 'Sem conexao com backend - exibindo o ultimo snapshot');
           mostrarToast('Exibindo o ultimo snapshot salvo', 'erro');
-          return snapshot.data;
+          return { data: snapshot.data, backendOk: false };
         }
         mostrarEstadoErro(error?.message || 'Nao foi possivel carregar os dados.');
         setOffline(true, 'Sem conexao com backend');
         mostrarToast(error?.message || 'Erro ao carregar dashboard', 'erro');
-        return null;
+        return { data: null, backendOk: false };
       }).finally(() => {
-        if (seq === requestSeq) setLoading(false, true);
-        if (typeof onDone === 'function') onDone();
+        if (requisicoesEmCurso.get(chave) === requisicao) {
+          requisicoesEmCurso.delete(chave);
+          requisicoesForcadas.delete(chave);
+        }
+        if (cacheKey(referenciaAtiva(), ambienteAtual()) === chave) setLoading(false, true);
+      });
+      if (forcarRecarregar) requisicoesForcadas.add(chave);
+      requisicoesEmCurso.set(chave, requisicao);
+      return requisicao.then(resultado => {
+        if (resultado?.superseded) return atualizar(true, onDone);
+        if (typeof onDone === 'function') {
+          onDone(resultado?.staleReference ? 'superseded' : resultado?.backendOk === true);
+        }
+        return resultado?.data || null;
       });
     }
 
     function init() {
       const f = refs();
       if (!f.month) return;
+      limparCacheLegado();
       if (!referenciaValida(f.month.value)) f.month.value = mesAtual();
       if (!iniciado) {
         f.month.addEventListener('change', () => atualizar(false));
@@ -460,12 +656,15 @@
       if (!chave) return;
       const f = refs();
       const referencia = referenciaAtiva();
-      const cacheKey = `${referencia}|${chave}|${JSON.stringify(filtro || {})}`;
-      const cache = cacheDetalhes[cacheKey];
-      focoAntesDoModal = document.activeElement;
-      f.modal?.classList.remove('hidden');
-      document.body.classList.add('modal-open');
-      setTimeout(() => f.modal?.querySelector?.('.modal-close-square')?.focus?.(), 0);
+      const ambiente = ambienteAtual();
+      const detalheCacheKey = `${cacheKey(referencia, ambiente)}|${chave}|${JSON.stringify(filtro || {})}`;
+      const cache = cacheDetalhes[detalheCacheKey];
+      if (!options.retry) {
+        focoAntesDoModal = document.activeElement;
+        f.modal?.classList.remove('hidden');
+        document.body.classList.add('modal-open');
+        setTimeout(() => f.modal?.querySelector?.('.modal-close-square')?.focus?.(), 0);
+      }
       if (cache?.data && !options.force && (Date.now() - cache.ts) <= DETAIL_CACHE_TTL_MS) {
         renderDetalhes(cache.data);
         return;
@@ -474,13 +673,39 @@
       if (f.detailSummary) f.detailSummary.innerHTML = '<span class="loading-inline">Carregando...</span>';
       if (f.detailList) f.detailList.innerHTML = '<p class="dashx-empty">Consultando os registros de origem.</p>';
       const seq = ++detailRequestSeq;
-      window.AppRequest.call('obterDetalhesDashboardExecutivoFinanceiro', [referencia, chave, filtro || {}], {
-        context: 'dashboard.detalhes',
-        errorMessage: 'Erro ao carregar a composicao'
-      }).then(payload => {
+      let requisicao = requisicoesDetalhes.get(detalheCacheKey);
+      if (!requisicao) {
+        const versaoAoIniciar = versaoCacheDetalhes;
+        requisicao = window.AppRequest.call('obterDetalhesDashboardExecutivoFinanceiro', [
+          referencia,
+          chave,
+          filtro || {},
+          ambiente
+        ], {
+          context: 'dashboard.detalhes',
+          errorMessage: 'Erro ao carregar a composicao'
+        }).then(payload => {
+          const valido = versaoAoIniciar === versaoCacheDetalhes;
+          if (valido) {
+            cacheDetalhes[detalheCacheKey] = { ts: Date.now(), data: payload || {} };
+          }
+          return { data: payload || {}, valid: valido };
+        }).finally(() => {
+          if (requisicoesDetalhes.get(detalheCacheKey) === requisicao) {
+            requisicoesDetalhes.delete(detalheCacheKey);
+          }
+        });
+        requisicoesDetalhes.set(detalheCacheKey, requisicao);
+      }
+      requisicao.then(resultado => {
         if (seq !== detailRequestSeq || f.modal?.classList.contains('hidden')) return;
-        cacheDetalhes[cacheKey] = { ts: Date.now(), data: payload || {} };
-        renderDetalhes(payload || {});
+        if (resultado?.valid !== true) {
+          // A composicao foi invalidada enquanto estava em voo. Reconsulta em
+          // vez de deixar o modal indefinidamente no estado "Consultando".
+          abrirDetalhes(chave, filtro, { force: true, retry: true });
+          return;
+        }
+        renderDetalhes(resultado.data || {});
       }).catch(error => {
         if (seq !== detailRequestSeq) return;
         if (f.detailTitle) f.detailTitle.textContent = 'Detalhes indisponiveis';
@@ -566,8 +791,8 @@
       return Array.from(meses);
     }
 
-    function invalidarCacheMeses() {
-      limparSnapshots();
+    function invalidarCacheMeses(referencias) {
+      limparSnapshots(referencias);
       window.AppTabRefresh?.markDirty?.('dashboard');
     }
 

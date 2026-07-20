@@ -143,6 +143,32 @@
   }
 
   function createRequestHelper() {
+    // Estes metodos ainda nao recebem o ambiente como argumento proprio. Toda
+    // chamada passa pelo dispatcher fechado do servidor para que uma troca de
+    // DEV/PROD em outra aba nao faca a RPC cair na UserProperty compartilhada.
+    // Metodos que ja recebem `_db_env` ou um argumento `ambiente` ficam fora
+    // desta lista e preservam o contrato existente.
+    const DATA_SCOPED_METHOD_ARITY = Object.freeze({
+      listarReceitasProduto: [1, 1],
+      criarReceitaProduto: [2, 2],
+      salvarReceitaCompleta: [4, 4],
+      obterModeloProduto: [1, 1],
+      obterMateriaisPrevistosProducao: [1, 1],
+      listarVinculosMateriaisProducao: [1, 2],
+      listarSaidasLotesProducao: [1, 1],
+      atualizarCustoLoteSaidaProducao: [3, 3],
+      atualizarPrecoVendaProdutoSaidaProducao: [4, 4],
+      salvarReservaEntradaProducao: [3, 3],
+      removerReservaEntradaProducao: [3, 3],
+      adicionarItemManualProducao: [2, 2],
+      consumirEstoque: [3, 3],
+      vincularPendenciasEntradaProducao: [2, 2],
+      atualizarEtapasProducao: [2, 2],
+      deletarEtapaProducao: [1, 1],
+      listarEtapasProducao: [1, 1],
+      baixarEstoqueVenda: [1, 1]
+    });
+
     function normalizeError(raw, fallback = '') {
       if (raw instanceof Error) return raw;
       const mensagem = String(raw?.message || raw || '').trim()
@@ -159,6 +185,41 @@
       return !!window.google?.script?.run;
     }
 
+    function resolverInvocacao(metodo, argumentos) {
+      const roteado = Object.prototype.hasOwnProperty.call(DATA_SCOPED_METHOD_ARITY, metodo);
+      if (!roteado) {
+        return { method: metodo, args: argumentos, routed: false, environment: '' };
+      }
+      const aridade = DATA_SCOPED_METHOD_ARITY[metodo];
+
+      const total = argumentos.length;
+      if (total < aridade[0] || total > aridade[1]) {
+        throw new Error(`Quantidade de argumentos invalida para ${metodo}.`);
+      }
+
+      const scope = window.AppClientScope?.get?.();
+      const ambiente = String(scope?.environment || '').trim().toLowerCase();
+      if (ambiente !== 'prod' && ambiente !== 'dev') {
+        throw new Error('Ambiente de dados indisponivel. Recarregue a aplicacao.');
+      }
+      if (window.AppClientScope?.isContextSwitching?.()) {
+        throw new Error('Aguarde a troca do ambiente de dados terminar.');
+      }
+      if (
+        typeof window.AppClientScope?.matchesCurrentEnvironment === 'function' &&
+        window.AppClientScope.matchesCurrentEnvironment() !== true
+      ) {
+        throw new Error('O contexto de dados mudou. Recarregue a aplicacao.');
+      }
+
+      return {
+        method: 'executarRpcDadosNoAmbiente',
+        args: [metodo, argumentos, ambiente],
+        routed: true,
+        environment: ambiente
+      };
+    }
+
     function call(method, args = [], options = {}) {
       const metodo = String(method || '').trim();
       if (!metodo) {
@@ -169,13 +230,23 @@
       }
 
       const argumentos = Array.isArray(args) ? args : [args];
+      let invocacao;
+      try {
+        invocacao = resolverInvocacao(metodo, argumentos);
+      } catch (error) {
+        return Promise.reject(normalizeError(error, options.errorMessage));
+      }
       const contexto = String(options.context || metodo).trim() || metodo;
       const perf = window.AppPerf?.start?.(`rpc.${contexto}`, {
-        method: metodo
+        method: metodo,
+        environment: invocacao.environment || undefined,
+        routed: invocacao.routed === true
       });
       window.AppDiag?.mark?.('rpc.call', {
         context: contexto,
-        method: metodo
+        method: metodo,
+        environment: invocacao.environment || undefined,
+        routed: invocacao.routed === true
       });
 
       return new Promise((resolve, reject) => {
@@ -196,7 +267,7 @@
           });
 
         try {
-          runner[metodo](...argumentos);
+          runner[invocacao.method](...invocacao.args);
         } catch (error) {
           window.AppPerf?.end?.(perf, { ok: false, exception: true });
           reject(normalizeError(error, options.errorMessage));
@@ -252,7 +323,11 @@
       call,
       runner,
       normalizeError,
-      isAvailable: disponivel
+      isAvailable: disponivel,
+      isDataScopedMethod: method => Object.prototype.hasOwnProperty.call(
+        DATA_SCOPED_METHOD_ARITY,
+        String(method || '').trim()
+      )
     };
   }
 

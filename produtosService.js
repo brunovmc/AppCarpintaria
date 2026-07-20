@@ -330,7 +330,13 @@ function getResumoModeloProduto(produtoId) {
   };
 }
 
-function listarProdutos(forcarRecarregar) {
+function listarProdutos(forcarRecarregar, ambiente) {
+  if (String(ambiente || '').trim()) {
+    if (typeof executarComAmbienteBancoDadosAutorizado_ !== 'function') {
+      throw new Error('Controle de ambiente indisponivel.');
+    }
+    return executarComAmbienteBancoDadosAutorizado_(ambiente, () => listarProdutos(forcarRecarregar, ''));
+  }
   if (!forcarRecarregar) {
     const cached = lerCacheProdutos();
     if (Array.isArray(cached)) {

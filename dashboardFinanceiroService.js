@@ -1,9 +1,57 @@
 const DASHBOARD_EXECUTIVO_CACHE_SCOPE = 'DASHBOARD_EXECUTIVO_FINANCEIRO';
 const DASHBOARD_EXECUTIVO_CACHE_TTL_SEC = 120;
+const DASHBOARD_EXECUTIVO_CACHE_INDEX_SCOPE = `${DASHBOARD_EXECUTIVO_CACHE_SCOPE}:INDEX`;
+const DASHBOARD_EXECUTIVO_CACHE_INDEX_TTL_SEC = 21600;
 const DASHBOARD_EXECUTIVO_VERSION = 'v2';
 
+function getDashboardExecutivoCacheScope(referencia) {
+  return `${DASHBOARD_EXECUTIVO_CACHE_SCOPE}:${String(referencia || '').trim()}`;
+}
+
+function executarComLockCacheDashboardExecutivo_(callback) {
+  if (typeof callback !== 'function') return null;
+  if (typeof LockService === 'undefined') return callback();
+  const lock = LockService.getScriptLock();
+  lock.waitLock(5000);
+  try {
+    return callback();
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function registrarReferenciaCacheDashboardExecutivoSemLock_(referencia) {
+  const ref = String(referencia || '').trim();
+  if (!ref) return;
+  const indexAtual = appCacheGetJson(DASHBOARD_EXECUTIVO_CACHE_INDEX_SCOPE);
+  const referencias = new Set(Array.isArray(indexAtual?.referencias) ? indexAtual.referencias : []);
+  referencias.add(ref);
+  return appCachePutJson(
+    DASHBOARD_EXECUTIVO_CACHE_INDEX_SCOPE,
+    { referencias: Array.from(referencias) },
+    DASHBOARD_EXECUTIVO_CACHE_INDEX_TTL_SEC
+  );
+}
+
+function registrarReferenciaCacheDashboardExecutivo(referencia) {
+  return executarComLockCacheDashboardExecutivo_(
+    () => registrarReferenciaCacheDashboardExecutivoSemLock_(referencia)
+  );
+}
+
 function limparCacheDashboardExecutivoFinanceiro() {
-  return appCacheRemove(DASHBOARD_EXECUTIVO_CACHE_SCOPE);
+  return executarComLockCacheDashboardExecutivo_(() => {
+    const indexAtual = appCacheGetJson(DASHBOARD_EXECUTIVO_CACHE_INDEX_SCOPE);
+    const referencias = Array.isArray(indexAtual?.referencias) ? indexAtual.referencias : [];
+    referencias.forEach(referencia => appCacheRemove(getDashboardExecutivoCacheScope(referencia)));
+    // Remove tambem a chave legada, usada antes de o cache ser separado por mes.
+    appCacheRemove(DASHBOARD_EXECUTIVO_CACHE_SCOPE);
+    const resultado = appCacheRemove(DASHBOARD_EXECUTIVO_CACHE_INDEX_SCOPE);
+    return {
+      ...resultado,
+      referencias_removidas: referencias.length
+    };
+  });
 }
 
 function normalizarTextoDashboardExecutivo(valor, fallback) {
@@ -561,11 +609,21 @@ function criarSociosDashboardExecutivo(contexto, inicio, fim) {
   };
 }
 
-function obterDashboardExecutivoFinanceiro(referenciaYm, forcarRecarregar) {
+function obterDashboardExecutivoFinanceiro(referenciaYm, forcarRecarregar, ambiente) {
+  if (String(ambiente || '').trim()) {
+    if (typeof executarComAmbienteBancoDadosAutorizado_ !== 'function') {
+      throw new Error('Controle de ambiente indisponivel.');
+    }
+    return executarComAmbienteBancoDadosAutorizado_(
+      ambiente,
+      () => obterDashboardExecutivoFinanceiro(referenciaYm, forcarRecarregar, '')
+    );
+  }
   const intervalo = getIntervaloMesFinanceiro(referenciaYm);
   const referencia = intervalo.ref;
+  const cacheScope = getDashboardExecutivoCacheScope(referencia);
   if (!forcarRecarregar) {
-    const cached = appCacheGetJson(DASHBOARD_EXECUTIVO_CACHE_SCOPE);
+    const cached = appCacheGetJson(cacheScope);
     if (cached && cached.version === DASHBOARD_EXECUTIVO_VERSION && cached.referencia === referencia) {
       return cached;
     }
@@ -669,11 +727,14 @@ function obterDashboardExecutivoFinanceiro(referenciaYm, forcarRecarregar) {
     }
   };
 
-  appCachePutJson(
-    DASHBOARD_EXECUTIVO_CACHE_SCOPE,
-    resultado,
-    DASHBOARD_EXECUTIVO_CACHE_TTL_SEC
-  );
+  executarComLockCacheDashboardExecutivo_(() => {
+    appCachePutJson(
+      cacheScope,
+      resultado,
+      DASHBOARD_EXECUTIVO_CACHE_TTL_SEC
+    );
+    registrarReferenciaCacheDashboardExecutivoSemLock_(referencia);
+  });
   return resultado;
 }
 
@@ -713,7 +774,16 @@ function criarLinhaObrigacaoDashboardExecutivo(item) {
   };
 }
 
-function obterDetalhesDashboardExecutivoFinanceiro(referenciaYm, contextoDetalhe, filtroInput) {
+function obterDetalhesDashboardExecutivoFinanceiro(referenciaYm, contextoDetalhe, filtroInput, ambiente) {
+  if (String(ambiente || '').trim()) {
+    if (typeof executarComAmbienteBancoDadosAutorizado_ !== 'function') {
+      throw new Error('Controle de ambiente indisponivel.');
+    }
+    return executarComAmbienteBancoDadosAutorizado_(
+      ambiente,
+      () => obterDetalhesDashboardExecutivoFinanceiro(referenciaYm, contextoDetalhe, filtroInput, '')
+    );
+  }
   const intervalo = getIntervaloMesFinanceiro(referenciaYm);
   const contexto = criarContextoDashboardExecutivo(false);
   const chave = String(contextoDetalhe || '').trim().toLowerCase();

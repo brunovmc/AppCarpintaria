@@ -16,6 +16,10 @@
     let resizeObserver = null;
     let resizeTimer = null;
     let renderToken = 0;
+    let renderPendente = false;
+    let ultimaAssinaturaRenderizada = '';
+    let ultimaAssinaturaFallback = '';
+    let ultimaLarguraRenderizada = 0;
     const instancias = {};
 
     function escapar(valor) {
@@ -56,6 +60,62 @@
 
     function obterElemento(id) {
       return document.getElementById(id);
+    }
+
+    function assinaturaPayload(payload) {
+      try {
+        const serializado = JSON.stringify(payload || {}, (chave, valor) => chave === 'gerado_em' ? undefined : valor);
+        let hashA = 2166136261;
+        let hashB = 2246822519;
+        for (let i = 0; i < serializado.length; i += 1) {
+          const codigo = serializado.charCodeAt(i);
+          hashA = Math.imul(hashA ^ codigo, 16777619);
+          hashB = Math.imul(hashB ^ codigo, 3266489917);
+        }
+        return `${serializado.length}:${(hashA >>> 0).toString(36)}:${(hashB >>> 0).toString(36)}`;
+      } catch (error) {
+        return '';
+      }
+    }
+
+    function painelPodeDesenhar() {
+      const raiz = obterElemento('dashboardExecutive');
+      return !!(
+        raiz &&
+        raiz.clientWidth > 0 &&
+        raiz.getClientRects().length > 0 &&
+        !raiz.classList.contains('hidden') &&
+        !raiz.closest('.aba.hidden')
+      );
+    }
+
+    function agendarBaixaPrioridade(tarefa) {
+      return new Promise((resolve, reject) => {
+        const executar = () => {
+          try {
+            resolve(tarefa());
+          } catch (error) {
+            reject(error);
+          }
+        };
+        if (typeof window.requestIdleCallback === 'function') {
+          window.requestIdleCallback(executar, { timeout: 220 });
+        } else {
+          setTimeout(executar, 0);
+        }
+      });
+    }
+
+    function executarEtapas(etapas, token, indice = 0) {
+      if (token !== renderToken) return Promise.resolve(false);
+      if (indice >= etapas.length) return Promise.resolve(true);
+      return agendarBaixaPrioridade(() => {
+        if (token !== renderToken || !painelPodeDesenhar()) return false;
+        etapas[indice]();
+        return true;
+      }).then(executou => executou
+        ? executarEtapas(etapas, token, indice + 1)
+        : false);
     }
 
     function preencherTabela(detailsId, linhasHtml) {
@@ -153,7 +213,7 @@
 
     function desenhar(id, TipoGrafico, data, opcoes, onSelect) {
       const container = obterElemento(id);
-      if (!container) return;
+      if (!container || container.clientWidth <= 0 || container.getClientRects().length === 0) return false;
       container.classList.remove('dashx-chart-failed');
       container.innerHTML = '';
       const chart = new TipoGrafico(container);
@@ -169,13 +229,11 @@
         marcarFalhaGrafico(id, evento?.message || 'Consulte os dados abaixo.');
       });
       chart.draw(data, opcoes);
+      return true;
     }
 
     function desenharHistorico(payload, callbacks) {
       const lista = Array.isArray(payload?.historico_12_meses) ? payload.historico_12_meses : [];
-      preencherTabela('dashFallbackHistory', lista.map(item => `
-        <tr><td>${escapar(mesCurto(item.mes))}</td><td>${moeda(item.vendas)}</td><td>${moeda(item.recebimentos)}</td><td>${moeda(item.pagamentos)}</td><td>${moeda(item.fluxo_liquido)}</td><td>${moeda(item.media_movel_3)}</td></tr>
-      `).join(''));
       if (!lista.some(item => Number(item.recebimentos || 0) !== 0 || Number(item.pagamentos || 0) !== 0)) {
         marcarFalhaGrafico('dashChartHistory', 'Nenhum recebimento ou pagamento realizado no intervalo.');
         return;
@@ -210,9 +268,6 @@
 
     function desenharProjecao(payload, callbacks) {
       const lista = Array.isArray(payload?.projecao_13_semanas) ? payload.projecao_13_semanas : [];
-      preencherTabela('dashFallbackForecast', lista.map(item => `
-        <tr><td>${dataCurta(item.inicio)} a ${dataCurta(item.fim)}</td><td>${moeda(item.recebimentos)}</td><td>${moeda(item.pagamentos)}</td><td>${moeda(item.liquido)}</td><td>${moeda(item.acumulado)}</td></tr>
-      `).join(''));
       if (!lista.some(item => Number(item.recebimentos || 0) > 0 || Number(item.pagamentos || 0) > 0)) {
         marcarFalhaGrafico('dashChartForecast', 'Nenhuma parcela futura encontrada.');
         return;
@@ -252,9 +307,6 @@
 
     function desenharAging(payload, callbacks) {
       const lista = Array.isArray(payload?.posicao?.aging) ? payload.posicao.aging : [];
-      preencherTabela('dashFallbackAging', lista.map(item => `
-        <tr><td>${escapar(item.label)}</td><td>${moeda(item.receber)}</td><td>${moeda(item.pagar)}</td></tr>
-      `).join(''));
       if (!lista.some(item => Number(item.receber || 0) > 0 || Number(item.pagar || 0) > 0)) {
         marcarFalhaGrafico('dashChartAging', 'Nenhuma conta em aberto.');
         return;
@@ -280,9 +332,6 @@
 
     function desenharRanking(id, detailsId, lista, cabecalho, cor, contexto, callbacks) {
       const segura = Array.isArray(lista) ? lista : [];
-      preencherTabela(detailsId, segura.map(item => `
-        <tr><td>${escapar(item.label)}</td><td>${moeda(item.valor)}</td><td>${percentual(item.percentual)}</td></tr>
-      `).join(''));
       if (!segura.length) {
         marcarFalhaGrafico(id, 'Nenhum valor para o periodo selecionado.');
         return;
@@ -305,9 +354,6 @@
     function desenharSocios(payload, callbacks) {
       const lista = Array.isArray(payload?.socios?.itens) ? payload.socios.itens : [];
       const centro = obterElemento('dashPartnersCenter');
-      preencherTabela('dashFallbackPartners', lista.map(item => `
-        <tr><td>${escapar(item.label)}</td><td>${moeda(item.valor)}</td><td>${percentual(item.percentual)}</td></tr>
-      `).join(''));
       if (!lista.some(item => Number(item.valor || 0) > 0)) {
         centro?.classList.add('hidden');
         marcarFalhaGrafico('dashChartPartners', 'Nenhum pagamento atribuido no periodo.');
@@ -342,11 +388,18 @@
       let larguraAnterior = raiz.clientWidth;
       resizeObserver = new ResizeObserver(entries => {
         const largura = entries[0]?.contentRect?.width || raiz.clientWidth;
-        if (Math.abs(largura - larguraAnterior) < 16) return;
+        if (largura <= 0) {
+          larguraAnterior = 0;
+          renderPendente = !!ultimoPayload;
+          return;
+        }
+        if (Math.abs(largura - larguraAnterior) < 16 && !renderPendente) return;
         larguraAnterior = largura;
         clearTimeout(resizeTimer);
         resizeTimer = setTimeout(() => {
-          if (ultimoPayload) renderAll(ultimoPayload, ultimosCallbacks, { resize: true });
+          if (ultimoPayload && painelPodeDesenhar()) {
+            renderAll(ultimoPayload, ultimosCallbacks, { resize: true });
+          }
         }, 180);
       });
       resizeObserver.observe(raiz);
@@ -382,20 +435,53 @@
     function renderAll(payload, callbacks, options = {}) {
       ultimoPayload = payload || {};
       ultimosCallbacks = callbacks || {};
-      preencherFallbacks(ultimoPayload);
+      const assinatura = assinaturaPayload(ultimoPayload);
+      if (assinatura !== ultimaAssinaturaFallback) {
+        preencherFallbacks(ultimoPayload);
+        ultimaAssinaturaFallback = assinatura;
+      }
+      observarRedimensionamento();
+      if (!painelPodeDesenhar()) {
+        renderPendente = true;
+        return Promise.resolve(false);
+      }
+      const larguraAtual = obterElemento('dashboardExecutive')?.clientWidth || 0;
+      if (
+        assinatura === ultimaAssinaturaRenderizada &&
+        (!options.resize || Math.abs(larguraAtual - ultimaLarguraRenderizada) < 16)
+      ) {
+        renderPendente = false;
+        return Promise.resolve(true);
+      }
       const token = ++renderToken;
       return carregarGoogleCharts()
         .then(() => {
-          if (token !== renderToken) return;
-          desenharHistorico(ultimoPayload, ultimosCallbacks);
-          desenharProjecao(ultimoPayload, ultimosCallbacks);
-          desenharAging(ultimoPayload, ultimosCallbacks);
-          desenharRanking('dashChartExpenses', 'dashFallbackExpenses', ultimoPayload?.direcionadores?.gastos_categoria, 'Categoria', CORES.pagamentos, 'gasto_categoria', ultimosCallbacks);
-          desenharRanking('dashChartSales', 'dashFallbackSales', ultimoPayload?.direcionadores?.vendas_produto, 'Produto', CORES.vendas, 'venda_produto', ultimosCallbacks);
-          desenharRanking('dashChartCapital', 'dashFallbackCapital', ultimoPayload?.capital?.estoque_por_tipo, 'Tipo', CORES.neutra, 'capital_tipo', ultimosCallbacks);
-          desenharSocios(ultimoPayload, ultimosCallbacks);
-          observarRedimensionamento();
-          return true;
+          if (token !== renderToken || !painelPodeDesenhar()) return false;
+          const payloadAtual = ultimoPayload;
+          const callbacksAtuais = ultimosCallbacks;
+          const etapas = [
+            () => desenharHistorico(payloadAtual, callbacksAtuais),
+            () => desenharProjecao(payloadAtual, callbacksAtuais),
+            () => {
+              desenharAging(payloadAtual, callbacksAtuais);
+              desenharRanking('dashChartExpenses', 'dashFallbackExpenses', payloadAtual?.direcionadores?.gastos_categoria, 'Categoria', CORES.pagamentos, 'gasto_categoria', callbacksAtuais);
+              desenharRanking('dashChartSales', 'dashFallbackSales', payloadAtual?.direcionadores?.vendas_produto, 'Produto', CORES.vendas, 'venda_produto', callbacksAtuais);
+            },
+            () => {
+              desenharRanking('dashChartCapital', 'dashFallbackCapital', payloadAtual?.capital?.estoque_por_tipo, 'Tipo', CORES.neutra, 'capital_tipo', callbacksAtuais);
+              desenharSocios(payloadAtual, callbacksAtuais);
+            }
+          ];
+          return executarEtapas(etapas, token).then(concluiu => {
+            if (!concluiu || token !== renderToken) {
+              renderPendente = token === renderToken;
+              return false;
+            }
+            ultimaAssinaturaRenderizada = assinatura;
+            ultimaLarguraRenderizada = larguraAtual;
+            renderPendente = false;
+            return true;
+          });
         })
         .catch(error => {
           if (!options.resize) {
@@ -411,6 +497,10 @@
       renderToken += 1;
       ultimoPayload = null;
       ultimosCallbacks = null;
+      renderPendente = false;
+      ultimaAssinaturaRenderizada = '';
+      ultimaAssinaturaFallback = '';
+      ultimaLarguraRenderizada = 0;
       clearTimeout(resizeTimer);
       if (resizeObserver) resizeObserver.disconnect();
       resizeObserver = null;

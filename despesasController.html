@@ -11,6 +11,13 @@
     let carregandoInboxDespesas = false;
     let processandoComprovanteDespesa = false;
     let importandoComprovantesDrive = false;
+    let inboxDespesasRequest = null;
+    let inboxDespesasRecargaPendente = false;
+    let inboxDespesasAmbientePendente = '';
+    let inboxDespesasChaveRequest = '';
+    let inboxDespesasForcarPendente = false;
+    let inboxDespesasUltimoResultado = true;
+    const inboxDespesasLoadCallbacks = [];
     let inboxDespesasExpandida = false;
     let inboxDespesasEstadoInicialDefinido = false;
     const inboxDespesasBusyIds = new Set();
@@ -36,6 +43,8 @@
     let renderCompletionWaiters = [];
     let listenerFecharFiltrosAtivo = false;
     let listenerMutacoesRegistrado = false;
+    let despesasLoadSeq = 0;
+    let despesasAssinatura = '';
 
     const PAGE_SIZE = 30;
     const RENDER_CHUNK_SIZE = 8;
@@ -577,10 +586,26 @@
     }
 
     function persistirEReRenderizarLista(onDone) {
+      const proximaAssinatura = window.AppDataRevision?.signature?.(despesas) || '';
+      const alterou = !carregado || !proximaAssinatura || proximaAssinatura !== despesasAssinatura;
       carregado = true;
-      popularFiltrosListaDespesas();
-      renderDespesas(onDone);
+      despesasAssinatura = proximaAssinatura;
       salvarCacheDespesas();
+      if (!alterou) {
+        if (typeof onDone === 'function') onDone();
+        return false;
+      }
+      if (window.AppTabRefresh?.shouldRender?.('despesas') === false) {
+        window.AppTabRefresh?.markRenderPending?.('despesas');
+        if (typeof onDone === 'function') onDone();
+        return true;
+      }
+      popularFiltrosListaDespesas();
+      renderDespesas(() => {
+        window.AppTabRefresh?.notifyRendered?.('despesas', { changed: true });
+        if (typeof onDone === 'function') onDone();
+      });
+      return true;
     }
 
     function agendarSyncSilenciosoDespesas() {
@@ -889,6 +914,26 @@
       proximoFrame(processarChunk);
     }
 
+    function revealRecord(options = {}) {
+      const id = String(options?.id || options || '').trim();
+      const indice = listaFiltradaAtual.findIndex(item => String(item?.ID || '').trim() === id);
+      if (!id || indice < 0) return Promise.resolve(false);
+      return new Promise(resolve => {
+        const avancar = () => {
+          if (indice < qtdRenderizada) {
+            resolve(true);
+            return;
+          }
+          if (carregandoMais) {
+            setTimeout(avancar, 32);
+            return;
+          }
+          renderMaisItensDespesas(avancar);
+        };
+        avancar();
+      });
+    }
+
     function renderListaDespesas(itensFiltrados, onDone) {
       registrarConclusaoRender(onDone);
       const f = el();
@@ -942,10 +987,20 @@
       return true;
     }
 
-    function carregarDespesas(forcarRecarregar = false, onDone, ambiente = '') {
-      const exibindoCache = !forcarRecarregar && hidratarDespesasDoCache();
+    function carregarDespesas(forcarRecarregar = false, onDone, ambiente = '', options = {}) {
+      const seq = ++despesasLoadSeq;
+      const ambienteSolicitado = String(
+        ambiente || window.AppClientScope?.get?.()?.environment || 'prod'
+      ).trim().toLowerCase();
+      const dirtyGeneration = window.AppTabRefresh?.getDirtyGeneration?.('despesas') || 0;
+      const exibindoCache = !forcarRecarregar && options.hydrate !== false && hidratarDespesasDoCache();
       window.AppRequest.runner()
         .withFailureHandler(() => {
+          if (seq !== despesasLoadSeq) {
+            if (typeof onDone === 'function') onDone('superseded');
+            return;
+          }
+          window.AppTabRefresh?.reportResult?.('despesas', false, dirtyGeneration);
           if (exibindoCache) {
             if (window.AppRuntime?.setReadOnly) {
               window.AppRuntime.setReadOnly(true, 'Sem conexao com backend - exibindo cache local');
@@ -958,15 +1013,20 @@
           if (typeof onDone === 'function') onDone(false);
         })
         .withSuccessHandler(lista => {
+          if (seq !== despesasLoadSeq) {
+            if (typeof onDone === 'function') onDone('superseded');
+            return;
+          }
           if (window.AppRuntime?.setReadOnly) {
             window.AppRuntime.setReadOnly(false);
           }
+          window.AppTabRefresh?.reportResult?.('despesas', true, dirtyGeneration);
           despesas = reconciliarListaComMutacoes(Array.isArray(lista) ? lista : []);
           persistirEReRenderizarLista(() => {
             if (typeof onDone === 'function') onDone(true);
           });
         })
-        .listarDespesasGerais(!!forcarRecarregar, String(ambiente || '').trim());
+        .listarDespesasGerais(!!forcarRecarregar, ambienteSolicitado);
     }
 
     function setInboxStatus(mensagem = '', tipo = '') {
@@ -982,7 +1042,8 @@
       carregandoInboxDespesas = !!ativo;
       const f = el();
       if (f.btnAtualizarInboxDespesas) {
-        f.btnAtualizarInboxDespesas.disabled = carregandoInboxDespesas || processandoComprovanteDespesa || importandoComprovantesDrive;
+        f.btnAtualizarInboxDespesas.disabled = carregandoInboxDespesas;
+        f.btnAtualizarInboxDespesas.setAttribute('aria-busy', carregandoInboxDespesas ? 'true' : 'false');
         if (window.AppLoading?.setButtonLoading) {
           window.AppLoading.setButtonLoading(
             f.btnAtualizarInboxDespesas,
@@ -999,11 +1060,9 @@
     function setImportandoComprovantesDrive(ativo) {
       importandoComprovantesDrive = !!ativo;
       const f = el();
-      [f.inputComprovanteDespesa, f.btnUploadComprovanteDespesa].forEach(input => {
-        if (input) input.disabled = importandoComprovantesDrive || processandoComprovanteDespesa;
-      });
       if (f.btnBuscarComprovantesDrive) {
-        f.btnBuscarComprovantesDrive.disabled = importandoComprovantesDrive || processandoComprovanteDespesa;
+        f.btnBuscarComprovantesDrive.disabled = importandoComprovantesDrive;
+        f.btnBuscarComprovantesDrive.setAttribute('aria-busy', importandoComprovantesDrive ? 'true' : 'false');
         if (window.AppLoading?.setButtonLoading) {
           window.AppLoading.setButtonLoading(
             f.btnBuscarComprovantesDrive,
@@ -1015,16 +1074,16 @@
           f.btnBuscarComprovantesDrive.textContent = importandoComprovantesDrive ? 'Buscando...' : 'Buscar no Drive';
         }
       }
-      setCarregandoInboxDespesas(carregandoInboxDespesas);
     }
 
     function setProcessandoComprovanteDespesa(ativo) {
       processandoComprovanteDespesa = !!ativo;
       const f = el();
-      [f.inputComprovanteDespesa, f.btnUploadComprovanteDespesa, f.btnAtualizarInboxDespesas, f.btnBuscarComprovantesDrive].forEach(input => {
+      [f.inputComprovanteDespesa, f.btnUploadComprovanteDespesa].forEach(input => {
         if (input) input.disabled = processandoComprovanteDespesa;
       });
       if (f.btnUploadComprovanteDespesa) {
+        f.btnUploadComprovanteDespesa.setAttribute('aria-busy', processandoComprovanteDespesa ? 'true' : 'false');
         if (window.AppLoading?.setButtonLoading) {
           window.AppLoading.setButtonLoading(
             f.btnUploadComprovanteDespesa,
@@ -1037,9 +1096,6 @@
             ? 'Processando...'
             : 'Adicionar comprovante';
         }
-      }
-      if (!processandoComprovanteDespesa) {
-        setCarregandoInboxDespesas(carregandoInboxDespesas);
       }
     }
 
@@ -1222,7 +1278,7 @@
           } else {
             mostrarToast('Comprovante adicionado a Inbox.');
           }
-          return carregarInboxDespesas();
+          return carregarInboxDespesas(undefined, '', true);
         })
         .catch(error => {
           mostrarToast(error?.message || 'Erro ao enviar comprovante', 'erro');
@@ -1234,40 +1290,75 @@
         });
     }
 
-    function carregarInboxDespesas(onDone, ambiente = '') {
+    function carregarInboxDespesas(onDone, ambiente = '', forcar = false) {
+      if (typeof onDone === 'function') inboxDespesasLoadCallbacks.push(onDone);
       if (!window.AppRequest?.call) {
         inboxDespesas = [];
         destinosComprovantes = [];
         resumoComprovantes = {};
         renderInboxDespesas();
-        if (typeof onDone === 'function') onDone(true);
+        const callbacks = inboxDespesasLoadCallbacks.splice(0);
+        callbacks.forEach(callback => callback(true));
         return Promise.resolve([]);
       }
 
+      const ambienteSolicitado = String(ambiente || '').trim().toLowerCase() || getAmbienteBancoAtivoInbox();
+      const chaveSolicitada = `${ambienteSolicitado}:${filtroInboxComprovantes}`;
+      if (inboxDespesasRequest) {
+        if (forcar || chaveSolicitada !== inboxDespesasChaveRequest) {
+          inboxDespesasRecargaPendente = true;
+          inboxDespesasForcarPendente = inboxDespesasForcarPendente || forcar;
+          inboxDespesasAmbientePendente = ambienteSolicitado;
+        }
+        return inboxDespesasRequest;
+      }
+
+      const filtroSolicitado = filtroInboxComprovantes;
+      inboxDespesasChaveRequest = chaveSolicitada;
+      inboxDespesasUltimoResultado = true;
       setCarregandoInboxDespesas(true);
-      return window.AppRequest.call('obterContextoComprovantesFinanceiros', [
-        filtroInboxComprovantes,
-        String(ambiente || '').trim() || getAmbienteBancoAtivoInbox()
+      inboxDespesasRequest = window.AppRequest.call('obterContextoComprovantesFinanceiros', [
+        filtroSolicitado,
+        ambienteSolicitado
       ], {
         context: 'despesas.inbox.list',
         errorMessage: 'Erro ao carregar comprovantes'
       })
         .then(contexto => {
+          if (filtroSolicitado !== filtroInboxComprovantes || ambienteSolicitado !== getAmbienteBancoAtivoInbox()) {
+            inboxDespesasRecargaPendente = true;
+            return inboxDespesas;
+          }
           inboxDespesas = Array.isArray(contexto?.comprovantes) ? contexto.comprovantes : [];
           destinosComprovantes = Array.isArray(contexto?.destinos) ? contexto.destinos : [];
           resumoComprovantes = contexto?.resumo && typeof contexto.resumo === 'object' ? contexto.resumo : {};
-          setCarregandoInboxDespesas(false);
           renderInboxDespesas();
-          if (typeof onDone === 'function') onDone(true);
           return inboxDespesas;
         })
         .catch(error => {
-          setCarregandoInboxDespesas(false);
+          inboxDespesasUltimoResultado = false;
           mostrarToast(error?.message || 'Erro ao carregar comprovantes', 'erro');
           setInboxStatus(error?.message || 'Erro ao carregar comprovantes', 'erro');
-          if (typeof onDone === 'function') onDone(false);
           return [];
+        })
+        .finally(() => {
+          inboxDespesasRequest = null;
+          if (inboxDespesasRecargaPendente) {
+            const proximoAmbiente = inboxDespesasAmbientePendente;
+            const proximoForcar = inboxDespesasForcarPendente;
+            inboxDespesasRecargaPendente = false;
+            inboxDespesasAmbientePendente = '';
+            inboxDespesasForcarPendente = false;
+            return carregarInboxDespesas(undefined, proximoAmbiente, proximoForcar);
+          }
+          inboxDespesasChaveRequest = '';
+          setCarregandoInboxDespesas(false);
+          const callbacks = inboxDespesasLoadCallbacks.splice(0);
+          callbacks.forEach(callback => {
+            try { callback(inboxDespesasUltimoResultado); } catch (error) { /* sem acao */ }
+          });
         });
+      return inboxDespesasRequest;
     }
 
     function importarComprovantesDoDrive() {
@@ -1276,7 +1367,7 @@
       setImportandoComprovantesDrive(true);
       setInboxDespesasExpandida(true);
       setInboxStatus('Buscando novos comprovantes no Drive...', 'info');
-      window.AppRequest.call('importarComprovantesDriveParaInbox', [5, getAmbienteBancoAtivoInbox()], {
+      return window.AppRequest.call('importarComprovantesDriveParaInbox', [5, getAmbienteBancoAtivoInbox()], {
         context: 'despesas.inbox.drive.import',
         errorMessage: 'Erro ao buscar comprovantes no Drive'
       })
@@ -1288,7 +1379,7 @@
           if (ignorados) partes.push(`${ignorados} ja importado(s)`);
           if (erros) partes.push(`${erros} com erro`);
           mostrarToast(`Busca concluida: ${partes.join(', ')}.`, erros ? 'erro' : 'sucesso');
-          return carregarInboxDespesas();
+          return carregarInboxDespesas(undefined, '', true);
         })
         .catch(error => {
           mostrarToast(error?.message || 'Erro ao buscar comprovantes no Drive', 'erro');
@@ -1345,7 +1436,7 @@
       return opcoes.join('');
     }
 
-    function montarAlocacoesComprovante(item, busy) {
+    function montarAlocacoesComprovante(item) {
       const alocacoes = Array.isArray(item?.alocacoes) ? item.alocacoes : [];
       if (alocacoes.length === 0) return '<span class="despesas-inbox-vazio">Nenhum vinculo registrado.</span>';
       return alocacoes.map(alocacao => {
@@ -1360,21 +1451,21 @@
               <span>${escapeHtml(formatarMoeda(alocacao.valor_alocado))}${escapeHtml(parcela)}</span>
             </div>
             ${alocacao.pagamento_id
-              ? `<button type="button" class="btn-secundario" onclick="DespesasController.desfazerAlocacaoComprovante('${escapeHtml(item.ID)}', '${escapeHtml(alocacao.pagamento_id)}')" ${busy ? 'disabled' : ''}>Desfazer</button>`
+              ? `<button type="button" class="btn-secundario" onclick="DespesasController.desfazerAlocacaoComprovante('${escapeHtml(item.ID)}', '${escapeHtml(alocacao.pagamento_id)}')">Desfazer</button>`
               : '<span class="despesas-inbox-legado">Confirmado no fluxo anterior</span>'}
           </div>
         `;
       }).join('');
     }
 
-    function montarSugestoesComprovante(item, busy) {
+    function montarSugestoesComprovante(item) {
       const sugestoes = Array.isArray(item?.sugestoes) ? item.sugestoes : [];
       if (sugestoes.length === 0) return '';
       return `
         <div class="despesas-inbox-sugestoes">
           <span class="despesa-card-resumo-label">Sugestoes de vinculo</span>
           ${sugestoes.map(sugestao => `
-            <button type="button" class="despesas-inbox-sugestao" onclick="DespesasController.selecionarSugestaoComprovante('${escapeHtml(item.ID)}', '${escapeHtml(sugestao.chave)}')" ${busy ? 'disabled' : ''}>
+            <button type="button" class="despesas-inbox-sugestao" onclick="DespesasController.selecionarSugestaoComprovante('${escapeHtml(item.ID)}', '${escapeHtml(sugestao.chave)}')">
               <strong>${escapeHtml(sugestao.label || sugestao.chave)}</strong>
               <span>Compatibilidade ${Math.round(Number(sugestao.score || 0))}/100 · ${escapeHtml((sugestao.motivos || []).join(', '))}</span>
             </button>
@@ -1387,7 +1478,6 @@
       const id = String(item?.ID || '').trim();
       const status = String(item?.status_conciliacao || item?.status || '').trim().toUpperCase() || 'PENDENTE';
       const statusClasse = status.toLowerCase().replace(/[^a-z0-9_-]+/g, '-');
-      const busy = inboxDespesasBusyIds.has(id);
       const confianca = Math.round(Number(item?.confianca || 0) * 100);
       const saldo = Number(item?.saldo_nao_alocado || 0);
       const alocado = Number(item?.valor_alocado || 0);
@@ -1478,11 +1568,11 @@
 
         <div class="despesas-inbox-vinculos">
           <span class="despesa-card-resumo-label">Vinculos registrados</span>
-          ${montarAlocacoesComprovante(item, busy)}
+          ${montarAlocacoesComprovante(item)}
         </div>
 
         ${!conciliado ? `
-          ${montarSugestoesComprovante(item, busy)}
+          ${montarSugestoesComprovante(item)}
           <div class="despesas-inbox-conciliar">
             <label class="campo-ajuda-wrap despesas-inbox-destino">
               <span class="campo-ajuda-tag">Vincular saldo a</span>
@@ -1492,12 +1582,12 @@
               <span class="campo-ajuda-tag">Valor deste vinculo (R$)</span>
               <input data-campo="valor_alocado" type="number" min="0.01" max="${escapeHtml(saldo)}" step="0.01" value="${escapeHtml(valorInicial.toFixed(2))}">
             </label>
-            <button type="button" onclick="DespesasController.vincularComprovante('${escapeHtml(id)}')" ${busy ? 'disabled' : ''}>Vincular pagamento</button>
+            <button type="button" onclick="DespesasController.vincularComprovante('${escapeHtml(id)}')">Vincular pagamento</button>
           </div>
           <div class="despesas-inbox-card-acoes">
-            <button type="button" class="btn-secundario" onclick="DespesasController.salvarRevisaoComprovante('${escapeHtml(id)}')" ${busy ? 'disabled' : ''}>Salvar revisao</button>
-            <button type="button" class="btn-secundario" onclick="DespesasController.registrarComprovanteComoDespesa('${escapeHtml(id)}')" ${busy ? 'disabled' : ''}>Registrar saldo como despesa simples</button>
-            <button type="button" class="btn-perigo" onclick="DespesasController.descartarInboxDespesa('${escapeHtml(id)}')" ${busy || alocado > 0.009 ? 'disabled' : ''}>Descartar</button>
+            <button type="button" class="btn-secundario" onclick="DespesasController.salvarRevisaoComprovante('${escapeHtml(id)}')">Salvar revisao</button>
+            <button type="button" class="btn-secundario" onclick="DespesasController.registrarComprovanteComoDespesa('${escapeHtml(id)}')">Registrar saldo como despesa simples</button>
+            <button type="button" class="btn-perigo" onclick="DespesasController.descartarInboxDespesa('${escapeHtml(id)}')" ${alocado > 0.009 ? 'disabled' : ''}>Descartar</button>
           </div>
         ` : '<div class="despesas-inbox-concluido">Comprovante totalmente conciliado.</div>'}
       `;
@@ -1539,6 +1629,7 @@
       const fragment = document.createDocumentFragment();
       itens.forEach(item => fragment.appendChild(montarCardInboxDespesa(item)));
       f.listaInboxDespesas.appendChild(fragment);
+      inboxDespesasBusyIds.forEach(id => setInboxItemBusy(id, true));
     }
 
     function getInboxCard(id) {
@@ -1585,8 +1676,19 @@
       const card = getInboxCard(alvo);
       if (card) {
         card.classList.toggle('is-busy', !!ativo);
+        card.setAttribute('aria-busy', ativo ? 'true' : 'false');
         card.querySelectorAll('button, input, select, textarea').forEach(controle => {
-          controle.disabled = !!ativo;
+          if (ativo) {
+            if (!Object.prototype.hasOwnProperty.call(controle.dataset, 'busyWasDisabled')) {
+              controle.dataset.busyWasDisabled = controle.disabled ? '1' : '0';
+            }
+            controle.disabled = true;
+            return;
+          }
+          if (Object.prototype.hasOwnProperty.call(controle.dataset, 'busyWasDisabled')) {
+            controle.disabled = controle.dataset.busyWasDisabled === '1';
+            delete controle.dataset.busyWasDisabled;
+          }
         });
       }
     }
@@ -1621,10 +1723,11 @@
     }
 
     function atualizarAposConciliacaoComprovante() {
-      carregarInboxDespesas();
+      const recarga = carregarInboxDespesas(undefined, '', true);
       carregarDespesas(true);
       window.ComprasController?.syncFromBackend?.();
-      window.DashboardController?.atualizar?.(true);
+      notificarDashboardAlterado();
+      return recarga;
     }
 
     function gerarClientRequestIdComprovante(id) {
@@ -1669,7 +1772,7 @@
         .then(resultado => {
           if (!resultado?.ok) throw new Error('O vinculo nao foi confirmado pelo servidor.');
           mostrarToast('Pagamento vinculado com sucesso.');
-          atualizarAposConciliacaoComprovante();
+          return atualizarAposConciliacaoComprovante();
         })
         .catch(error => {
           mostrarToast(error?.message || 'Erro ao vincular comprovante', 'erro');
@@ -1710,7 +1813,7 @@
         .then(resultado => {
           if (!resultado?.ok) throw new Error('A despesa nao foi confirmada pelo servidor.');
           mostrarToast('Saldo registrado como despesa simples.');
-          atualizarAposConciliacaoComprovante();
+          return atualizarAposConciliacaoComprovante();
         })
         .catch(error => mostrarToast(error?.message || 'Erro ao registrar despesa simples', 'erro'))
         .finally(() => setInboxItemBusy(inboxId, false));
@@ -1737,7 +1840,7 @@
         .then(resultado => {
           if (!resultado?.ok) throw new Error('A revisao nao foi confirmada pelo servidor.');
           mostrarToast('Revisao do comprovante salva.');
-          carregarInboxDespesas();
+          return carregarInboxDespesas(undefined, '', true);
         })
         .catch(error => mostrarToast(error?.message || 'Erro ao salvar revisao', 'erro'))
         .finally(() => setInboxItemBusy(inboxId, false));
@@ -1760,7 +1863,7 @@
         .then(resultado => {
           if (!resultado?.ok) throw new Error('O vinculo nao foi removido pelo servidor.');
           mostrarToast('Vinculo desfeito.');
-          atualizarAposConciliacaoComprovante();
+          return atualizarAposConciliacaoComprovante();
         })
         .catch(error => mostrarToast(error?.message || 'Erro ao desfazer vinculo', 'erro'))
         .finally(() => setInboxItemBusy(inboxId, false));
@@ -1779,11 +1882,11 @@
       })
         .then(() => {
           mostrarToast('Item da Inbox descartado.');
-          carregarInboxDespesas();
+          return carregarInboxDespesas(undefined, '', true);
         })
         .catch(error => {
           mostrarToast(error?.message || 'Erro ao descartar item da Inbox', 'erro');
-          carregarInboxDespesas();
+          return carregarInboxDespesas(undefined, '', true);
         })
         .finally(() => {
           setInboxItemBusy(inboxId, false);
@@ -1807,10 +1910,9 @@
         if (f.despesaDataCompetencia && !f.despesaDataCompetencia.value) {
           f.despesaDataCompetencia.value = getHojeISO();
         }
-        carregarValidacoes(() => {
-          carregarDespesas(false);
-          carregarInboxDespesas();
-        });
+        carregarValidacoes();
+        carregarDespesas(false);
+        carregarInboxDespesas();
         iniciado = true;
         return;
       }
@@ -1821,21 +1923,28 @@
       return carregado;
     }
 
-    function syncFromBackend(onDone, ambiente = '') {
+    function syncFromBackend(onDone, ambiente = '', options = {}) {
+      const incluirInbox = options.includeSecondary === true;
+      const totalEsperado = incluirInbox ? 2 : 1;
       let concluidos = 0;
       let sucesso = true;
+      let superseded = false;
       const done = resultado => {
         concluidos += 1;
+        superseded = superseded || resultado === 'superseded';
         sucesso = sucesso && resultado !== false;
-        if (concluidos >= 2 && typeof onDone === 'function') onDone(sucesso);
+        if (concluidos >= totalEsperado && typeof onDone === 'function') {
+          onDone(sucesso ? (superseded ? 'superseded' : true) : false);
+        }
       };
-      carregarDespesas(true, done, ambiente);
-      carregarInboxDespesas(done, ambiente);
+      carregarDespesas(options.force === true, done, ambiente, { hydrate: false });
+      if (incluirInbox) carregarInboxDespesas(done, ambiente, options.force === true);
     }
 
-    function setFiltroTexto(texto) {
+    function setFiltroTexto(texto, onDone, options = {}) {
       filtroTexto = String(texto || '');
-      renderDespesas();
+      if (options.refreshFilters === true) popularFiltrosListaDespesas();
+      renderDespesas(onDone);
     }
 
     function getById(id) {
@@ -2521,6 +2630,7 @@
       setFiltroTexto,
       getById,
       abrirDetalhes,
+      revealRecord,
       togglePainelFiltros,
       fecharPainelFiltros,
 

@@ -7,6 +7,9 @@
     let salvando = false;
     let mutationLockToken = null;
     let listenerMutacoesRegistrado = false;
+    let producaoLoadSeq = 0;
+    let produtosOpcoesLoadSeq = 0;
+    let estoqueOpcoesLoadSeq = 0;
 
     let produtos = [];
     let estoqueOpcoes = [];
@@ -98,11 +101,25 @@
       });
     }
 
-    function persistirEReRenderizarProducao(lista) {
+    function persistirEReRenderizarProducao(lista, onDone) {
+      let alterou = false;
       if (Array.isArray(lista)) {
-        ProducaoStore.set(lista);
+        alterou = ProducaoStore.set(lista) !== false;
       }
-      renderListaAtual();
+      if (!alterou && ProducaoStore.isLoaded()) {
+        if (typeof onDone === 'function') onDone();
+        return false;
+      }
+      if (window.AppTabRefresh?.shouldRender?.('producao') === false) {
+        window.AppTabRefresh?.markRenderPending?.('producao');
+        if (typeof onDone === 'function') onDone();
+        return true;
+      }
+      renderListaAtual(() => {
+        window.AppTabRefresh?.notifyRendered?.('producao', { changed: true });
+        if (typeof onDone === 'function') onDone();
+      });
+      return true;
     }
 
     function agendarSyncSilenciosoProducao() {
@@ -216,12 +233,12 @@
       }
     }
 
-    function renderListaAtual() {
+    function renderListaAtual(onDone) {
       if (typeof window.aplicarBuscaProducao === 'function') {
-        window.aplicarBuscaProducao();
+        window.aplicarBuscaProducao(onDone);
         return;
       }
-      ProducaoUI.renderLista(ProducaoStore.get());
+      ProducaoUI.renderLista(ProducaoStore.get(), onDone);
     }
 
     function hidratarProducaoDoCache() {
@@ -397,7 +414,11 @@
       }));
     }
 
-    function carregarProdutos(forcarRecarregar = false, onDone) {
+    function carregarProdutos(forcarRecarregar = false, onDone, ambiente = '') {
+      const seq = ++produtosOpcoesLoadSeq;
+      const ambienteSolicitado = String(
+        ambiente || window.AppClientScope?.get?.()?.environment || 'prod'
+      ).trim().toLowerCase();
       if (!forcarRecarregar && window.ProdutosStore?.get) {
         const locais = window.ProdutosStore.get();
         if (Array.isArray(locais) && locais.length > 0) {
@@ -407,17 +428,29 @@
       }
       window.AppRequest.runner()
         .withSuccessHandler(lista => {
+          if (seq !== produtosOpcoesLoadSeq) {
+            if (typeof onDone === 'function') onDone('superseded');
+            return;
+          }
           produtos = Array.isArray(lista) ? lista : [];
           ProducaoUI.renderProdutos(produtos);
-          if (typeof onDone === 'function') onDone();
+          if (typeof onDone === 'function') onDone(true);
         })
         .withFailureHandler(() => {
-          if (typeof onDone === 'function') onDone();
+          if (seq !== produtosOpcoesLoadSeq) {
+            if (typeof onDone === 'function') onDone('superseded');
+            return;
+          }
+          if (typeof onDone === 'function') onDone(false);
         })
-        .listarProdutos(!!forcarRecarregar);
+        .listarProdutos(!!forcarRecarregar, ambienteSolicitado);
     }
 
-    function carregarEstoqueOpcoes(forcarRecarregar = false, onDone) {
+    function carregarEstoqueOpcoes(forcarRecarregar = false, onDone, ambiente = '') {
+      const seq = ++estoqueOpcoesLoadSeq;
+      const ambienteSolicitado = String(
+        ambiente || window.AppClientScope?.get?.()?.environment || 'prod'
+      ).trim().toLowerCase();
       if (!forcarRecarregar && window.EstoqueStore?.get) {
         const locais = window.EstoqueStore.get();
         if (Array.isArray(locais) && locais.length > 0) {
@@ -427,16 +460,24 @@
       }
       window.AppRequest.runner()
         .withSuccessHandler(lista => {
+          if (seq !== estoqueOpcoesLoadSeq) {
+            if (typeof onDone === 'function') onDone('superseded');
+            return;
+          }
           estoqueOpcoes = Array.isArray(lista) ? lista : [];
           ProducaoUI.setEstoqueOpcoes?.(estoqueOpcoes);
-          if (typeof onDone === 'function') onDone();
+          if (typeof onDone === 'function') onDone(true);
         })
         .withFailureHandler(() => {
+          if (seq !== estoqueOpcoesLoadSeq) {
+            if (typeof onDone === 'function') onDone('superseded');
+            return;
+          }
           estoqueOpcoes = [];
           ProducaoUI.setEstoqueOpcoes?.([]);
-          if (typeof onDone === 'function') onDone();
+          if (typeof onDone === 'function') onDone(false);
         })
-        .listarEstoque(!!forcarRecarregar);
+        .listarEstoque(!!forcarRecarregar, ambienteSolicitado);
     }
 
     function carregarValidacoes() {
@@ -504,42 +545,62 @@
         .listarReceitasProduto(produtoId);
     }
 
-    function carregarProducao(forcarRecarregar = false, onDone) {
-      const exibindoCache = !forcarRecarregar && hidratarProducaoDoCache();
+    function carregarProducao(forcarRecarregar = false, onDone, options = {}) {
+      const seq = ++producaoLoadSeq;
+      const ambienteSolicitado = String(
+        options.ambiente || window.AppClientScope?.get?.()?.environment || 'prod'
+      ).trim().toLowerCase();
+      const dirtyGeneration = window.AppTabRefresh?.getDirtyGeneration?.('producao') || 0;
+      const exibindoCache = !forcarRecarregar && options.hydrate !== false && hidratarProducaoDoCache();
       window.AppRequest.runner()
         .withSuccessHandler(lista => {
+          if (seq !== producaoLoadSeq) {
+            if (typeof onDone === 'function') onDone('superseded');
+            return;
+          }
           if (window.AppRuntime?.setReadOnly) {
             window.AppRuntime.setReadOnly(false);
           }
-          persistirEReRenderizarProducao(reconciliarListaProducaoComMutacoes(lista));
-          if (typeof onDone === 'function') onDone();
+          window.AppTabRefresh?.reportResult?.('producao', true, dirtyGeneration);
+          persistirEReRenderizarProducao(reconciliarListaProducaoComMutacoes(lista), () => {
+            if (typeof onDone === 'function') onDone(true);
+          });
         })
         .withFailureHandler(err => {
+          if (seq !== producaoLoadSeq) {
+            if (typeof onDone === 'function') onDone('superseded');
+            return;
+          }
+          window.AppTabRefresh?.reportResult?.('producao', false, dirtyGeneration);
           if (exibindoCache) {
             if (window.AppRuntime?.setReadOnly) {
               window.AppRuntime.setReadOnly(true, 'Sem conexao com backend - exibindo cache local');
             }
             mostrarToast('Exibindo ultimo snapshot em cache', 'erro');
-            if (typeof onDone === 'function') onDone();
+            if (typeof onDone === 'function') onDone(false);
             return;
           }
           const msg = err?.message || 'Erro ao carregar producao';
           mostrarToast(msg, 'erro');
-          if (typeof onDone === 'function') onDone();
+          if (typeof onDone === 'function') onDone(false);
         })
-        .listarProducao(!!forcarRecarregar);
+        .listarProducao(!!forcarRecarregar, ambienteSolicitado);
     }
 
-    function syncFromBackend(onDone) {
+    function syncFromBackend(onDone, ambiente = '', options = {}) {
       let pendencias = 3;
-      const concluir = () => {
+      let sucesso = true;
+      let superseded = false;
+      const concluir = resultado => {
         pendencias -= 1;
+        superseded = superseded || resultado === 'superseded';
+        sucesso = sucesso && resultado !== false;
         if (pendencias > 0) return;
-        if (typeof onDone === 'function') onDone();
+        if (typeof onDone === 'function') onDone(sucesso ? (superseded ? 'superseded' : true) : false);
       };
-      carregarProdutos(true, concluir);
-      carregarEstoqueOpcoes(true, concluir);
-      carregarProducao(true, concluir);
+      carregarProdutos(options.force === true, concluir, ambiente);
+      carregarEstoqueOpcoes(options.force === true, concluir, ambiente);
+      carregarProducao(options.force === true, concluir, { hydrate: false, ambiente });
     }
 
     function salvar() {

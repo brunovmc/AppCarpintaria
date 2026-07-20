@@ -6,6 +6,7 @@
     let salvando = false;
     let mutationLockToken = null;
     let listenerMutacoesRegistrado = false;
+    let produtosLoadSeq = 0;
 
     let receitasCache = {};
     let tiposValidacao = [];
@@ -203,12 +204,26 @@
       });
     }
 
-    function persistirEReRenderizarProdutos(lista) {
+    function persistirEReRenderizarProdutos(lista, onDone) {
+      let alterou = false;
       if (Array.isArray(lista)) {
-        ProdutosStore.set(lista);
+        alterou = ProdutosStore.set(lista) !== false;
+      }
+      if (!alterou && ProdutosStore.isLoaded()) {
+        if (typeof onDone === 'function') onDone();
+        return false;
+      }
+      if (window.AppTabRefresh?.shouldRender?.('produtos') === false) {
+        window.AppTabRefresh?.markRenderPending?.('produtos');
+        if (typeof onDone === 'function') onDone();
+        return true;
       }
       atualizarOpcoesReceitas();
-      renderListaAtual();
+      renderListaAtual(() => {
+        window.AppTabRefresh?.notifyRendered?.('produtos', { changed: true });
+        if (typeof onDone === 'function') onDone();
+      });
+      return true;
     }
 
     function agendarSyncSilenciosoProdutos() {
@@ -390,12 +405,12 @@
         });
     }
 
-    function renderListaAtual() {
+    function renderListaAtual(onDone) {
       if (window.aplicarBuscaProdutos) {
-        aplicarBuscaProdutos();
+        aplicarBuscaProdutos(onDone);
         return;
       }
-      ProdutosUI.renderLista(ProdutosStore.get());
+      ProdutosUI.renderLista(ProdutosStore.get(), onDone);
     }
 
     function hidratarProdutosDoCache() {
@@ -405,13 +420,23 @@
       return true;
     }
 
-    function carregarProdutos(forcarRecarregar = false, onDone) {
-      const exibindoCache = !forcarRecarregar && hidratarProdutosDoCache();
+    function carregarProdutos(forcarRecarregar = false, onDone, options = {}) {
+      const seq = ++produtosLoadSeq;
+      const ambienteSolicitado = String(
+        options.ambiente || window.AppClientScope?.get?.()?.environment || 'prod'
+      ).trim().toLowerCase();
+      const dirtyGeneration = window.AppTabRefresh?.getDirtyGeneration?.('produtos') || 0;
+      const exibindoCache = !forcarRecarregar && options.hydrate !== false && hidratarProdutosDoCache();
       window.AppRequest.runner()
         .withSuccessHandler(lista => {
+          if (seq !== produtosLoadSeq) {
+            if (typeof onDone === 'function') onDone('superseded');
+            return;
+          }
           if (window.AppRuntime?.setReadOnly) {
             window.AppRuntime.setReadOnly(false);
           }
+          window.AppTabRefresh?.reportResult?.('produtos', true, dirtyGeneration);
           const atual = ProdutosStore.get();
           const map = {};
           atual.forEach(p => {
@@ -429,26 +454,32 @@
             };
           });
 
-          persistirEReRenderizarProdutos(reconciliarListaProdutosComMutacoes(normalizada));
-          if (typeof onDone === 'function') onDone();
+          persistirEReRenderizarProdutos(reconciliarListaProdutosComMutacoes(normalizada), () => {
+            if (typeof onDone === 'function') onDone(true);
+          });
         })
         .withFailureHandler(() => {
+          if (seq !== produtosLoadSeq) {
+            if (typeof onDone === 'function') onDone('superseded');
+            return;
+          }
+          window.AppTabRefresh?.reportResult?.('produtos', false, dirtyGeneration);
           if (exibindoCache) {
             if (window.AppRuntime?.setReadOnly) {
               window.AppRuntime.setReadOnly(true, 'Sem conexao com backend - exibindo cache local');
             }
             mostrarToast('Exibindo ultimo snapshot em cache', 'erro');
-            if (typeof onDone === 'function') onDone();
+            if (typeof onDone === 'function') onDone(false);
             return;
           }
           mostrarToast('Erro ao carregar produtos', 'erro');
-          if (typeof onDone === 'function') onDone();
+          if (typeof onDone === 'function') onDone(false);
         })
-        .listarProdutos(!!forcarRecarregar);
+        .listarProdutos(!!forcarRecarregar, ambienteSolicitado);
     }
 
-    function syncFromBackend(onDone) {
-      carregarProdutos(true, onDone);
+    function syncFromBackend(onDone, ambiente = '', options = {}) {
+      carregarProdutos(options.force === true, onDone, { hydrate: false, ambiente });
     }
 
     function carregarReceitas(produtoId, forcar = false, onDone) {

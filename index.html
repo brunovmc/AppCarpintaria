@@ -10,10 +10,10 @@
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&family=Source+Sans+3:wght@400;500;600;700&display=swap">
     <style>
       .hidden { display: none !important; }
-      body.app-booting .navbar,
+      body.app-booting .navbar-actions,
       body.app-booting #appDbEnvBanner,
       body.app-booting #appSyncBanner,
-      body.app-booting .app-workspace-header,
+      body.app-booting .app-workspace-chips,
       body.app-booting .top-bar,
       body.app-booting .painel-filtro-inline,
       body.app-booting .aba,
@@ -23,6 +23,28 @@
       body.app-booting #toast,
       body.app-booting #appAccessDenied {
         visibility: visible;
+      }
+      body:not(.app-booting) #appBootSkeleton { display: none; }
+      #appBootSkeleton {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 12px;
+        margin: 4px 0 20px;
+      }
+      .app-boot-skeleton-card {
+        min-height: 112px;
+        border-radius: 16px;
+        background: linear-gradient(100deg, #eef1f4 25%, #f8f9fa 42%, #eef1f4 60%);
+        background-size: 240% 100%;
+        animation: appBootPulse 1.25s ease-in-out infinite;
+      }
+      @keyframes appBootPulse {
+        from { background-position: 100% 0; }
+        to { background-position: -100% 0; }
+      }
+      @media (max-width: 720px) {
+        #appBootSkeleton { grid-template-columns: 1fr; }
+        .app-boot-skeleton-card:nth-child(n+3) { display: none; }
       }
     </style>
     <?!= include('styles'); ?>
@@ -103,6 +125,12 @@
             <strong id="appWorkspaceEnvBadge">PROD</strong>
           </div>
         </div>
+      </section>
+
+      <section id="appBootSkeleton" aria-label="Inicializando aplicativo" aria-busy="true">
+        <div class="app-boot-skeleton-card"></div>
+        <div class="app-boot-skeleton-card"></div>
+        <div class="app-boot-skeleton-card"></div>
       </section>
 
       <div id="topBarEstoque" class="top-bar hidden">

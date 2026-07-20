@@ -5,11 +5,18 @@
     const JPEG_QUALITY = 0.86;
     let iniciado = false;
     let expandido = false;
-    let carregando = false;
+    let carregandoContexto = false;
+    let processandoUpload = false;
+    let importandoDrive = false;
+    let ativandoBuscaAutomatica = false;
+    let contextoRequest = null;
+    let recargaContextoPendente = false;
+    let statusErroOperacao = '';
     let documentos = [];
     let validacoes = {};
     let estoque = [];
     const busyIds = new Set();
+    const busyAcoes = new Map();
 
     const byId = id => document.getElementById(id);
     const escapeHtml = valor => String(valor ?? '')
@@ -67,13 +74,68 @@
       }
     }
 
-    function setCarregando(ativo, texto) {
-      carregando = !!ativo;
-      ['btnUploadDocumentoCompra', 'btnAtualizarDocumentosCompra', 'btnBuscarDocumentosCompraDrive'].forEach(id => {
-        const el = byId(id);
-        if (el) el.disabled = carregando;
-      });
-      mostrarStatus(carregando ? (texto || 'Carregando documentos...') : '', false);
+    function atualizarControlesOperacoes() {
+      const input = byId('inputDocumentoCompra');
+      const btnUpload = byId('btnUploadDocumentoCompra');
+      const btnAtualizar = byId('btnAtualizarDocumentosCompra');
+      const btnDrive = byId('btnBuscarDocumentosCompraDrive');
+
+      if (input) input.disabled = processandoUpload;
+      if (btnUpload) {
+        btnUpload.disabled = processandoUpload;
+        btnUpload.textContent = processandoUpload ? 'Processando...' : 'Enviar documento';
+        btnUpload.setAttribute('aria-busy', processandoUpload ? 'true' : 'false');
+      }
+      if (btnAtualizar) {
+        btnAtualizar.disabled = carregandoContexto;
+        btnAtualizar.textContent = carregandoContexto ? 'Atualizando...' : 'Atualizar';
+        btnAtualizar.setAttribute('aria-busy', carregandoContexto ? 'true' : 'false');
+      }
+      if (btnDrive) {
+        btnDrive.disabled = importandoDrive;
+        btnDrive.textContent = importandoDrive ? 'Buscando...' : 'Buscar no Drive';
+        btnDrive.setAttribute('aria-busy', importandoDrive ? 'true' : 'false');
+      }
+    }
+
+    function atualizarStatusOperacoes() {
+      if (processandoUpload) {
+        mostrarStatus('Preparando e lendo o documento...', false);
+      } else if (importandoDrive) {
+        mostrarStatus('Buscando documentos na pasta do Drive...', false);
+      } else if (carregandoContexto) {
+        mostrarStatus('Atualizando documentos de compra...', false);
+      } else if (statusErroOperacao) {
+        mostrarStatus(statusErroOperacao, true);
+      } else {
+        mostrarStatus('', false);
+      }
+    }
+
+    function registrarErroOperacao(mensagem) {
+      statusErroOperacao = String(mensagem || '').trim();
+      atualizarStatusOperacoes();
+    }
+
+    function setCarregandoContexto(ativo) {
+      carregandoContexto = !!ativo;
+      if (carregandoContexto) statusErroOperacao = '';
+      atualizarControlesOperacoes();
+      atualizarStatusOperacoes();
+    }
+
+    function setProcessandoUpload(ativo) {
+      processandoUpload = !!ativo;
+      if (processandoUpload) statusErroOperacao = '';
+      atualizarControlesOperacoes();
+      atualizarStatusOperacoes();
+    }
+
+    function setImportandoDrive(ativo) {
+      importandoDrive = !!ativo;
+      if (importandoDrive) statusErroOperacao = '';
+      atualizarControlesOperacoes();
+      atualizarStatusOperacoes();
     }
 
     function mostrarStatus(texto, erro) {
@@ -85,24 +147,41 @@
       el.classList.toggle('despesas-inbox-status-info', !erro);
     }
 
-    function carregar(forcar) {
-      if (carregando && !forcar) return;
-      setCarregando(true, 'Carregando documentos de compra...');
-      window.AppRequest.call('obterContextoInboxDocumentosCompra', [ambiente()], {
+    function carregar(forcar = false) {
+      if (contextoRequest) {
+        if (forcar) recargaContextoPendente = true;
+        return contextoRequest;
+      }
+
+      const ambienteSolicitado = ambiente();
+      setCarregandoContexto(true);
+      contextoRequest = window.AppRequest.call('obterContextoInboxDocumentosCompra', [ambienteSolicitado], {
         context: 'compras.documentos.contexto',
         errorMessage: 'Erro ao carregar documentos de compra'
       }).then(contexto => {
+        if (ambienteSolicitado !== ambiente()) {
+          recargaContextoPendente = true;
+          return documentos;
+        }
         documentos = Array.isArray(contexto?.documentos) ? contexto.documentos : [];
         validacoes = contexto?.validacoes || {};
         estoque = Array.isArray(contexto?.estoque) ? contexto.estoque : [];
         renderDrive(contexto?.drive || {});
         render();
         if (documentos.length > 0) setExpandido(true);
-        setCarregando(false);
+        return documentos;
       }).catch(error => {
-        setCarregando(false);
-        mostrarStatus(error?.message || 'Erro ao carregar documentos de compra.', true);
+        registrarErroOperacao(error?.message || 'Erro ao carregar documentos de compra.');
+        return documentos;
+      }).finally(() => {
+        contextoRequest = null;
+        if (recargaContextoPendente) {
+          recargaContextoPendente = false;
+          return carregar(true);
+        }
+        setCarregandoContexto(false);
       });
+      return contextoRequest;
     }
 
     function renderDrive(drive) {
@@ -138,11 +217,11 @@
       }
       lista.innerHTML = documentos.map(renderDocumento).join('');
       documentos.forEach(doc => atualizarVisibilidadePagamento(doc.ID));
+      busyIds.forEach(id => setDocumentoBusy(id, true, busyAcoes.get(id) || ''));
     }
 
     function renderDocumento(doc) {
       const id = escapeHtml(doc.ID);
-      const busy = busyIds.has(String(doc.ID));
       const dataDocumento = window.AppListOrderUI?.formatDate?.(
         doc.data_compra || doc.criado_em
       ) || { display: '-' };
@@ -157,7 +236,7 @@
           <div class="despesa-inbox-item-topo"><strong>${arquivos || 'Documento sem nome'}</strong><span class="despesa-inbox-badge">ERRO</span></div>
           <p class="despesa-inbox-meta">Documento: <time${dataDocumento.datetime ? ` datetime="${escapeHtml(dataDocumento.datetime)}"` : ''}>${escapeHtml(dataDocumento.display)}</time></p>
           <p class="despesa-inbox-meta">${escapeHtml(doc.erro || 'Nao foi possivel ler este documento.')}</p>
-          <div class="despesas-inbox-card-acoes"><button type="button" onclick="ComprasDocumentoController.descartar('${id}')" ${busy ? 'disabled' : ''}>Descartar</button></div>
+          <div class="despesas-inbox-card-acoes"><button type="button" data-doc-action="discard" onclick="ComprasDocumentoController.descartar('${id}')">Descartar</button></div>
         </article>`;
       }
       const alertas = [...(doc.alertas || []), ...(doc.erro ? [doc.erro] : [])];
@@ -200,8 +279,8 @@
         <div class="compra-documento-itens">${(doc.itens || []).map(item => renderItem(doc, item)).join('')}</div>
         <div class="campo-ajuda-wrap compras-documento-observacao"><span class="campo-ajuda-tag">Observacao</span><textarea data-doc-field="observacao">${escapeHtml(doc.observacao || '')}</textarea></div>
         <div class="despesas-inbox-card-acoes">
-          <button type="button" onclick="ComprasDocumentoController.confirmar('${id}')" ${busy ? 'disabled' : ''}>${busy ? 'Confirmando...' : 'Confirmar documento'}</button>
-          ${possuiIntegracao ? '' : `<button type="button" onclick="ComprasDocumentoController.descartar('${id}')" ${busy ? 'disabled' : ''}>Descartar</button>`}
+          <button type="button" data-doc-action="confirm" onclick="ComprasDocumentoController.confirmar('${id}')">Confirmar documento</button>
+          ${possuiIntegracao ? '' : `<button type="button" data-doc-action="discard" onclick="ComprasDocumentoController.descartar('${id}')">Descartar</button>`}
         </div>
       </article>`;
     }
@@ -401,55 +480,117 @@
       return payload;
     }
 
+    function setDocumentoBusy(id, ativo, acao = '') {
+      const alvo = String(id || '');
+      if (ativo) {
+        busyIds.add(alvo);
+        if (acao) busyAcoes.set(alvo, acao);
+      } else {
+        busyIds.delete(alvo);
+        busyAcoes.delete(alvo);
+      }
+      const acaoAtual = acao || busyAcoes.get(alvo) || '';
+
+      const card = encontrarCard(alvo);
+      if (!card) return;
+      card.classList.toggle('is-busy', !!ativo);
+      card.setAttribute('aria-busy', ativo ? 'true' : 'false');
+      card.querySelectorAll('button, input, select, textarea').forEach(controle => {
+        if (ativo) {
+          if (!Object.prototype.hasOwnProperty.call(controle.dataset, 'busyWasDisabled')) {
+            controle.dataset.busyWasDisabled = controle.disabled ? '1' : '0';
+          }
+          controle.disabled = true;
+          return;
+        }
+        if (Object.prototype.hasOwnProperty.call(controle.dataset, 'busyWasDisabled')) {
+          controle.disabled = controle.dataset.busyWasDisabled === '1';
+          delete controle.dataset.busyWasDisabled;
+        }
+      });
+      const btnConfirmar = card.querySelector('[data-doc-action="confirm"]');
+      if (btnConfirmar && ativo && acaoAtual === 'confirmar') {
+        btnConfirmar.textContent = 'Confirmando...';
+      } else if (btnConfirmar && !ativo) {
+        btnConfirmar.textContent = 'Confirmar documento';
+      }
+    }
+
+    function removerDocumentoDaTela(id) {
+      encontrarCard(id)?.remove();
+      const resumo = byId('comprasDocumentosResumo');
+      if (resumo) resumo.textContent = documentos.length === 1
+        ? '1 documento aguardando revisao.'
+        : `${documentos.length} documentos aguardando revisao.`;
+      if (documentos.length === 0) {
+        const lista = byId('listaDocumentosCompra');
+        if (lista) lista.innerHTML = '<div class="empty-state">Nenhum documento aguardando revisao.</div>';
+      }
+    }
+
     function confirmar(id) {
       if (busyIds.has(String(id))) return;
       let payload;
       try { payload = lerPayload(id); } catch (error) { mostrarToast(error.message, 'erro'); return; }
-      busyIds.add(String(id)); render();
+      setDocumentoBusy(id, true, 'confirmar');
       window.AppRequest.call('confirmarDocumentoCompra', [id, payload], {
         context: 'compras.documentos.confirmar', errorMessage: 'Erro ao confirmar documento de compra'
       }).then(() => {
         mostrarToast('Documento confirmado e dados integrados.');
-        window.AppTabRefresh?.markDirty?.('dashboard');
+        const dash = window.DashboardController;
+        if (dash?.invalidarCacheMeses) {
+          dash.invalidarCacheMeses(dash.coletarMesesImpactados?.(payload) || []);
+        } else {
+          window.AppTabRefresh?.markDirty?.('dashboard');
+        }
         window.AppTabRefresh?.markDirty?.('estoque');
         window.AppTabRefresh?.markDirty?.('compras');
         window.ComprasController?.syncFromBackend?.();
+        return carregar(true);
       }).catch(error => {
         mostrarToast(error?.message || 'Erro ao confirmar documento.', 'erro');
-        carregar(true);
-      }).finally(() => { busyIds.delete(String(id)); });
+        return carregar(true);
+      }).finally(() => { setDocumentoBusy(id, false); });
     }
 
     function descartar(id) {
       if (busyIds.has(String(id)) || !confirm('Descartar este documento de compra?')) return;
-      busyIds.add(String(id)); render();
+      setDocumentoBusy(id, true, 'descartar');
       window.AppRequest.call('descartarDocumentoCompra', [id, ambiente()], {
         context: 'compras.documentos.descartar', errorMessage: 'Erro ao descartar documento'
       }).then(() => {
         documentos = documentos.filter(doc => String(doc.ID) !== String(id));
-        render(); mostrarToast('Documento descartado.');
+        removerDocumentoDaTela(id);
+        mostrarToast('Documento descartado.');
       }).catch(error => mostrarToast(error?.message || 'Erro ao descartar documento.', 'erro'))
-        .finally(() => { busyIds.delete(String(id)); });
+        .finally(() => { setDocumentoBusy(id, false); });
     }
 
     function importarDrive() {
-      if (carregando) return;
-      setCarregando(true, 'Buscando documentos na pasta do Drive...');
-      window.AppRequest.call('importarDocumentosCompraDriveParaInbox', [5, ambiente()], {
+      if (importandoDrive) return;
+      setImportandoDrive(true);
+      return window.AppRequest.call('importarDocumentosCompraDriveParaInbox', [5, ambiente()], {
         context: 'compras.documentos.drive', errorMessage: 'Erro ao importar documentos do Drive'
       }).then(resultado => {
         mostrarToast(`${resultado?.adicionados || 0} documento(s) adicionado(s) para revisao.`);
-        setCarregando(false); carregar(true);
-      }).catch(error => { setCarregando(false); mostrarStatus(error?.message || 'Erro ao importar do Drive.', true); });
+        return carregar(true);
+      }).catch(error => {
+        registrarErroOperacao(error?.message || 'Erro ao importar do Drive.');
+      }).finally(() => {
+        setImportandoDrive(false);
+      });
     }
 
     function ativarBuscaAutomatica() {
-      window.AppRequest.call('instalarTriggerImportacaoDocumentosCompraDrive', [5, ambiente()], {
+      if (ativandoBuscaAutomatica) return;
+      ativandoBuscaAutomatica = true;
+      return window.AppRequest.call('instalarTriggerImportacaoDocumentosCompraDrive', [5, ambiente()], {
         context: 'compras.documentos.drive.trigger', errorMessage: 'Erro ao ativar busca automatica'
       }).then(() => {
         mostrarToast('Busca automatica de documentos ativada a cada 5 minutos.');
-        carregar(true);
-      }).catch(error => mostrarToast(error?.message || 'Erro ao ativar busca automatica.', 'erro'));
+        return carregar(true);
+      }).catch(error => mostrarToast(error?.message || 'Erro ao ativar busca automatica.', 'erro'))
+        .finally(() => { ativandoBuscaAutomatica = false; });
     }
 
     async function processarArquivos(fileList) {
@@ -458,7 +599,8 @@
       if (input) input.value = '';
       if (files.length === 0) return;
       if (files.length > MAX_FILES) { mostrarToast(`Selecione no maximo ${MAX_FILES} arquivos.`, 'erro'); return; }
-      setCarregando(true, 'Preparando e lendo o documento...');
+      if (processandoUpload) return;
+      setProcessandoUpload(true);
       try {
         const arquivos = await Promise.all(files.map(prepararArquivo));
         const resultado = await window.AppRequest.call('processarDocumentoCompraUpload', [{ arquivos, _db_env: ambiente() }], {
@@ -467,9 +609,15 @@
         if (resultado?.duplicado) mostrarToast('Este documento ja estava na Inbox.');
         else if (resultado?.status === 'ERRO') mostrarToast(resultado.erro || 'O documento nao pode ser lido.', 'erro');
         else mostrarToast('Documento lido. Revise os itens antes de confirmar.');
-        setCarregando(false); carregar(true); setExpandido(true);
+        // Mantem o estado ocupado ate a Inbox refletir o documento recebido.
+        // Se havia uma listagem em curso, `carregar(true)` tambem preserva a
+        // necessidade de uma leitura posterior.
+        await carregar(true);
+        setExpandido(true);
       } catch (error) {
-        setCarregando(false); mostrarStatus(error?.message || 'Erro ao preparar documento.', true);
+        registrarErroOperacao(error?.message || 'Erro ao preparar documento.');
+      } finally {
+        setProcessandoUpload(false);
       }
     }
 

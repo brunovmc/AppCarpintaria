@@ -3,6 +3,7 @@
     let itens = [];
     let carregado = false;
     let versao = 0;
+    let assinatura = '';
     const CACHE_TAB = 'vendas';
     let ordenacao = window.AppListOrder?.get?.(CACHE_TAB)
       || { key: 'operation', direction: 'desc' };
@@ -34,8 +35,8 @@
 
       ordenacao = next;
       itens = ordenar(itens);
+      assinatura = window.AppDataRevision?.signature?.(itens) || '';
       tocarVersao();
-      salvarCache();
       window.AppListOrder?.save?.(CACHE_TAB, ordenacao);
       return getSort();
     }
@@ -53,10 +54,17 @@
     }
 
     function set(lista) {
-      itens = ordenar(lista);
+      const proximos = ordenar(lista);
+      const proximaAssinatura = window.AppDataRevision?.signature?.(proximos) || '';
+      if (carregado && proximaAssinatura && proximaAssinatura === assinatura) {
+        return false;
+      }
+      itens = proximos;
+      assinatura = proximaAssinatura;
       carregado = true;
       tocarVersao();
       salvarCache();
+      return true;
     }
 
     function get() {
@@ -74,6 +82,7 @@
     function clear() {
       itens = [];
       carregado = false;
+      assinatura = '';
       tocarVersao();
       removerCache();
     }
@@ -82,6 +91,7 @@
       if (!item || !item.ID) return;
       itens.unshift(item);
       itens = ordenar(itens);
+      assinatura = window.AppDataRevision?.signature?.(itens) || '';
       tocarVersao();
       salvarCache();
     }
@@ -91,12 +101,14 @@
       if (idx === -1) return;
       itens[idx] = { ...itens[idx], ...dados };
       itens = ordenar(itens);
+      assinatura = window.AppDataRevision?.signature?.(itens) || '';
       tocarVersao();
       salvarCache();
     }
 
     function remove(id) {
       itens = itens.filter(i => i.ID !== id);
+      assinatura = window.AppDataRevision?.signature?.(itens) || '';
       tocarVersao();
       salvarCache();
     }
