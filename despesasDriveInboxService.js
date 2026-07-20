@@ -15,20 +15,12 @@ function configurarPastasInboxDespesasDrive(pastaRaizId) {
 }
 
 function configurarPastasInboxDespesasDrive_(pastaRaizId) {
-  const props = PropertiesService.getScriptProperties();
   const ambiente = obterAmbienteInboxDespesasDrive_();
-  const pastasAnteriores = lerPastasComprovantesDriveSalvas_(
-    INBOX_DESPESAS_DRIVE_FOLDER_PROPS,
-    obterChavePastaInboxDespesasDrive_,
-    ambiente
-  );
-  const raizComum = obterOuCriarRaizComprovantesDrive_(ambiente, pastaRaizId);
-  const pastas = criarEstruturaDominioComprovantesDrive_(raizComum, 'despesas', pastasAnteriores);
-  const migracao = migrarArquivosPastasComprovantesDrive_(pastasAnteriores, pastas, 'despesas');
-  Object.keys(pastas).forEach(chave => {
-    props.setProperty(obterChavePastaInboxDespesasDrive_(chave, ambiente), pastas[chave].getId());
-  });
-  return { ...montarStatusPastasInboxDrive_(pastas, ambiente), migracao };
+  const resultado = reconciliarEstruturaPastasComprovantesDrive_(ambiente, pastaRaizId);
+  return {
+    ...montarStatusPastasInboxDrive_(resultado.pastas.despesas, ambiente),
+    migracao: resultado.migracao
+  };
 }
 
 function obterStatusInboxDespesasDrive() {
@@ -51,10 +43,10 @@ function importarComprovantesDriveParaInbox(limite, ambiente) {
 function importarComprovantesDriveParaInboxNoAmbienteAtual_(limite) {
   assertCanWrite('Importacao de comprovantes do Drive');
   const quantidade = Math.max(1, Math.min(20, Math.floor(Number(limite) || INBOX_DESPESAS_DRIVE_BATCH_DEFAULT)));
+  const pastas = obterPastasInboxDespesasDrive_(true);
   const lock = LockService.getScriptLock();
   if (!lock.tryLock(1000)) throw new Error('Ja existe uma busca de comprovantes em andamento. Tente novamente em instantes.');
   try {
-    const pastas = obterPastasInboxDespesasDrive_(true);
     const arquivos = pastas.entrada.getFiles();
     const resultado = { processados: 0, adicionados: 0, ignorados: 0, erros: 0, limite: quantidade };
     while (arquivos.hasNext() && resultado.processados < quantidade) {
@@ -225,25 +217,33 @@ function tentarMoverArquivoInboxDrive_(arquivo, pasta) {
 function obterPastasInboxDespesasDrive_(criarSeAusente) {
   const props = PropertiesService.getScriptProperties();
   const ambiente = obterAmbienteInboxDespesasDrive_();
+  if (criarSeAusente) {
+    const versao = String(props.getProperty(
+      obterChaveVersaoEstruturaComprovantesDrive_(ambiente)
+    ) || '').trim();
+    const existentes = versao === COMPROVANTES_DRIVE_STRUCTURE_VERSION
+      ? obterPastasInboxDespesasDrive_(false)
+      : null;
+    if (existentes) return existentes;
+    return reconciliarEstruturaPastasComprovantesDrive_(ambiente).pastas.despesas;
+  }
   const ids = {};
   for (const chave of Object.keys(INBOX_DESPESAS_DRIVE_FOLDER_PROPS)) {
     ids[chave] = String(props.getProperty(obterChavePastaInboxDespesasDrive_(chave, ambiente)) || '').trim();
-    if (!ids[chave]) return criarSeAusente ? pastasDeStatusParaDrive_(configurarPastasInboxDespesasDrive_()) : null;
+    if (!ids[chave]) return null;
   }
   try {
     const pastas = {};
     Object.keys(ids).forEach(chave => { pastas[chave] = DriveApp.getFolderById(ids[chave]); });
-    if (estruturaDominioComprovantesDriveValida_(pastas, 'despesas')) return pastas;
-    return criarSeAusente ? pastasDeStatusParaDrive_(configurarPastasInboxDespesasDrive_()) : null;
+    const raizId = String(props.getProperty(obterChaveRaizComprovantesDrive_(ambiente)) || '').trim();
+    const raizComum = raizId ? DriveApp.getFolderById(raizId) : null;
+    if (raizComum && estruturaDominioComprovantesDriveValida_(pastas, 'despesas', raizComum)) {
+      return pastas;
+    }
+    return null;
   } catch (error) {
-    return criarSeAusente ? pastasDeStatusParaDrive_(configurarPastasInboxDespesasDrive_()) : null;
+    return null;
   }
-}
-
-function pastasDeStatusParaDrive_(status) {
-  const pastas = {};
-  Object.keys(status.pastas || {}).forEach(chave => { pastas[chave] = DriveApp.getFolderById(status.pastas[chave].id); });
-  return pastas;
 }
 
 function montarStatusPastasInboxDrive_(pastas, ambiente) {
@@ -264,6 +264,9 @@ function temTriggerInboxDespesasDrive_() {
 }
 
 function obterAmbienteInboxDespesasDrive_() {
+  if (typeof getDbEnvironmentExecutionEffective_ === 'function') {
+    return getDbEnvironmentExecutionEffective_();
+  }
   if (typeof getUserDbEnvironment_ === 'function') {
     return String(getUserDbEnvironment_() || '').trim().toLowerCase() === 'dev' ? 'dev' : 'prod';
   }

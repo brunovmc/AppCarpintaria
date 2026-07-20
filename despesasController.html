@@ -33,6 +33,7 @@
     let qtdRenderizada = 0;
     let carregandoMais = false;
     let renderJobSeq = 0;
+    let renderCompletionWaiters = [];
     let listenerFecharFiltrosAtivo = false;
     let listenerMutacoesRegistrado = false;
 
@@ -42,11 +43,26 @@
     const COMPROVANTE_MAX_DIMENSION = 1600;
     const COMPROVANTE_JPEG_QUALITY = 0.82;
     const STATUS_LABEL_ORDEM = ['VENCIDO', 'PENDENTE', 'PARCIAL', 'PAGO'];
-    const STATUS_PRIORIDADE = {
-      VENCIDO: 0,
-      PENDENTE: 1,
-      PARCIAL: 2,
-      PAGO: 3
+    let despesasSortState = window.AppListOrder?.get?.('despesas') || { key: 'operation', direction: 'desc' };
+
+    function registrarConclusaoRender(onDone) {
+      if (typeof onDone === 'function') renderCompletionWaiters.push(onDone);
+    }
+
+    function concluirRenderPendente() {
+      const waiters = renderCompletionWaiters.splice(0);
+      waiters.forEach(callback => {
+        try { callback(); } catch (error) { /* sem acao */ }
+      });
+    }
+    const despesasSortAdapter = {
+      getSort: () => ({ ...despesasSortState }),
+      setSort: (key, direction) => {
+        despesasSortState = window.AppListOrder?.save?.('despesas', key, direction)
+          || { key, direction };
+        return { ...despesasSortState };
+      },
+      getSortOptions: () => window.AppListOrder?.getOptions?.('despesas') || []
     };
 
     function el() {
@@ -227,40 +243,11 @@
       return 'pendente';
     }
 
-    function prioridadeStatusDespesa(despesa) {
-      const status = obterStatusVisual(despesa);
-      return Number(STATUS_PRIORIDADE[status] ?? 5);
-    }
-
     function ordenarValoresUnicos(lista) {
       return [...new Set((Array.isArray(lista) ? lista : [])
         .map(v => String(v || '').trim())
         .filter(Boolean))]
         .sort((a, b) => a.localeCompare(b, 'pt-BR', { sensitivity: 'base' }));
-    }
-
-    function compararDespesasPrioridade(a, b) {
-      const prioridadeA = prioridadeStatusDespesa(a);
-      const prioridadeB = prioridadeStatusDespesa(b);
-      if (prioridadeA !== prioridadeB) return prioridadeA - prioridadeB;
-
-      const pendenteA = Number(a?.total_pendente || 0);
-      const pendenteB = Number(b?.total_pendente || 0);
-      if (pendenteA !== pendenteB) return pendenteB - pendenteA;
-
-      const vencA = parseDataISO(a?.data_vencimento);
-      const vencB = parseDataISO(b?.data_vencimento);
-      if (vencA && vencB) {
-        if (vencA.getTime() !== vencB.getTime()) return vencA - vencB;
-      } else if (vencA && !vencB) {
-        return -1;
-      } else if (!vencA && vencB) {
-        return 1;
-      }
-
-      const nomeA = String(a?.descricao || '').trim();
-      const nomeB = String(b?.descricao || '').trim();
-      return nomeA.localeCompare(nomeB, 'pt-BR', { sensitivity: 'base' });
     }
 
     function renderSelect(selectEl, valores, placeholder = 'Selecione') {
@@ -589,10 +576,10 @@
       return window.AppDespesaMutations.mergeFetchedList(listaBase, listarMutacoesDespesaAtivas());
     }
 
-    function persistirEReRenderizarLista() {
+    function persistirEReRenderizarLista(onDone) {
       carregado = true;
       popularFiltrosListaDespesas();
-      renderDespesas();
+      renderDespesas(onDone);
       salvarCacheDespesas();
     }
 
@@ -707,8 +694,7 @@
       const filtroCategoria = normalizarTexto(filtrosLista.categoria);
       const filtroFornecedor = normalizarTexto(filtrosLista.fornecedor);
 
-      return arr
-        .filter(d => {
+      const filtradas = arr.filter(d => {
           if (termo) {
             const blob = [
               d?.descricao,
@@ -730,8 +716,11 @@
           if (filtroFornecedor && normalizarTexto(d?.fornecedor) !== filtroFornecedor) return false;
 
           return true;
-        })
-        .sort(compararDespesasPrioridade);
+        });
+      if (window.AppListOrder?.sort) {
+        return window.AppListOrder.sort('despesas', filtradas, despesasSortAdapter.getSort());
+      }
+      return filtradas.sort((a, b) => String(b?.data_competencia || '').localeCompare(String(a?.data_competencia || '')));
     }
 
     function montarCardResumoDespesa(d) {
@@ -747,6 +736,13 @@
       const estadoClasse = localState.status ? `despesa-local-${localState.status}` : '';
       const estadoDeleteClasse = d?._localDeleted ? 'despesa-local-delete' : '';
       const rotuloExcluir = criacaoLocalComFalha ? 'Descartar' : 'Excluir';
+      const despesaId = String(d?.ID || '').trim();
+      const dataHtml = window.AppListOrderUI?.cardDateHtml?.(
+        'despesas',
+        d,
+        despesasSortAdapter.getSort()
+      ) || '';
+      const podeCarregarHistorico = !!despesaId && !/^DES_TMP/i.test(despesaId);
 
       const card = document.createElement('div');
       card.className = `card card-ficha despesa-card despesa-card-${statusClasse} ${estadoClasse} ${estadoDeleteClasse}`.trim();
@@ -759,6 +755,7 @@
             <span class="despesa-card-resumo-label">Despesa geral</span>
             <span class="despesa-status-badge despesa-status-${statusClasse}">${escapeHtml(statusVisual)}</span>
           </div>
+          ${dataHtml}
           ${localState.label ? `
             <div class="despesa-local-state-row">
               <span class="despesa-local-state despesa-local-state-${escapeHtml(localState.status || 'pending')}">${escapeHtml(localState.label)}</span>
@@ -794,6 +791,16 @@
               <strong>${formatarMoeda(pago)}</strong>
             </div>
           </div>
+          ${podeCarregarHistorico ? `
+            <details class="finance-history-disclosure" data-finance-history-disclosure>
+              <summary>Historico financeiro</summary>
+              <div
+                class="finance-history"
+                data-finance-history-type="DESPESA_GERAL"
+                data-finance-history-id="${escapeHtml(despesaId)}"
+              ><p class="finance-history-empty">Abra para carregar pagamentos e parcelas.</p></div>
+            </details>
+          ` : ''}
         </div>
       `;
       return card;
@@ -882,9 +889,13 @@
       proximoFrame(processarChunk);
     }
 
-    function renderListaDespesas(itensFiltrados) {
+    function renderListaDespesas(itensFiltrados, onDone) {
+      registrarConclusaoRender(onDone);
       const f = el();
-      if (!f.listaDespesas) return;
+      if (!f.listaDespesas) {
+        concluirRenderPendente();
+        return;
+      }
       f.listaDespesas.classList.remove('hidden');
       f.listaDespesas.innerHTML = '';
       if (f.listaControles) f.listaControles.innerHTML = '';
@@ -907,15 +918,16 @@
         f.listaDespesas.innerHTML = semFiltro
           ? '<p>Nenhuma despesa geral cadastrada.</p>'
           : '<p>Nenhuma despesa encontrada para os filtros aplicados.</p>';
+        concluirRenderPendente();
         return;
       }
 
-      renderMaisItensDespesas();
+      renderMaisItensDespesas(concluirRenderPendente);
     }
 
-    function renderDespesas() {
+    function renderDespesas(onDone) {
       const lista = filtrarDespesas(despesas, filtroTexto);
-      renderListaDespesas(lista);
+      renderListaDespesas(lista, onDone);
     }
 
     function salvarCacheDespesas() {
@@ -930,7 +942,7 @@
       return true;
     }
 
-    function carregarDespesas(forcarRecarregar = false, onDone) {
+    function carregarDespesas(forcarRecarregar = false, onDone, ambiente = '') {
       const exibindoCache = !forcarRecarregar && hidratarDespesasDoCache();
       window.AppRequest.runner()
         .withFailureHandler(() => {
@@ -939,21 +951,22 @@
               window.AppRuntime.setReadOnly(true, 'Sem conexao com backend - exibindo cache local');
             }
             mostrarToast('Exibindo ultimo snapshot em cache', 'erro');
-            if (typeof onDone === 'function') onDone();
+            if (typeof onDone === 'function') onDone(false);
             return;
           }
           mostrarToast('Erro ao carregar despesas gerais', 'erro');
-          if (typeof onDone === 'function') onDone();
+          if (typeof onDone === 'function') onDone(false);
         })
         .withSuccessHandler(lista => {
           if (window.AppRuntime?.setReadOnly) {
             window.AppRuntime.setReadOnly(false);
           }
           despesas = reconciliarListaComMutacoes(Array.isArray(lista) ? lista : []);
-          persistirEReRenderizarLista();
-          if (typeof onDone === 'function') onDone();
+          persistirEReRenderizarLista(() => {
+            if (typeof onDone === 'function') onDone(true);
+          });
         })
-        .listarDespesasGerais(!!forcarRecarregar);
+        .listarDespesasGerais(!!forcarRecarregar, String(ambiente || '').trim());
     }
 
     function setInboxStatus(mensagem = '', tipo = '') {
@@ -1221,18 +1234,21 @@
         });
     }
 
-    function carregarInboxDespesas(onDone) {
+    function carregarInboxDespesas(onDone, ambiente = '') {
       if (!window.AppRequest?.call) {
         inboxDespesas = [];
         destinosComprovantes = [];
         resumoComprovantes = {};
         renderInboxDespesas();
-        if (typeof onDone === 'function') onDone();
+        if (typeof onDone === 'function') onDone(true);
         return Promise.resolve([]);
       }
 
       setCarregandoInboxDespesas(true);
-      return window.AppRequest.call('obterContextoComprovantesFinanceiros', [filtroInboxComprovantes, getAmbienteBancoAtivoInbox()], {
+      return window.AppRequest.call('obterContextoComprovantesFinanceiros', [
+        filtroInboxComprovantes,
+        String(ambiente || '').trim() || getAmbienteBancoAtivoInbox()
+      ], {
         context: 'despesas.inbox.list',
         errorMessage: 'Erro ao carregar comprovantes'
       })
@@ -1242,14 +1258,14 @@
           resumoComprovantes = contexto?.resumo && typeof contexto.resumo === 'object' ? contexto.resumo : {};
           setCarregandoInboxDespesas(false);
           renderInboxDespesas();
-          if (typeof onDone === 'function') onDone();
+          if (typeof onDone === 'function') onDone(true);
           return inboxDespesas;
         })
         .catch(error => {
           setCarregandoInboxDespesas(false);
           mostrarToast(error?.message || 'Erro ao carregar comprovantes', 'erro');
           setInboxStatus(error?.message || 'Erro ao carregar comprovantes', 'erro');
-          if (typeof onDone === 'function') onDone();
+          if (typeof onDone === 'function') onDone(false);
           return [];
         });
     }
@@ -1380,6 +1396,9 @@
       const valorInicial = sugestaoInicial
         ? Math.min(saldo, Number(sugestaoInicial.valor_pendente || saldo))
         : saldo;
+      const dataComprovante = window.AppListOrderUI?.formatDate?.(
+        item?.data_pagamento || item?.data_competencia || item?.criado_em
+      ) || { display: '-' };
       const card = document.createElement('div');
       card.className = `despesa-inbox-item despesa-inbox-item-${statusClasse}`;
       card.dataset.inboxId = id;
@@ -1393,6 +1412,7 @@
         </div>
 
         <div class="despesa-inbox-meta">
+          <span>Pagamento: <time${dataComprovante.datetime ? ` datetime="${escapeHtml(dataComprovante.datetime)}"` : ''}>${escapeHtml(dataComprovante.display)}</time></span>
           <span>Confianca da leitura: ${Number.isFinite(confianca) ? confianca : 0}%</span>
           <span>Classificacao: ${escapeHtml(item?.classificacao || 'NAO_CLASSIFICADO')}</span>
           ${item?.arquivo_url ? `<a href="${escapeHtml(item.arquivo_url)}" target="_blank" rel="noopener">Abrir arquivo</a>` : ''}
@@ -1775,6 +1795,12 @@
       window.AppOptimistic?.process?.();
       if (!iniciado) {
         const f = el();
+        window.AppListOrderUI?.mount?.({
+          containerId: 'ordenacaoDespesas',
+          domain: 'despesas',
+          adapter: despesasSortAdapter,
+          onChange: () => renderDespesas()
+        });
         bindFiltrosListaDespesas();
         bindInboxDespesas();
         atualizarRotuloBotaoFiltroTopBar();
@@ -1795,14 +1821,16 @@
       return carregado;
     }
 
-    function syncFromBackend(onDone) {
+    function syncFromBackend(onDone, ambiente = '') {
       let concluidos = 0;
-      const done = () => {
+      let sucesso = true;
+      const done = resultado => {
         concluidos += 1;
-        if (concluidos >= 2 && typeof onDone === 'function') onDone();
+        sucesso = sucesso && resultado !== false;
+        if (concluidos >= 2 && typeof onDone === 'function') onDone(sucesso);
       };
-      carregarDespesas(true, done);
-      carregarInboxDespesas(done);
+      carregarDespesas(true, done, ambiente);
+      carregarInboxDespesas(done, ambiente);
     }
 
     function setFiltroTexto(texto) {
@@ -1814,6 +1842,21 @@
       const alvo = String(id || '').trim();
       if (!alvo) return null;
       return despesas.find(d => String(d.ID || '').trim() === alvo) || null;
+    }
+
+    function abrirDetalhes(id) {
+      const alvoId = String(id || '').trim();
+      if (!alvoId) return false;
+      const card = Array.from(document.querySelectorAll('#listaDespesasGerais [data-id]'))
+        .find(item => String(item?.dataset?.id || '').trim() === alvoId);
+      if (!card) return false;
+      const details = card.querySelector('details[data-finance-history-disclosure]');
+      if (!details) return true;
+      details.open = true;
+      const container = details.querySelector('[data-finance-history-type]');
+      return container
+        ? (window.AppFinanceHistoryUI?.loadContainer?.(container, false) || true)
+        : true;
     }
 
     function limparFormularioDespesa() {
@@ -2477,6 +2520,7 @@
       syncFromBackend,
       setFiltroTexto,
       getById,
+      abrirDetalhes,
       togglePainelFiltros,
       fecharPainelFiltros,
 

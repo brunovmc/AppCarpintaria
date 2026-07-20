@@ -6,6 +6,7 @@ const DATA_SPREADSHEET_ID_DEV = "1wqW2WPZvLWPr72Xsd_8ZAhAgbjvMw8A7b5Riapz6P4s";
 const DATA_SPREADSHEET_ID = DATA_SPREADSHEET_ID_PROD;
 
 function doGet() {
+  tentarReconciliarEstruturaComprovantesDriveNoAcesso_();
   return HtmlService.createTemplateFromFile("index")
     .evaluate()
     .setTitle("CarpintariaZizu")

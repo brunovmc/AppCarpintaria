@@ -1,0 +1,293 @@
+<script>
+  window.AppFinanceHistoryUI = (() => {
+    const requestTokens = new WeakMap();
+    const requestPromises = new WeakMap();
+    let delegationInitialized = false;
+
+    function escapeHtml(value) {
+      return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+    }
+
+    function formatMoney(value) {
+      const amount = Number(value || 0);
+      return Number.isFinite(amount)
+        ? amount.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+        : 'R$ 0,00';
+    }
+
+    function formatDate(value) {
+      return window.AppListOrderUI?.formatDate?.(value)?.display || String(value || '-');
+    }
+
+    function getEnvironment() {
+      const context = window.AppDbEnv?.getContext?.() || {};
+      const value = String(context.effective_env || context.selected_env || '').trim().toLowerCase();
+      return value === 'dev' ? 'dev' : 'prod';
+    }
+
+    function statusClass(value) {
+      return String(value || 'PENDENTE').trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '-');
+    }
+
+    function displayStatus(status, isReceipt) {
+      const value = String(status || 'PENDENTE').toUpperCase();
+      if (!isReceipt) return value;
+      if (value === 'PAGO') return 'RECEBIDO';
+      if (value === 'PENDENTE') return 'A RECEBER';
+      return value;
+    }
+
+    function renderInstallment(installment, isReceipt) {
+      const number = Number(installment?.parcela_numero || 1);
+      const total = Number(installment?.parcelas_total || 1);
+      const status = String(installment?.status || 'PENDENTE').toUpperCase();
+      return `
+        <li class="finance-history-installment">
+          <div>
+            <strong>Parcela ${number}/${total}</strong>
+            <span>Prevista para ${escapeHtml(formatDate(installment?.data_prevista))}</span>
+          </div>
+          <div class="finance-history-installment-values">
+            <span>${isReceipt ? 'Recebido' : 'Pago'} ${escapeHtml(formatMoney(installment?.valor_pago))} de ${escapeHtml(formatMoney(installment?.valor_previsto))}</span>
+            <span class="finance-history-status finance-history-status-${escapeHtml(statusClass(status))}">${escapeHtml(displayStatus(status, isReceipt))}</span>
+          </div>
+        </li>
+      `;
+    }
+
+    function renderPayment(payment, originType, originId, isReceipt) {
+      const installment = payment?.parcela_alvo
+        ? `Parcela ${Number(payment.parcela_alvo.parcela_numero || 1)}/${Number(payment.parcela_alvo.parcelas_total || 1)}`
+        : (isReceipt ? 'Recebimento geral' : 'Pagamento geral');
+      const readOnly = !!window.AppRuntime?.isReadOnly?.();
+      return `
+        <li class="finance-history-payment" data-payment-id="${escapeHtml(payment?.ID)}">
+          <div class="finance-history-payment-main">
+            <div>
+              <strong>${escapeHtml(formatMoney(payment?.valor_pago))}</strong>
+              <span>${escapeHtml(formatDate(payment?.data_pagamento))} · ${escapeHtml(payment?.forma_pagamento || 'Forma nao informada')}</span>
+              <span>${escapeHtml(installment)}</span>
+            </div>
+            <button
+              type="button"
+              class="btn-secundario finance-history-remove"
+              data-finance-remove-id="${escapeHtml(payment?.ID)}"
+              data-finance-origin-type="${escapeHtml(originType)}"
+              data-finance-origin-id="${escapeHtml(originId)}"
+              ${readOnly ? 'disabled title="Indisponivel no modo somente leitura"' : ''}
+            >Remover ${isReceipt ? 'recebimento' : 'pagamento'}</button>
+          </div>
+          ${payment?.observacao ? `<p>${escapeHtml(payment.observacao)}</p>` : ''}
+        </li>
+      `;
+    }
+
+    function render(container, data) {
+      const summary = data?.resumo || {};
+      const payments = Array.isArray(data?.pagamentos) ? data.pagamentos : [];
+      const installments = Array.isArray(data?.parcelas) ? data.parcelas : [];
+      const originType = String(data?.origem?.tipo || container.dataset.financeHistoryType || '').trim().toUpperCase();
+      const originId = String(data?.origem?.id || container.dataset.financeHistoryId || '').trim();
+      const status = String(summary.status_pagamento || 'PENDENTE').toUpperCase();
+      const isReceipt = String(data?.origem?.natureza || '').trim().toUpperCase() === 'RECEBIMENTO';
+
+      container.classList.remove('finance-history-loading', 'finance-history-error');
+      container.innerHTML = `
+        <div class="finance-history-summary">
+          <div><span>Previsto</span><strong>${escapeHtml(formatMoney(summary.total_previsto))}</strong></div>
+          <div><span>${isReceipt ? 'Recebido' : 'Pago'}</span><strong>${escapeHtml(formatMoney(summary.total_pago))}</strong></div>
+          <div><span>${isReceipt ? 'A receber' : 'Pendente'}</span><strong>${escapeHtml(formatMoney(summary.total_pendente))}</strong></div>
+          <span class="finance-history-status finance-history-status-${escapeHtml(statusClass(status))}">${escapeHtml(displayStatus(status, isReceipt))}</span>
+        </div>
+        ${installments.length > 1 ? `
+          <details class="finance-history-installments">
+            <summary>Parcelas (${installments.length})</summary>
+            <ul>${installments.map(installment => renderInstallment(installment, isReceipt)).join('')}</ul>
+          </details>
+        ` : ''}
+        <div class="finance-history-heading">
+          <strong>${isReceipt ? 'Recebimentos' : 'Pagamentos'} registrados</strong>
+          <span>${payments.length}</span>
+        </div>
+        ${payments.length > 0
+          ? `<ul class="finance-history-payments">${payments.map(payment => renderPayment(payment, originType, originId, isReceipt)).join('')}</ul>`
+          : `<p class="finance-history-empty">Nenhum ${isReceipt ? 'recebimento' : 'pagamento'} registrado.</p>`}
+      `;
+      container.dataset.financeHistoryLoaded = 'true';
+    }
+
+    function renderError(container, error) {
+      container.classList.remove('finance-history-loading');
+      container.classList.add('finance-history-error');
+      container.innerHTML = `
+        <p>${escapeHtml(error?.message || 'Nao foi possivel carregar o historico financeiro.')}</p>
+        <button type="button" class="btn-secundario finance-history-retry">Tentar novamente</button>
+      `;
+    }
+
+    function loadContainer(container, forceReload = false) {
+      if (!container || !window.AppRequest?.call) return Promise.resolve(null);
+      const currentRequest = requestPromises.get(container);
+      if (currentRequest && !forceReload) return currentRequest;
+      if (!forceReload && container.dataset.financeHistoryLoaded === 'true') {
+        return Promise.resolve(null);
+      }
+      const originType = String(container.dataset.financeHistoryType || '').trim().toUpperCase();
+      const originId = String(container.dataset.financeHistoryId || '').trim();
+      if (!originType || !originId) return Promise.resolve(null);
+      if (/(?:^|[_-])TMP(?:[_-]|$)/i.test(originId)) {
+        container.classList.remove('finance-history-loading', 'finance-history-error');
+        container.dataset.financeHistoryLoaded = 'true';
+        container.innerHTML = '<p class="finance-history-empty">Aguardando a sincronizacao deste registro para carregar o historico.</p>';
+        return Promise.resolve(null);
+      }
+
+      const token = Symbol('finance-history');
+      requestTokens.set(container, token);
+      container.classList.add('finance-history-loading');
+      container.classList.remove('finance-history-error');
+      container.innerHTML = '<div class="finance-history-skeleton" aria-label="Carregando historico financeiro"><span></span><span></span><span></span></div>';
+
+      const request = window.AppRequest.call('listarHistoricoPagamentosOrigem', [
+        originType,
+        originId,
+        !!forceReload,
+        getEnvironment()
+      ], {
+        context: 'finance.history.read',
+        errorMessage: 'Erro ao carregar historico financeiro'
+      })
+        .then(data => {
+          if (requestTokens.get(container) !== token || !container.isConnected) return data;
+          render(container, data || {});
+          return data;
+        })
+        .catch(error => {
+          if (requestTokens.get(container) === token && container.isConnected) {
+            renderError(container, error);
+          }
+          return null;
+        })
+        .finally(() => {
+          if (requestPromises.get(container) === request) {
+            requestPromises.delete(container);
+          }
+        });
+      requestPromises.set(container, request);
+      return request;
+    }
+
+    function loadWithin(root, forceReload = false) {
+      const scope = root?.querySelectorAll ? root : document;
+      const containers = Array.from(scope.querySelectorAll('[data-finance-history-type][data-finance-history-id]'));
+      return Promise.all(containers.map(container => loadContainer(container, forceReload)));
+    }
+
+    function refreshDomain(originType, originId, previousContainer) {
+      const type = String(originType || '').trim().toUpperCase();
+      const id = String(originId || '').trim();
+      const environment = getEnvironment();
+      const controllers = {
+        COMPRA: window.ComprasController,
+        VENDA: window.VendasController,
+        DESPESA_GERAL: window.DespesasController
+      };
+      const controller = controllers[type];
+      if (controller?.syncFromBackend) {
+        controller.syncFromBackend(success => {
+          if (success !== false && type === 'DESPESA_GERAL') {
+            controller.abrirDetalhes?.(id);
+            return;
+          }
+          if (success === false && previousContainer?.isConnected) {
+            loadContainer(previousContainer, true);
+          }
+        }, environment);
+      } else if (previousContainer?.isConnected) {
+        loadContainer(previousContainer, true);
+      }
+      if (type === 'COMPRA') {
+        window.AppTabRefresh?.markDirty?.('despesas');
+      }
+      window.DashboardController?.invalidarCacheMeses?.();
+      window.AppTabRefresh?.markDirty?.('dashboard');
+    }
+
+    function removePayment(button) {
+      const paymentId = String(button?.dataset?.financeRemoveId || '').trim();
+      const originType = String(button?.dataset?.financeOriginType || '').trim().toUpperCase();
+      const originId = String(button?.dataset?.financeOriginId || '').trim();
+      if (!paymentId || !originType || !originId) return;
+      const isReceipt = originType === 'VENDA';
+      if (window.AppDomainUtils?.ensureWritable && !window.AppDomainUtils.ensureWritable(`Remocao de ${isReceipt ? 'recebimento' : 'pagamento'}`)) return;
+      if (!window.confirm(`Remover este ${isReceipt ? 'recebimento' : 'pagamento'}? Os saldos e as parcelas serao recalculados.`)) return;
+
+      button.disabled = true;
+      button.textContent = 'Removendo...';
+      window.AppRequest.call('removerPagamentoHistoricoOrigem', [
+        paymentId,
+        originType,
+        originId,
+        getEnvironment()
+      ], {
+        context: 'finance.history.remove',
+        errorMessage: `Erro ao remover ${isReceipt ? 'recebimento' : 'pagamento'}`
+      })
+        .then(result => {
+          if (!result?.ok) throw new Error(`O ${isReceipt ? 'recebimento' : 'pagamento'} nao foi removido pelo servidor.`);
+          const container = button.closest('[data-finance-history-type]');
+          if (container) {
+            container.dataset.financeHistoryLoaded = 'false';
+            container.innerHTML = '<div class="finance-history-skeleton" aria-label="Atualizando historico financeiro"><span></span><span></span><span></span></div>';
+          }
+          if (typeof mostrarToast === 'function') {
+            mostrarToast(`${isReceipt ? 'Recebimento' : 'Pagamento'} removido.`);
+          }
+          refreshDomain(originType, originId, container);
+        })
+        .catch(error => {
+          if (typeof mostrarToast === 'function') {
+            mostrarToast(error?.message || `Erro ao remover ${isReceipt ? 'recebimento' : 'pagamento'}`, 'erro');
+          }
+          button.disabled = false;
+          button.textContent = `Remover ${isReceipt ? 'recebimento' : 'pagamento'}`;
+        });
+    }
+
+    function initDelegation() {
+      if (delegationInitialized) return;
+      delegationInitialized = true;
+      document.addEventListener('click', event => {
+        const removeButton = event.target.closest('[data-finance-remove-id]');
+        if (removeButton) {
+          event.preventDefault();
+          removePayment(removeButton);
+          return;
+        }
+        const retryButton = event.target.closest('.finance-history-retry');
+        if (retryButton) {
+          const container = retryButton.closest('[data-finance-history-type]');
+          if (container) loadContainer(container, true);
+        }
+      });
+      document.addEventListener('toggle', event => {
+        const details = event.target.closest?.('details[data-finance-history-disclosure]');
+        if (!details?.open) return;
+        const container = details.querySelector('[data-finance-history-type]');
+        if (container) loadContainer(container, false);
+      }, true);
+    }
+
+    initDelegation();
+
+    return {
+      loadContainer,
+      loadWithin
+    };
+  })();
+</script>

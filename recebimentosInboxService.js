@@ -428,12 +428,13 @@ function normalizarTextoRecebimento_(valor) {
 }
 
 function executarComAmbienteInboxRecebimentos_(ambiente, callback) {
-  const raw = String(ambiente || '').trim().toLowerCase();
-  const env = raw === 'dev' || raw === 'prod' ? raw : '';
-  if (env && typeof setUserDbEnvironment_ === 'function' && typeof getUserDbEnvironment_ === 'function') {
-    if (String(getUserDbEnvironment_() || '').trim().toLowerCase() !== env) setUserDbEnvironment_(env);
+  if (typeof callback !== 'function') {
+    throw new Error('Callback da Inbox de recebimentos invalido.');
   }
-  return callback();
+  if (typeof executarComAmbienteBancoDadosAutorizado_ !== 'function') {
+    throw new Error('Controle de ambiente indisponivel.');
+  }
+  return executarComAmbienteBancoDadosAutorizado_(ambiente, () => callback());
 }
 
 function parseJsonRecebimento_(raw, fallback) {

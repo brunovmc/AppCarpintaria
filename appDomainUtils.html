@@ -77,4 +77,511 @@
       parseNumeroZero
     };
   })();
+
+  /**
+   * Ordenacao compartilhada das listas do aplicativo.
+   *
+   * A configuracao de cada dominio vive aqui para que Store e UI interpretem
+   * datas, textos e valores da mesma forma. Toda ordenacao retorna uma copia e
+   * nunca altera a lista recebida.
+   */
+  window.AppListOrder = window.AppListOrder || (() => {
+    const STORAGE_PREFIX = 'carpintaria:list-order:v1:';
+    const DIRECTIONS = new Set(['asc', 'desc']);
+
+    const option = (key, label, type, defaultDirection, ascLabel, descLabel) => ({
+      key,
+      label,
+      type,
+      defaultDirection,
+      directionLabels: {
+        asc: ascLabel,
+        desc: descLabel
+      }
+    });
+
+    const ALPHA = option('alpha', 'Nome', 'text', 'asc', 'A → Z', 'Z → A');
+    const CREATED = option('created', 'Data de cadastro', 'date', 'desc', 'Mais antiga', 'Mais recente');
+    const OPERATION = option('operation', 'Data da operação', 'date', 'desc', 'Mais antiga', 'Mais recente');
+    const VALUE = option('value', 'Valor', 'number', 'desc', 'Menor valor', 'Maior valor');
+    const DUE = option('due', 'Vencimento', 'date', 'asc', 'Mais próximo', 'Mais distante');
+    const PENDING = option('pending', 'Saldo pendente', 'number', 'desc', 'Menor saldo', 'Maior saldo');
+    const QUANTITY = option('quantity', 'Quantidade', 'number', 'desc', 'Menor quantidade', 'Maior quantidade');
+    const FORECAST = option('forecast', 'Previsão de término', 'date', 'asc', 'Mais próxima', 'Mais distante');
+    const PROGRESS = option('progress', 'Progresso', 'number', 'desc', 'Menor progresso', 'Maior progresso');
+
+    const DOMAIN_ALIASES = {
+      compra: 'compras',
+      despesa: 'despesas',
+      estoque: 'estoque',
+      produto: 'produtos',
+      producao: 'producao',
+      venda: 'vendas'
+    };
+
+    function parseNumber(value) {
+      if (value === null || value === undefined || value === '') return null;
+      if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+      const parsed = window.AppDomainUtils?.parseNumeroOptional
+        ? window.AppDomainUtils.parseNumeroOptional(value)
+        : Number(value);
+      return parsed === '' || !Number.isFinite(Number(parsed)) ? null : Number(parsed);
+    }
+
+    function firstNumber(item, fields) {
+      for (const field of fields || []) {
+        const value = parseNumber(item?.[field]);
+        if (value !== null) return value;
+      }
+      return null;
+    }
+
+    function multiply(item, quantityFields, unitFields) {
+      const quantity = firstNumber(item, quantityFields);
+      const unit = firstNumber(item, unitFields);
+      return quantity === null || unit === null ? null : quantity * unit;
+    }
+
+    function getPendingValue(item, totalFields) {
+      const explicit = firstNumber(item, ['total_pendente', 'saldo_pendente', 'saldo_receber']);
+      if (explicit !== null) return explicit;
+      const total = firstNumber(item, totalFields);
+      const paid = firstNumber(item, ['total_pago', 'valor_pago', 'total_recebido']);
+      if (total === null) return null;
+      return Math.max(0, total - (paid ?? 0));
+    }
+
+    function getStockValue(item) {
+      const direct = firstNumber(item, ['valor_total', 'valor_total_item', 'custo_total_item']);
+      if (direct !== null) return direct;
+      const isProduct = String(item?.tipo || '').trim().toUpperCase() === 'PRODUTO';
+      return multiply(
+        item,
+        ['quantidade'],
+        isProduct
+          ? ['preco_venda', 'custo_unitario', 'valor_unit']
+          : ['custo_unitario', 'valor_unit', 'preco_venda']
+      );
+    }
+
+    function getProductionProgress(item) {
+      const explicit = firstNumber(item, ['progresso', 'percentual_concluido', 'progresso_percentual']);
+      if (explicit !== null) return explicit;
+
+      const stages = Array.isArray(item?.etapas) ? item.etapas : [];
+      if (stages.length > 0) {
+        const completed = stages.filter(stage => {
+          const value = String(stage?.feito ?? '').trim().toLowerCase();
+          return value === 'true' || value === '1' || value === 'sim';
+        }).length;
+        return (completed / stages.length) * 100;
+      }
+
+      const planned = firstNumber(item, ['qtd_planejada', 'quantidade_planejada']);
+      let produced = firstNumber(item, ['qtd_produzida_acumulada', 'quantidade_produzida']);
+      if (produced === null && planned !== null) {
+        const remaining = firstNumber(item, ['qtd_restante', 'quantidade_restante']);
+        if (remaining !== null) produced = Math.max(0, planned - remaining);
+      }
+      if (planned !== null && planned > 0 && produced !== null) {
+        return Math.max(0, Math.min(100, (produced / planned) * 100));
+      }
+      const status = String(item?.status || '').trim().normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
+      if (status === 'CONCLUIDO' || status === 'CONCLUIDA') return 100;
+      return null;
+    }
+
+    const DOMAIN_CONFIG = {
+      despesas: {
+        idFields: ['ID', 'id'],
+        alphaFields: ['descricao', 'fornecedor'],
+        createdFields: ['criado_em'],
+        operationFields: ['data_competencia'],
+        value: item => firstNumber(item, ['valor_total', 'total_previsto']),
+        pending: item => getPendingValue(item, ['valor_total', 'total_previsto']),
+        dueFields: ['data_vencimento'],
+        defaultSort: { key: 'operation', direction: 'desc' },
+        options: [ALPHA, CREATED, OPERATION, VALUE, DUE, PENDING]
+      },
+      estoque: {
+        idFields: ['ID', 'id'],
+        alphaFields: ['item', 'fornecedor', 'categoria'],
+        createdFields: ['criado_em'],
+        operationFields: ['comprado_em', 'data_pagamento'],
+        operationFallbackCreated: true,
+        value: getStockValue,
+        quantity: item => firstNumber(item, ['quantidade', 'quantidade_disponivel']),
+        defaultSort: { key: 'operation', direction: 'desc' },
+        options: [ALPHA, CREATED, OPERATION, VALUE, QUANTITY]
+      },
+      compras: {
+        idFields: ['ID', 'id'],
+        alphaFields: ['item', 'fornecedor'],
+        createdFields: ['criado_em'],
+        operationFields: ['comprado_em'],
+        value: item => {
+          const direct = firstNumber(item, ['total_previsto', 'valor_total_item']);
+          return direct !== null
+            ? direct
+            : multiply(item, ['quantidade'], ['valor_unit', 'custo_unitario']);
+        },
+        pending: item => getPendingValue(item, ['total_previsto', 'valor_total_item']),
+        dueFields: ['data_vencimento'],
+        defaultSort: { key: 'operation', direction: 'desc' },
+        options: [ALPHA, CREATED, OPERATION, VALUE, DUE, PENDING]
+      },
+      vendas: {
+        idFields: ['ID', 'id'],
+        alphaFields: ['item', 'cliente', 'referencia_venda'],
+        createdFields: ['criado_em'],
+        operationFields: ['data_venda'],
+        value: item => {
+          const direct = firstNumber(item, ['valor_total_venda', 'total_previsto', 'valor_total']);
+          return direct !== null
+            ? direct
+            : multiply(item, ['quantidade'], ['valor_unit_venda', 'valor_unit']);
+        },
+        pending: item => getPendingValue(item, ['valor_total_venda', 'total_previsto']),
+        defaultSort: { key: 'operation', direction: 'desc' },
+        options: [ALPHA, CREATED, OPERATION, VALUE, PENDING]
+      },
+      produtos: {
+        idFields: ['produto_id', 'ID', 'id'],
+        alphaFields: ['nome_produto'],
+        createdFields: ['criado_em'],
+        operationFields: [],
+        value: item => firstNumber(item, ['preco_venda', 'custo_previsto']),
+        defaultSort: { key: 'alpha', direction: 'asc' },
+        options: [ALPHA, CREATED, VALUE]
+      },
+      producao: {
+        idFields: ['producao_id', 'ID', 'id'],
+        alphaFields: ['nome_ordem', 'nome_produto'],
+        createdFields: ['criado_em'],
+        operationFields: ['data_inicio'],
+        forecastFields: ['data_prevista_termino'],
+        progress: getProductionProgress,
+        defaultSort: { key: 'operation', direction: 'desc' },
+        options: [ALPHA, CREATED, OPERATION, FORECAST, PROGRESS]
+      }
+    };
+
+    function canonicalDomain(domain) {
+      const normalized = String(domain || '').trim().toLowerCase();
+      return DOMAIN_ALIASES[normalized] || normalized;
+    }
+
+    function getConfig(domain) {
+      return DOMAIN_CONFIG[canonicalDomain(domain)] || null;
+    }
+
+    function isValidDateParts(year, month, day, hour = 0, minute = 0, second = 0, millisecond = 0) {
+      if (![year, month, day, hour, minute, second, millisecond].every(Number.isFinite)) return false;
+      if (year < 1000 || year > 9999 || month < 1 || month > 12 || day < 1 || day > 31) return false;
+      if (hour < 0 || hour > 23 || minute < 0 || minute > 59 || second < 0 || second > 59) return false;
+      const date = new Date(Date.UTC(year, month - 1, day, hour, minute, second, millisecond));
+      return date.getUTCFullYear() === year
+        && date.getUTCMonth() === month - 1
+        && date.getUTCDate() === day
+        && date.getUTCHours() === hour
+        && date.getUTCMinutes() === minute
+        && date.getUTCSeconds() === second;
+    }
+
+    /** Retorna timestamp em ms ou null. Nao usa Date.parse para formatos ambiguos. */
+    function parseDate(value) {
+      if (value === null || value === undefined || value === '') return null;
+      if (value instanceof Date) {
+        const timestamp = value.getTime();
+        return Number.isFinite(timestamp) ? timestamp : null;
+      }
+      if (typeof value === 'number') {
+        return Number.isFinite(value) && value > 0 ? value : null;
+      }
+
+      const raw = String(value).trim();
+      if (!raw) return null;
+
+      const iso = raw.match(
+        /^(\d{4})-(\d{2})-(\d{2})(?:[T\s](\d{2})(?::?(\d{2}))?(?::?(\d{2})(?:\.(\d{1,3}))?)?)?(Z|[+-]\d{2}:?\d{2})?$/i
+      );
+      if (iso) {
+        const year = Number(iso[1]);
+        const month = Number(iso[2]);
+        const day = Number(iso[3]);
+        const hour = Number(iso[4] || 0);
+        const minute = Number(iso[5] || 0);
+        const second = Number(iso[6] || 0);
+        const millisecond = Number(String(iso[7] || '').padEnd(3, '0') || 0);
+        if (!isValidDateParts(year, month, day, hour, minute, second, millisecond)) return null;
+
+        if (iso[8]) {
+          const timezone = iso[8].toUpperCase() === 'Z'
+            ? 'Z'
+            : iso[8].replace(/([+-]\d{2})(\d{2})$/, '$1:$2');
+          const normalized = `${iso[1]}-${iso[2]}-${iso[3]}T${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:${String(second).padStart(2, '0')}.${String(millisecond).padStart(3, '0')}${timezone}`;
+          const timestamp = Date.parse(normalized);
+          return Number.isFinite(timestamp) ? timestamp : null;
+        }
+        return Date.UTC(year, month - 1, day, hour, minute, second, millisecond);
+      }
+
+      const br = raw.match(
+        /^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})(?:[T\s](\d{1,2})(?::(\d{2}))?(?::(\d{2}))?)?$/
+      );
+      if (br) {
+        const day = Number(br[1]);
+        const month = Number(br[2]);
+        const year = Number(br[3]);
+        const hour = Number(br[4] || 0);
+        const minute = Number(br[5] || 0);
+        const second = Number(br[6] || 0);
+        if (!isValidDateParts(year, month, day, hour, minute, second, 0)) return null;
+        return Date.UTC(year, month - 1, day, hour, minute, second, 0);
+      }
+
+      return null;
+    }
+
+    function parseNumericId(value) {
+      if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+      const groups = String(value ?? '').match(/\d+/g);
+      if (!groups || groups.length === 0) return null;
+      const parsed = Number(groups[groups.length - 1]);
+      return Number.isFinite(parsed) ? parsed : null;
+    }
+
+    function firstText(item, fields) {
+      for (const field of fields || []) {
+        const value = String(item?.[field] ?? '').trim();
+        if (value) return value;
+      }
+      return '';
+    }
+
+    function findDate(item, fields) {
+      for (const field of fields || []) {
+        const value = item?.[field];
+        const timestamp = parseDate(value);
+        if (timestamp !== null) {
+          return { value, timestamp, field, fallback: false };
+        }
+      }
+      return null;
+    }
+
+    function findOptimisticTimestamp(item, config) {
+      const candidates = [
+        item?._localCreatedAt,
+        item?._localCreatedAtMs,
+        item?._localMutationId,
+        ...(config?.idFields || []).map(field => item?.[field])
+      ];
+      for (const candidate of candidates) {
+        const explicit = typeof candidate === 'number' ? parseDate(candidate) : null;
+        if (explicit !== null) {
+          return { value: explicit, timestamp: explicit, field: '_localCreatedAt', fallback: true };
+        }
+        const match = String(candidate ?? '').match(/(?:^|[_-])(\d{13})(?=[_-]|$)/);
+        if (!match) continue;
+        const timestamp = Number(match[1]);
+        const year = new Date(timestamp).getUTCFullYear();
+        if (Number.isFinite(timestamp) && year >= 2000 && year <= 2100) {
+          return { value: timestamp, timestamp, field: '_localMutationId', fallback: true };
+        }
+      }
+      return null;
+    }
+
+    function getDateInfo(domain, item, kind = 'operation') {
+      const config = getConfig(domain);
+      if (!config) return null;
+
+      if (kind === 'due') return findDate(item, config.dueFields);
+      if (kind === 'forecast') return findDate(item, config.forecastFields);
+
+      const primaryFields = kind === 'created' ? config.createdFields : config.operationFields;
+      const primary = findDate(item, primaryFields);
+      if (primary) return primary;
+
+      const optimistic = findOptimisticTimestamp(item, config);
+      // Cadastro sem criado_em usa o timestamp do ID otimista. IDs persistidos
+      // sem data permanecem no fim e sao ordenados pela sequencia numerica.
+      if (kind === 'created') return optimistic;
+
+      if (!config.operationFallbackCreated) return null;
+      const fallback = findDate(item, config.createdFields) || optimistic;
+      return fallback ? { ...fallback, fallback: true } : null;
+    }
+
+    function getIdValue(item, config) {
+      for (const field of config?.idFields || []) {
+        const raw = item?.[field];
+        if (String(raw ?? '').trim()) return raw;
+      }
+      return '';
+    }
+
+    function getCriterionValue(domain, item, key) {
+      const config = getConfig(domain);
+      if (!config) return null;
+      if (key === 'alpha') return firstText(item, config.alphaFields) || null;
+      if (key === 'created' || key === 'operation' || key === 'due' || key === 'forecast') {
+        return getDateInfo(domain, item, key)?.timestamp ?? null;
+      }
+      const accessor = config[key];
+      return typeof accessor === 'function' ? accessor(item) : null;
+    }
+
+    function getOptions(domain) {
+      const config = getConfig(domain);
+      return (config?.options || []).map(item => ({
+        ...item,
+        directionLabels: { ...item.directionLabels }
+      }));
+    }
+
+    function getDefault(domain) {
+      const config = getConfig(domain);
+      const fallback = config?.defaultSort || { key: 'created', direction: 'desc' };
+      return { key: fallback.key, direction: fallback.direction };
+    }
+
+    function normalize(domain, sortOrKey, direction) {
+      const options = getOptions(domain);
+      const fallback = getDefault(domain);
+      const raw = typeof sortOrKey === 'string'
+        ? { key: sortOrKey, direction }
+        : (sortOrKey && typeof sortOrKey === 'object' ? sortOrKey : {});
+      const selected = options.find(item => item.key === String(raw.key || '').trim())
+        || options.find(item => item.key === fallback.key)
+        || options[0];
+      if (!selected) return fallback;
+      const normalizedDirection = DIRECTIONS.has(String(raw.direction || '').toLowerCase())
+        ? String(raw.direction).toLowerCase()
+        : selected.defaultDirection;
+      return { key: selected.key, direction: normalizedDirection };
+    }
+
+    function storageKey(domain) {
+      return `${STORAGE_PREFIX}${canonicalDomain(domain)}`;
+    }
+
+    function get(domain) {
+      const fallback = getDefault(domain);
+      try {
+        if (typeof localStorage === 'undefined') return fallback;
+        const raw = localStorage.getItem(storageKey(domain));
+        return raw ? normalize(domain, JSON.parse(raw)) : fallback;
+      } catch (error) {
+        return fallback;
+      }
+    }
+
+    function emitChange(domain, sort) {
+      if (typeof window === 'undefined' || typeof window.dispatchEvent !== 'function') return;
+      try {
+        window.dispatchEvent(new CustomEvent('app:list-order:changed', {
+          detail: { tab: canonicalDomain(domain), sort: { ...sort } }
+        }));
+      } catch (error) {
+        // Preferencia salva mesmo quando CustomEvent nao esta disponivel.
+      }
+    }
+
+    function save(domain, sortOrKey, direction) {
+      const sort = normalize(domain, sortOrKey, direction);
+      try {
+        if (typeof localStorage !== 'undefined') {
+          localStorage.setItem(storageKey(domain), JSON.stringify(sort));
+        }
+      } catch (error) {
+        // Navegadores podem bloquear storage; a ordenacao da sessao continua valida.
+      }
+      emitChange(domain, sort);
+      return sort;
+    }
+
+    function compareValues(a, b, type) {
+      if (type === 'text') {
+        const normalizedA = window.AppDomainUtils?.normalizeTextNoAccent
+          ? window.AppDomainUtils.normalizeTextNoAccent(a)
+          : String(a || '').trim().toUpperCase();
+        const normalizedB = window.AppDomainUtils?.normalizeTextNoAccent
+          ? window.AppDomainUtils.normalizeTextNoAccent(b)
+          : String(b || '').trim().toUpperCase();
+        return normalizedA.localeCompare(normalizedB, 'pt-BR', {
+          sensitivity: 'base',
+          numeric: true
+        });
+      }
+      return Number(a) - Number(b);
+    }
+
+    function sort(domain, list, sortInput) {
+      const config = getConfig(domain);
+      const source = Array.isArray(list) ? list : [];
+      if (!config) return [...source];
+
+      const selectedSort = sortInput ? normalize(domain, sortInput) : get(domain);
+      const optionConfig = getOptions(domain).find(item => item.key === selectedSort.key);
+      const factor = selectedSort.direction === 'asc' ? 1 : -1;
+
+      return source
+        .map((item, index) => ({ item, index }))
+        .sort((left, right) => {
+          const valueA = getCriterionValue(domain, left.item, selectedSort.key);
+          const valueB = getCriterionValue(domain, right.item, selectedSort.key);
+          const missingA = valueA === null || valueA === undefined || valueA === '';
+          const missingB = valueB === null || valueB === undefined || valueB === '';
+          if (missingA !== missingB) return missingA ? 1 : -1;
+          if (!missingA) {
+            const compared = compareValues(valueA, valueB, optionConfig?.type);
+            if (compared !== 0) return compared * factor;
+          }
+
+          // Empates usam cadastro e ID para manter a ordem deterministica.
+          const createdA = getDateInfo(domain, left.item, 'created')?.timestamp ?? null;
+          const createdB = getDateInfo(domain, right.item, 'created')?.timestamp ?? null;
+          if (createdA !== createdB) {
+            if (createdA === null) return 1;
+            if (createdB === null) return -1;
+            return createdB - createdA;
+          }
+
+          const rawIdA = getIdValue(left.item, config);
+          const rawIdB = getIdValue(right.item, config);
+          const idA = parseNumericId(rawIdA);
+          const idB = parseNumericId(rawIdB);
+          if (idA !== idB) {
+            if (idA === null) return 1;
+            if (idB === null) return -1;
+            return selectedSort.key === 'created'
+              ? (idA - idB) * factor
+              : idB - idA;
+          }
+          const textId = String(rawIdA || '').localeCompare(String(rawIdB || ''), 'pt-BR', { numeric: true });
+          if (textId) {
+            return selectedSort.key === 'created'
+              ? textId * factor
+              : textId * -1;
+          }
+          return left.index - right.index;
+        })
+        .map(entry => entry.item);
+    }
+
+    return {
+      parseDate,
+      parseNumericId,
+      getDateInfo,
+      getCriterionValue,
+      getOptions,
+      getDefault,
+      normalize,
+      get,
+      save,
+      sort
+    };
+  })();
 </script>

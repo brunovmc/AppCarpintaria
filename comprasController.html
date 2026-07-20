@@ -304,11 +304,11 @@
       });
     }
 
-    function persistirEReRenderizarCompras(lista) {
+    function persistirEReRenderizarCompras(lista, onDone) {
       if (Array.isArray(lista)) {
         ComprasStore.set(lista);
       }
-      renderListaAtual();
+      renderListaAtual(onDone);
       if (typeof popularFiltrosDoPainelCompras === 'function') {
         popularFiltrosDoPainelCompras();
       }
@@ -400,11 +400,21 @@
       mostrarToast('Tentando sincronizar novamente...');
     }
 
+    function initOrdenacao() {
+      window.AppListOrderUI?.mount?.({
+        containerId: 'ordenacaoCompras',
+        domain: 'compras',
+        adapter: ComprasStore,
+        onChange: renderListaAtual
+      });
+    }
+
     function init() {
       if (iniciado) return;
 
       registrarListenerMutacoesSeNecessario();
       window.AppOptimistic?.process?.();
+      initOrdenacao();
       carregarValidacoes();
       carregarCompras();
       window.ComprasDocumentoController?.init?.();
@@ -474,12 +484,12 @@
         .some(v => String(v || '').trim().toUpperCase() === c);
     }
 
-    function renderListaAtual() {
+    function renderListaAtual(onDone) {
       if (window.aplicarBuscaCompras) {
-        aplicarBuscaCompras();
+        aplicarBuscaCompras(onDone);
         return;
       }
-      ComprasUI.renderLista(ComprasStore.get());
+      ComprasUI.renderLista(ComprasStore.get(), onDone);
     }
 
     function hidratarComprasDoCache() {
@@ -489,7 +499,7 @@
       return true;
     }
 
-    function carregarCompras(forcarRecarregar = false, onDone) {
+    function carregarCompras(forcarRecarregar = false, onDone, ambiente = '') {
       const exibindoCache = !forcarRecarregar && hidratarComprasDoCache();
       const perf = perfStart('rpc.compras.listarCompras');
       window.AppRequest.runner()
@@ -498,8 +508,9 @@
             window.AppRuntime.setReadOnly(false);
           }
           perfEnd(perf, { ok: true, total: Array.isArray(lista) ? lista.length : 0 });
-          persistirEReRenderizarCompras(reconciliarListaComprasComMutacoes(lista));
-          if (typeof onDone === 'function') onDone();
+          persistirEReRenderizarCompras(reconciliarListaComprasComMutacoes(lista), () => {
+            if (typeof onDone === 'function') onDone(true);
+          });
         })
         .withFailureHandler(() => {
           perfEnd(perf, { ok: false });
@@ -508,17 +519,17 @@
               window.AppRuntime.setReadOnly(true, 'Sem conexao com backend - exibindo cache local');
             }
             mostrarToast('Exibindo ultimo snapshot em cache', 'erro');
-            if (typeof onDone === 'function') onDone();
+            if (typeof onDone === 'function') onDone(false);
             return;
           }
           mostrarToast('Erro ao carregar compras', 'erro');
-          if (typeof onDone === 'function') onDone();
+          if (typeof onDone === 'function') onDone(false);
         })
-        .listarCompras(!!forcarRecarregar);
+        .listarCompras(!!forcarRecarregar, String(ambiente || '').trim());
     }
 
-    function syncFromBackend(onDone) {
-      carregarCompras(true, onDone);
+    function syncFromBackend(onDone, ambiente = '') {
+      carregarCompras(true, onDone, ambiente);
       window.ComprasDocumentoController?.carregar?.(true);
     }
 
@@ -990,11 +1001,18 @@
       ComprasUI.fecharModalPagamentoCompra();
     }
 
+    function abrirDetalhes(id) {
+      const alvoId = String(id || '').trim();
+      if (!alvoId || typeof ComprasUI?.abrirDetalhes !== 'function') return false;
+      return ComprasUI.abrirDetalhes(alvoId) ?? true;
+    }
+
     return {
       init,
       syncFromBackend,
       salvar,
       editar,
+      abrirDetalhes,
       refazer,
       registrarPagamento,
       confirmarPagamentoCompra,

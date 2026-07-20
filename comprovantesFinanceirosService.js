@@ -7,10 +7,10 @@ const COMPROVANTE_STATUS_PARCIAL = 'PARCIAL';
 const COMPROVANTE_STATUS_CONCILIADO = 'CONCILIADO';
 
 function executarComAmbienteComprovantesFinanceiros_(ambiente, callback) {
-  if (typeof executarComAmbienteInboxDespesas_ === 'function') {
-    return executarComAmbienteInboxDespesas_(ambiente, callback);
+  if (typeof executarComAmbienteBancoDadosAutorizado_ !== 'function') {
+    throw new Error('Controle de ambiente indisponivel.');
   }
-  return callback();
+  return executarComAmbienteBancoDadosAutorizado_(ambiente, () => callback());
 }
 
 function obterContextoComprovantesFinanceiros(statusFiltro, ambiente) {
@@ -21,6 +21,7 @@ function obterContextoComprovantesFinanceiros(statusFiltro, ambiente) {
 
 function obterContextoComprovantesFinanceirosAtual_(statusFiltro) {
   if (typeof assertCanRead === 'function') assertCanRead('Conciliacao de comprovantes financeiros');
+  tentarReconciliarEstruturaComprovantesDriveNoAcesso_();
   const catalogo = montarCatalogoFinanceiroComprovantes_();
   const pagamentos = listarPagamentos(true);
   const todos = listarInboxDespesasNoAmbienteAtual_('TODOS')
@@ -481,7 +482,7 @@ function desfazerAlocacaoComprovanteFinanceiro(comprovanteId, pagamentoId, ambie
       if (!pagamento) throw new Error('Vinculo do comprovante nao encontrado.');
       const origemTipo = String(pagamento.origem_tipo || '').trim().toUpperCase();
       const origemId = String(pagamento.origem_id || '').trim();
-      const removido = removerPagamento(pagamento.ID, { rollbackEmFalha: true });
+      const removido = removerPagamento_(pagamento.ID, { rollbackEmFalha: true });
       if (!removido) throw new Error('Nao foi possivel remover o vinculo financeiro.');
       if (origemTipo === 'DESPESA_GERAL') {
         const sheet = getSheet(ABA_DESPESAS_GERAIS);

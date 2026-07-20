@@ -984,6 +984,7 @@
           <div class="card-resumo">
             ${resumo}<br>
             ${resumoPreco}
+            ${window.AppListOrderUI?.cardDateHtml('produtos', i, window.ProdutosStore?.getSort?.()) || ''}
           </div>
           ${localState.label ? `
             <div class="optimistic-local-state-row">
@@ -1330,6 +1331,8 @@
       adicionarSaidaModeloForm,
       adicionarEtapaModeloForm,
       renderLista,
+      abrirModalDetalhes,
+      abrirDetalhes: abrirModalDetalhes,
       fecharModalDetalhes,
       setOpcoesReceitas,
       setReceitasProduto

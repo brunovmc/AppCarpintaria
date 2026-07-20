@@ -5,6 +5,41 @@
     let carregado = false;
     let versao = 0;
     const CACHE_TAB = 'produtos';
+    let ordenacao = window.AppListOrder?.get?.(CACHE_TAB)
+      || { key: 'alpha', direction: 'asc' };
+
+    function ordenar(lista) {
+      return window.AppListOrder?.sort
+        ? window.AppListOrder.sort(CACHE_TAB, lista, ordenacao)
+        : [...(Array.isArray(lista) ? lista : [])];
+    }
+
+    function getSort() {
+      return { ...ordenacao };
+    }
+
+    function getSortOptions() {
+      return window.AppListOrder?.getOptions?.(CACHE_TAB) || [];
+    }
+
+    function setSort(sortOrKey, direction) {
+      const next = window.AppListOrder?.normalize
+        ? window.AppListOrder.normalize(CACHE_TAB, sortOrKey, direction)
+        : {
+          key: typeof sortOrKey === 'string' ? sortOrKey : sortOrKey?.key,
+          direction: direction || sortOrKey?.direction
+        };
+      if (next.key === ordenacao.key && next.direction === ordenacao.direction) {
+        return getSort();
+      }
+
+      ordenacao = next;
+      itens = ordenar(itens);
+      tocarVersao();
+      salvarCache();
+      window.AppListOrder?.save?.(CACHE_TAB, ordenacao);
+      return getSort();
+    }
 
     function tocarVersao() {
       versao += 1;
@@ -22,14 +57,14 @@
        BASICO
     ========================== */
     function set(lista) {
-      itens = Array.isArray(lista) ? [...lista] : [];
+      itens = ordenar(lista);
       carregado = true;
       tocarVersao();
       salvarCache();
     }
 
     function get() {
-      return [...itens];
+      return ordenar(itens);
     }
 
     function isLoaded() {
@@ -52,7 +87,8 @@
     ========================== */
     function add(item) {
       if (!item || !item.produto_id) return;
-      itens.unshift(item);
+      itens.push(item);
+      itens = ordenar(itens);
       tocarVersao();
       salvarCache();
     }
@@ -65,6 +101,7 @@
         ...itens[idx],
         ...dados
       };
+      itens = ordenar(itens);
       tocarVersao();
       salvarCache();
     }
@@ -94,7 +131,7 @@
         );
       }
 
-      return resultado;
+      return ordenar(resultado);
     }
 
     /* =========================
@@ -106,6 +143,10 @@
       isLoaded,
       getVersion,
       clear,
+      getSort,
+      getSortOptions,
+      setSort,
+      sort: ordenar,
 
       add,
       update,

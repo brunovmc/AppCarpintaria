@@ -4,6 +4,7 @@ const REGRESSION_PURGE_MARKER = '__REGTEST';
 function listarCasosRegressaoSprint3_() {
   return [
     ['sheetRepo:updateById', regressionSheetRepoUpdateById],
+    ['ambiente:override-execucao', regressionAmbienteOverrideExecucao],
     ['cache:app+validacoes+producao', regressionCacheCore],
     ['financeiro:parcelas', regressionFinanceiroParcelas],
     ['producao:agregacao+custo', regressionProducaoCalculos],
@@ -14,7 +15,8 @@ function listarCasosRegressaoSprint3_() {
     ['vendas:saldo-disponivel-com-reserva', regressionVendaSaldoReservado],
     ['documentos-compra:rateio+quantidade', regressionDocumentoCompraCalculos],
     ['comprovantes:matching+schema', regressionComprovantesFinanceiros],
-    ['recebimentos:matching+schema', regressionComprovantesRecebimentos]
+    ['recebimentos:matching+schema', regressionComprovantesRecebimentos],
+    ['comprovantes-drive:estrutura', regressionEstruturaComprovantesDrive]
   ];
 }
 
@@ -22,6 +24,7 @@ function listarGruposRegressaoSprint3_() {
   return {
     parte1: [
       'sheetRepo:updateById',
+      'ambiente:override-execucao',
       'cache:app+validacoes+producao',
       'financeiro:parcelas',
       'producao:agregacao+custo'
@@ -42,7 +45,8 @@ function listarGruposRegressaoSprint3_() {
     ],
     parte6: [
       'comprovantes:matching+schema',
-      'recebimentos:matching+schema'
+      'recebimentos:matching+schema',
+      'comprovantes-drive:estrutura'
     ]
   };
 }
@@ -572,6 +576,52 @@ function assertAproxRegressao(atual, esperado, tolerancia, mensagem) {
   const e = Number(esperado);
   if (!Number.isFinite(a) || !Number.isFinite(e) || Math.abs(a - e) > tol) {
     throw new Error(mensagem || `Valor fora da tolerancia. atual=${a} esperado=${e} tol=${tol}`);
+  }
+}
+
+function regressionAmbienteOverrideExecucao() {
+  const ambienteOriginal = DB_ENV_EXECUTION_OVERRIDE_;
+  try {
+    DB_ENV_EXECUTION_OVERRIDE_ = DB_ENV_PROD;
+    const observado = executarComAmbienteBancoDados_(DB_ENV_DEV, ambiente => ({
+      argumento: ambiente,
+      override: DB_ENV_EXECUTION_OVERRIDE_
+    }));
+    assertRegressao(
+      observado.argumento === DB_ENV_DEV && observado.override === DB_ENV_DEV,
+      'Override deve usar o ambiente solicitado durante a execucao.'
+    );
+    assertRegressao(
+      DB_ENV_EXECUTION_OVERRIDE_ === DB_ENV_PROD,
+      'Override deve restaurar o ambiente anterior apos sucesso.'
+    );
+
+    const aninhado = executarComAmbienteBancoDados_(DB_ENV_DEV, () => {
+      const externo = DB_ENV_EXECUTION_OVERRIDE_;
+      const interno = executarComAmbienteBancoDados_(DB_ENV_PROD, () => DB_ENV_EXECUTION_OVERRIDE_);
+      return { externo, interno, restaurado: DB_ENV_EXECUTION_OVERRIDE_ };
+    });
+    assertRegressao(
+      aninhado.externo === DB_ENV_DEV && aninhado.interno === DB_ENV_PROD && aninhado.restaurado === DB_ENV_DEV,
+      'Override aninhado deve restaurar o ambiente externo.'
+    );
+
+    let lancou = false;
+    try {
+      executarComAmbienteBancoDados_(DB_ENV_DEV, () => {
+        throw new Error('falha esperada');
+      });
+    } catch (error) {
+      lancou = String(error?.message || '') === 'falha esperada';
+    }
+    assertRegressao(lancou, 'Override deve propagar o erro original.');
+    assertRegressao(
+      DB_ENV_EXECUTION_OVERRIDE_ === DB_ENV_PROD,
+      'Override deve restaurar o ambiente anterior apos erro.'
+    );
+    return { ok: true };
+  } finally {
+    DB_ENV_EXECUTION_OVERRIDE_ = ambienteOriginal;
   }
 }
 
@@ -1531,6 +1581,107 @@ function regressionComprovantesFinanceiros() {
     'Multiplos pagamentos parciais devem permanecer na mesma parcela apos recalculo.'
   );
 
+  const historico = montarHistoricoPagamentosOrigemFinanceiro_(
+    {
+      tipo: 'COMPRA',
+      id: 'COM_HIST',
+      natureza: 'PAGAMENTO',
+      total_previsto: 300,
+      item: { item: 'Madeira teste', comprado_em: '2026-07-10', criado_em: '2026-07-10 08:00' }
+    },
+    [
+      {
+        ID: 'PGT_ANTIGO', origem_tipo: 'COMPRA', origem_id: 'COM_HIST', ativo: true,
+        parcela_alvo_id: 'PAR_1', data_pagamento: '2026-07-11', valor_pago: 100,
+        forma_pagamento: 'PIX', observacao: 'Primeira parte', criado_em: '2026-07-11 09:00',
+        client_request_id: 'NAO_EXPOR'
+      },
+      {
+        ID: 'PGT_RECENTE', origem_tipo: 'COMPRA', origem_id: 'COM_HIST', ativo: true,
+        parcela_alvo_id: 'PAR_2', data_pagamento: '2026-07-15', valor_pago: 50,
+        forma_pagamento: 'DINHEIRO', observacao: '', criado_em: '2026-07-15 10:00'
+      },
+      {
+        ID: 'PGT_INATIVO', origem_tipo: 'COMPRA', origem_id: 'COM_HIST', ativo: false,
+        parcela_alvo_id: 'PAR_2', data_pagamento: '2026-07-16', valor_pago: 80,
+        forma_pagamento: 'PIX'
+      }
+    ],
+    [
+      {
+        ID: 'PAR_1', origem_tipo: 'COMPRA', origem_id: 'COM_HIST', ativo: true,
+        parcela_numero: 1, parcelas_total: 2, data_prevista: '2026-07-11',
+        valor_previsto: 150, valor_pago: 100, status: 'PARCIAL'
+      },
+      {
+        ID: 'PAR_2', origem_tipo: 'COMPRA', origem_id: 'COM_HIST', ativo: true,
+        parcela_numero: 2, parcelas_total: 2, data_prevista: '2026-08-11',
+        valor_previsto: 150, valor_pago: 50, status: 'PARCIAL'
+      }
+    ]
+  );
+  assertRegressao(historico.pagamentos.length === 2, 'Historico deve excluir pagamentos inativos.');
+  assertRegressao(
+    historico.pagamentos[0].ID === 'PGT_RECENTE',
+    'Historico deve ordenar pagamentos do mais recente para o mais antigo.'
+  );
+  assertRegressao(
+    historico.pagamentos[0].parcela_alvo?.parcela_numero === 2,
+    'Historico deve identificar a parcela alvo do pagamento.'
+  );
+  assertAproxRegressao(historico.resumo.total_pago, 150, 0.001, 'Total pago do historico incorreto.');
+  assertAproxRegressao(historico.resumo.total_pendente, 150, 0.001, 'Saldo pendente do historico incorreto.');
+  assertRegressao(
+    !Object.prototype.hasOwnProperty.call(historico.pagamentos[1], 'client_request_id'),
+    'Historico nao deve expor identificadores internos de idempotencia.'
+  );
+
+  const historicoVenda = montarHistoricoPagamentosOrigemFinanceiro_(
+    {
+      tipo: 'VENDA', id: 'VND_HIST', natureza: 'RECEBIMENTO', total_previsto: 120,
+      item: { item: 'Mesa teste', data_venda: '2026-07-12', criado_em: '2026-07-12 08:00' }
+    },
+    [{
+      ID: 'RCB_HIST', origem_tipo: 'VENDA', origem_id: 'VND_HIST', ativo: true,
+      data_pagamento: '2026-07-13', valor_pago: 40, forma_pagamento: 'PIX'
+    }],
+    []
+  );
+  assertRegressao(
+    historicoVenda.origem.tipo === 'VENDA' && historicoVenda.origem.natureza === 'RECEBIMENTO',
+    'Historico de venda deve preservar tipo e natureza de recebimento.'
+  );
+  assertAproxRegressao(historicoVenda.resumo.total_pago, 40, 0.001, 'Total recebido incorreto.');
+
+  const historicoDespesa = montarHistoricoPagamentosOrigemFinanceiro_(
+    {
+      tipo: 'DESPESA_GERAL', id: 'DES_HIST', natureza: 'PAGAMENTO', total_previsto: 90,
+      item: { descricao: 'Energia', data_competencia: '2026-07-01', criado_em: '2026-07-01 08:00' }
+    },
+    [],
+    []
+  );
+  assertRegressao(
+    historicoDespesa.origem.tipo === 'DESPESA_GERAL' && historicoDespesa.pagamentos.length === 0,
+    'Historico de despesa deve usar o tipo canonico e aceitar lista sem pagamentos.'
+  );
+
+  let rejeitouOrigemDivergente = false;
+  try {
+    validarPagamentoHistoricoOrigemFinanceiro_(
+      { ID: 'PGT_VALIDAR', origem_tipo: 'COMPRA', origem_id: 'COM_1', ativo: true },
+      'PGT_VALIDAR',
+      'VENDA',
+      'VND_1'
+    );
+  } catch (error) {
+    rejeitouOrigemDivergente = /nao pertence/i.test(String(error?.message || ''));
+  }
+  assertRegressao(
+    rejeitouOrigemDivergente,
+    'Remocao pelo historico deve rejeitar origem divergente antes de alterar dados.'
+  );
+
   return {
     ok: true,
     score_exato: destinoExato.score,
@@ -1584,4 +1735,76 @@ function regressionComprovantesRecebimentos() {
     'Matching deve reconhecer recebimentos parciais.'
   );
   return { ok: true, score_exato: destinoExato.score, score_parcial: destinoParcial.score };
+}
+
+function regressionEstruturaComprovantesDrive() {
+  const criarIterador = itens => {
+    let indice = 0;
+    return {
+      hasNext: () => indice < itens.length,
+      next: () => itens[indice++]
+    };
+  };
+  const criarPasta = (id, nome, pai) => ({
+    getId: () => id,
+    getName: () => nome,
+    getParents: () => criarIterador(pai ? [pai] : [])
+  });
+  const raiz = criarPasta('ROOT', COMPROVANTES_DRIVE_ROOT_FOLDER_NAME, null);
+  const despesas = criarPasta('DESP', COMPROVANTES_DRIVE_DOMAIN_FOLDER_NAMES.despesas, raiz);
+  const recebimentos = criarPasta('REC', COMPROVANTES_DRIVE_DOMAIN_FOLDER_NAMES.recebimentos, raiz);
+  const montarDominio = (prefixo, pastaRaiz) => {
+    const pastas = { raiz: pastaRaiz };
+    Object.keys(COMPROVANTES_DRIVE_STATUS_FOLDER_NAMES).forEach(chave => {
+      pastas[chave] = criarPasta(
+        `${prefixo}_${chave}`,
+        COMPROVANTES_DRIVE_STATUS_FOLDER_NAMES[chave],
+        pastaRaiz
+      );
+    });
+    return pastas;
+  };
+  const pastasDespesas = montarDominio('D', despesas);
+  const pastasRecebimentos = montarDominio('R', recebimentos);
+  assertRegressao(
+    estruturaDominioComprovantesDriveValida_(pastasDespesas, 'despesas', raiz),
+    'Despesas deve aceitar apenas a hierarquia raiz/Despesas/status.'
+  );
+  assertRegressao(
+    estruturaDominioComprovantesDriveValida_(pastasRecebimentos, 'recebimentos', raiz),
+    'Recebimentos deve aceitar apenas a hierarquia raiz/Recebimentos/status.'
+  );
+
+  const despesasComEntradaNaRaiz = {
+    ...pastasDespesas,
+    entrada: criarPasta('D_ENTRADA_ANTIGA', COMPROVANTES_DRIVE_STATUS_FOLDER_NAMES.entrada, raiz)
+  };
+  assertRegressao(
+    !estruturaDominioComprovantesDriveValida_(despesasComEntradaNaRaiz, 'despesas', raiz),
+    'Uma pasta de status diretamente na raiz comum deve ser rejeitada.'
+  );
+  const entradaNova = pastasDespesas.entrada;
+  const entradaLegada = despesasComEntradaNaRaiz.entrada;
+  assertRegressao(
+    selecionarPastaDestinoStatusComprovantesDrive_(
+      [entradaNova, entradaLegada],
+      entradaLegada,
+      despesas
+    )?.getId() === entradaLegada.getId(),
+    'A migracao deve preservar o ID da pasta legada salva, mesmo que ja exista um destino novo.'
+  );
+  assertRegressao(
+    resolverRaizComumComprovantesDrive_(pastasRecebimentos.entrada, COMPROVANTES_DRIVE_ROOT_FOLDER_NAME)?.getId() === raiz.getId(),
+    'A raiz comum deve ser resolvida a partir de uma pasta de status aninhada.'
+  );
+  assertRegressao(
+    obterChaveRaizComprovantesDrive_('dev') === `${COMPROVANTES_DRIVE_COMMON_ROOT_PROP}_DEV`,
+    'A raiz DEV deve usar propriedade independente de PROD.'
+  );
+  assertRegressao(
+    obterChavePastaInboxDespesasDrive_('entrada', 'dev').endsWith('_DEV') &&
+      obterChavePastaInboxRecebimentosDrive_('entrada', 'dev').endsWith('_DEV'),
+    'Os caminhos de despesas e recebimentos em DEV devem usar propriedades independentes.'
+  );
+  return { ok: true, raiz: raiz.getName(), dominios: [despesas.getName(), recebimentos.getName()] };
 }

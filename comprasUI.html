@@ -15,9 +15,21 @@
     let separadorAdicionadasRenderizado = false;
     let mostrarAdicionadasAoEstoque = false;
     let renderJobSeq = 0;
+    let renderCompletionWaiters = [];
 
     const PAGE_SIZE = 24;
     const RENDER_CHUNK_SIZE = 4;
+
+    function registrarConclusaoRender(onDone) {
+      if (typeof onDone === 'function') renderCompletionWaiters.push(onDone);
+    }
+
+    function concluirRenderPendente() {
+      const waiters = renderCompletionWaiters.splice(0);
+      waiters.forEach(callback => {
+        try { callback(); } catch (error) { /* sem acao */ }
+      });
+    }
 
     /* =========================
        HELPERS
@@ -880,6 +892,7 @@
             ${quantidadeLabel} ${unidadeLabel}
             ${isMadeira ? `<br><span>(${comprimentoLabel} x ${larguraLabel} x ${espessuraLabel}) cm</span>` : ''}
             <br><span>${statusLabel}</span>
+            ${window.AppListOrderUI?.cardDateHtml('compras', i, window.ComprasStore?.getSort?.()) || ''}
             <div class="card-resumo-valor">Valor: ${formatarMoeda(valorTotal)}</div>
           </div>
           ${localState.label ? `
@@ -967,6 +980,15 @@
           <p><b>Voltagem:</b> ${voltagem}</p>
         ` : ''}
 
+        <section class="finance-history-section">
+          <h4>Historico financeiro</h4>
+          <div
+            class="finance-history"
+            data-finance-history-type="COMPRA"
+            data-finance-history-id="${escapeAttr(i.ID || '')}"
+          >Carregando historico...</div>
+        </section>
+
         <div class="acoes">
           ${botaoAdicionarAoEstoque}
           ${botaoPagamento}
@@ -998,6 +1020,7 @@
       f.modalDetalhesConteudo.innerHTML = montarDetalhesCard(item);
       detalhesModalAbertoId = alvoId;
       f.modalDetalhes.classList.remove('hidden');
+      return window.AppFinanceHistoryUI?.loadWithin?.(f.modalDetalhesConteudo) || true;
     }
 
     function fecharModalDetalhes() {
@@ -1212,9 +1235,13 @@
     /* =========================
        LISTA + CARDS
     ========================== */
-    function renderLista(itens) {
+    function renderLista(itens, onDone) {
+      registrarConclusaoRender(onDone);
       const { lista, listaControles } = el();
-      if (!lista) return;
+      if (!lista) {
+        concluirRenderPendente();
+        return;
+      }
       lista.classList.remove('lista-loading');
       lista.setAttribute('aria-busy', 'false');
       const tsInicio = performance.now();
@@ -1262,6 +1289,7 @@
           elapsed_ms: Number((performance.now() - tsInicio).toFixed(1)),
           total_visivel: 0
         });
+        concluirRenderPendente();
         return;
       }
 
@@ -1277,6 +1305,7 @@
           renderizados_iniciais: Number(qtdRenderizada || 0)
         });
         atualizarModalDetalhesSeAberto();
+        concluirRenderPendente();
       });
     }
 
@@ -1485,6 +1514,8 @@
       toggleAdicionadasAoEstoque,
       atualizarQuantidadeMadeira,
       definirTituloFormulario,
+      abrirModalDetalhes,
+      abrirDetalhes: abrirModalDetalhes,
       fecharModalDetalhes,
       abrirModalPagamentoCompra,
       handlePagamentoParcelaChange,

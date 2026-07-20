@@ -101,10 +101,10 @@ const MOVIMENTOS_ESTOQUE_SCHEMA = [
 const DESTINOS_ITEM_DOCUMENTO_COMPRA = ['ESTOQUE', 'CONSUMO', 'EQUIPAMENTO', 'IGNORAR'];
 
 function executarComAmbienteDocumentosCompra_(ambiente, callback) {
-  if (typeof executarComAmbienteInboxDespesas_ === 'function') {
-    return executarComAmbienteInboxDespesas_(ambiente, callback);
+  if (typeof executarComAmbienteBancoDadosAutorizado_ !== 'function') {
+    throw new Error('Controle de ambiente indisponivel.');
   }
-  return callback();
+  return executarComAmbienteBancoDadosAutorizado_(ambiente, () => callback());
 }
 
 function listarInboxDocumentosCompra(statusFiltro, ambiente) {

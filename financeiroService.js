@@ -1620,7 +1620,17 @@ function gerarRecorrenciaDespesasFixasFinanceiro() {
   }
 }
 
-function listarDespesasGerais(forcarRecarregar) {
+function listarDespesasGerais(forcarRecarregar, ambiente) {
+  if (typeof executarComAmbienteBancoDadosAutorizado_ !== 'function') {
+    throw new Error('Controle de ambiente indisponivel.');
+  }
+  return executarComAmbienteBancoDadosAutorizado_(
+    ambiente,
+    () => listarDespesasGeraisNoAmbienteAtual_(forcarRecarregar)
+  );
+}
+
+function listarDespesasGeraisNoAmbienteAtual_(forcarRecarregar) {
   if (!forcarRecarregar) {
     const cached = lerCacheDespesasGerais();
     if (Array.isArray(cached)) {
@@ -1947,6 +1957,253 @@ function obterOrigemPagamentoFinanceiro(origemTipo, origemId) {
   };
 }
 
+function executarConsultaHistoricoFinanceiroNoAmbiente_(ambiente, callback) {
+  if (typeof executarComAmbienteBancoDadosAutorizado_ === 'function') {
+    return executarComAmbienteBancoDadosAutorizado_(ambiente, callback);
+  }
+  const ambienteInformado = String(ambiente || '').trim().toLowerCase();
+  if (ambienteInformado && ambienteInformado !== DB_ENV_PROD && ambienteInformado !== DB_ENV_DEV) {
+    throw new Error('Ambiente de banco de dados invalido.');
+  }
+
+  const contexto = (typeof obterContextoBancoDados === 'function')
+    ? (obterContextoBancoDados() || {})
+    : {};
+  const podeAlternar = contexto?.can_toggle === true;
+  const ambienteContexto = String(
+    contexto?.effective_env || contexto?.selected_env || DB_ENV_PROD
+  ).trim().toLowerCase() === DB_ENV_DEV
+    ? DB_ENV_DEV
+    : DB_ENV_PROD;
+
+  if (ambienteInformado === DB_ENV_DEV && !podeAlternar) {
+    throw new Error('Ambiente DEV disponivel apenas para administradores.');
+  }
+
+  const ambienteAlvo = podeAlternar
+    ? (ambienteInformado || ambienteContexto)
+    : DB_ENV_PROD;
+
+  if (typeof executarComAmbienteBancoDados_ === 'function') {
+    return executarComAmbienteBancoDados_(ambienteAlvo, () => callback(ambienteAlvo));
+  }
+
+  if (
+    typeof setUserDbEnvironment_ === 'function' &&
+    typeof getUserDbEnvironment_ === 'function' &&
+    String(getUserDbEnvironment_() || '').trim().toLowerCase() !== ambienteAlvo
+  ) {
+    setUserDbEnvironment_(ambienteAlvo);
+  }
+
+  return callback(ambienteAlvo);
+}
+
+function montarOrigemHistoricoFinanceiro_(origem) {
+  const tipo = normalizarOrigemTipoFinanceiro(origem?.tipo);
+  const item = origem?.item || {};
+  let rotulo = '';
+  let dataOperacao = '';
+
+  if (tipo === ORIGEM_TIPO_COMPRA) {
+    rotulo = String(item.item || origem?.id || '').trim();
+    dataOperacao = formatarDataYmdFinanceiroSafe(item.comprado_em);
+  } else if (tipo === ORIGEM_TIPO_VENDA) {
+    rotulo = String(item.item || origem?.id || '').trim();
+    dataOperacao = formatarDataYmdFinanceiroSafe(item.data_venda);
+  } else {
+    rotulo = String(item.descricao || origem?.id || '').trim();
+    dataOperacao = formatarDataYmdFinanceiroSafe(item.data_competencia);
+  }
+
+  return {
+    tipo,
+    id: String(origem?.id || '').trim(),
+    natureza: normalizarNaturezaFinanceiro(
+      origem?.natureza || getNaturezaOrigemFinanceiro(tipo)
+    ),
+    rotulo,
+    data_operacao: dataOperacao,
+    criado_em: formatarDataYmdHmFinanceiroSafe(item.criado_em)
+  };
+}
+
+function montarHistoricoPagamentosOrigemFinanceiro_(origem, pagamentos, parcelas) {
+  const origemPublica = montarOrigemHistoricoFinanceiro_(origem);
+  const tipo = origemPublica.tipo;
+  const id = origemPublica.id;
+  const registroAtivo = registro => {
+    if (!Object.prototype.hasOwnProperty.call(registro || {}, 'ativo')) return true;
+    const valor = String(registro?.ativo ?? '').trim().toLowerCase();
+    return valor === 'true' || valor === '1' || valor === 'sim' || valor === 'yes';
+  };
+  const pertenceOrigem = registro => {
+    try {
+      return normalizarOrigemTipoFinanceiro(registro?.origem_tipo) === tipo &&
+        String(registro?.origem_id || '').trim() === id;
+    } catch (error) {
+      return false;
+    }
+  };
+
+  const parcelasPublicas = (Array.isArray(parcelas) ? parcelas : [])
+    .filter(parcela => registroAtivo(parcela) && pertenceOrigem(parcela))
+    .map(parcela => {
+      const valorPrevisto = round2Financeiro(parseNumeroBR(parcela?.valor_previsto));
+      const valorPago = round2Financeiro(parseNumeroBR(parcela?.valor_pago));
+      const valorPendente = round2Financeiro(Math.max(0, valorPrevisto - valorPago));
+      const statusInformado = String(parcela?.status || '').trim().toUpperCase();
+      return {
+        ID: String(parcela?.ID || '').trim(),
+        parcela_numero: Number(parcela?.parcela_numero || 0),
+        parcelas_total: Number(parcela?.parcelas_total || 0),
+        data_prevista: formatarDataYmdFinanceiroSafe(parcela?.data_prevista),
+        valor_previsto: valorPrevisto,
+        valor_pago: valorPago,
+        valor_pendente: valorPendente,
+        status: statusInformado || getStatusPagamentoFinanceiro(valorPrevisto, valorPago),
+        data_quitacao: formatarDataYmdFinanceiroSafe(parcela?.data_quitacao)
+      };
+    })
+    .sort((a, b) => {
+      const numeroA = Number(a.parcela_numero || 0);
+      const numeroB = Number(b.parcela_numero || 0);
+      if (numeroA !== numeroB) return numeroA - numeroB;
+      return String(a.ID || '').localeCompare(String(b.ID || ''));
+    });
+
+  const parcelasPorId = {};
+  parcelasPublicas.forEach(parcela => {
+    if (parcela.ID) parcelasPorId[parcela.ID] = parcela;
+  });
+
+  const pagamentosPublicos = (Array.isArray(pagamentos) ? pagamentos : [])
+    .filter(pagamento => registroAtivo(pagamento) && pertenceOrigem(pagamento))
+    .map(pagamento => {
+      const parcelaAlvoId = String(pagamento?.parcela_alvo_id || '').trim();
+      const parcelaAlvo = parcelasPorId[parcelaAlvoId] || null;
+      return {
+        ID: String(pagamento?.ID || '').trim(),
+        data_pagamento: formatarDataYmdFinanceiroSafe(pagamento?.data_pagamento),
+        valor_pago: round2Financeiro(parseNumeroBR(pagamento?.valor_pago)),
+        forma_pagamento: String(pagamento?.forma_pagamento || '').trim(),
+        observacao: String(pagamento?.observacao || '').trim(),
+        parcela_alvo: parcelaAlvo
+          ? {
+              ID: parcelaAlvo.ID,
+              parcela_numero: parcelaAlvo.parcela_numero,
+              parcelas_total: parcelaAlvo.parcelas_total
+            }
+          : null,
+        criado_em: formatarDataYmdHmFinanceiroSafe(pagamento?.criado_em)
+      };
+    })
+    .sort((a, b) => {
+      const dataA = parseDataFinanceiro(a.data_pagamento)?.getTime() || 0;
+      const dataB = parseDataFinanceiro(b.data_pagamento)?.getTime() || 0;
+      if (dataA !== dataB) return dataB - dataA;
+      const criacaoA = parseDataFinanceiro(a.criado_em)?.getTime() || 0;
+      const criacaoB = parseDataFinanceiro(b.criado_em)?.getTime() || 0;
+      if (criacaoA !== criacaoB) return criacaoB - criacaoA;
+      return String(b.ID || '').localeCompare(String(a.ID || ''));
+    });
+
+  const totalPrevisto = round2Financeiro(origem?.total_previsto);
+  const totalPago = round2Financeiro(
+    pagamentosPublicos.reduce((acumulado, pagamento) => acumulado + pagamento.valor_pago, 0)
+  );
+  const totalPendente = round2Financeiro(Math.max(0, totalPrevisto - totalPago));
+  const ultimoPagamento = pagamentosPublicos[0] || null;
+
+  return {
+    origem: origemPublica,
+    resumo: {
+      total_previsto: totalPrevisto,
+      total_pago: totalPago,
+      total_pendente: totalPendente,
+      status_pagamento: getStatusPagamentoFinanceiro(totalPrevisto, totalPago),
+      quantidade_pagamentos: pagamentosPublicos.length,
+      quantidade_parcelas: parcelasPublicas.length,
+      parcelas_pagas: parcelasPublicas.filter(parcela => parcela.status === 'PAGO').length,
+      parcelas_parciais: parcelasPublicas.filter(parcela => parcela.status === 'PARCIAL').length,
+      parcelas_pendentes: parcelasPublicas.filter(parcela => parcela.status === 'PENDENTE').length,
+      data_ultimo_pagamento: ultimoPagamento?.data_pagamento || '',
+      forma_ultimo_pagamento: ultimoPagamento?.forma_pagamento || ''
+    },
+    parcelas: parcelasPublicas,
+    pagamentos: pagamentosPublicos
+  };
+}
+
+/**
+ * Retorna o historico financeiro ativo de uma compra, despesa ou venda.
+ * O ambiente explicito respeita as mesmas permissoes do seletor DEV/PROD.
+ */
+function listarHistoricoPagamentosOrigem(origemTipo, origemId, forcarRecarregar, ambiente) {
+  return executarConsultaHistoricoFinanceiroNoAmbiente_(ambiente, ambienteAtivo => {
+    if (typeof assertCanRead === 'function') {
+      assertCanRead('Leitura do historico financeiro');
+    }
+
+    const origem = obterOrigemPagamentoFinanceiro(origemTipo, origemId);
+    const pagamentos = listarPagamentos(parseBooleanFinanceiro(forcarRecarregar));
+    const parcelas = listarParcelasFinanceirasOrigem(origem.tipo, origem.id);
+    return {
+      ambiente: ambienteAtivo,
+      ...montarHistoricoPagamentosOrigemFinanceiro_(origem, pagamentos, parcelas)
+    };
+  });
+}
+
+function validarPagamentoHistoricoOrigemFinanceiro_(pagamento, pagamentoId, origemTipo, origemId) {
+  const idPagamento = String(pagamentoId || '').trim();
+  const tipo = normalizarOrigemTipoFinanceiro(origemTipo);
+  const idOrigem = String(origemId || '').trim();
+  if (!idPagamento || !idOrigem) {
+    throw new Error('Lancamento financeiro ou origem nao informado.');
+  }
+  if (
+    !pagamento ||
+    String(pagamento.ID || '').trim() !== idPagamento ||
+    !parseBooleanFinanceiro(pagamento.ativo)
+  ) {
+    throw new Error('Lancamento financeiro nao encontrado ou ja removido.');
+  }
+  if (
+    normalizarOrigemTipoFinanceiro(pagamento.origem_tipo) !== tipo ||
+    String(pagamento.origem_id || '').trim() !== idOrigem
+  ) {
+    throw new Error('O lancamento financeiro nao pertence ao registro informado.');
+  }
+  return { idPagamento, tipo, idOrigem };
+}
+
+/** Remove um pagamento somente quando ele pertence a origem e ao ambiente exibidos. */
+function removerPagamentoHistoricoOrigem(pagamentoId, origemTipo, origemId, ambiente) {
+  return executarConsultaHistoricoFinanceiroNoAmbiente_(ambiente, ambienteAtivo => {
+    if (typeof assertCanWrite === 'function') {
+      assertCanWrite('Remocao de lancamento financeiro');
+    }
+    const idPagamento = String(pagamentoId || '').trim();
+    const pagamento = listarPagamentos(true).find(item => String(item?.ID || '').trim() === idPagamento);
+    const validado = validarPagamentoHistoricoOrigemFinanceiro_(
+      pagamento,
+      idPagamento,
+      origemTipo,
+      origemId
+    );
+
+    const ok = removerPagamento_(validado.idPagamento, { rollbackEmFalha: true });
+    return {
+      ok: !!ok,
+      ambiente: ambienteAtivo,
+      pagamento_id: validado.idPagamento,
+      origem_tipo: validado.tipo,
+      origem_id: validado.idOrigem
+    };
+  });
+}
+
 function calcularTotalPagoOrigemFinanceiro(origemTipo, origemId, forcarRecarregar) {
   const tipo = normalizarOrigemTipoFinanceiro(origemTipo);
   const id = String(origemId || '').trim();
@@ -2100,7 +2357,7 @@ function registrarPagamentoDespesaGeral(despesaId, payload) {
   };
 }
 
-function removerPagamento(id, opcoesInternas) {
+function removerPagamento_(id, opcoesInternas) {
   assertCanWrite('Exclusao de pagamento');
   const pagamento = listarPagamentos(true).find(p => String(p.ID || '').trim() === String(id || '').trim());
   const ok = updateById(
@@ -2114,7 +2371,7 @@ function removerPagamento(id, opcoesInternas) {
     try {
       regerarParcelasFinanceirasOrigemComPagamentos(pagamento.origem_tipo, pagamento.origem_id);
     } catch (error) {
-      if (opcoesInternas?.rollbackEmFalha === true) {
+      if (opcoesInternas?.rollbackEmFalha !== false) {
         updateById(ABA_PAGAMENTOS, 'ID', id, { ativo: true }, PAGAMENTOS_SCHEMA);
         try {
           regerarParcelasFinanceirasOrigemComPagamentos(pagamento.origem_tipo, pagamento.origem_id);

@@ -255,11 +255,11 @@
       });
     }
 
-    function persistirEReRenderizarVendas(lista) {
+    function persistirEReRenderizarVendas(lista, onDone) {
       if (Array.isArray(lista)) {
         VendasStore.set(lista);
       }
-      renderListaAtual();
+      renderListaAtual(onDone);
     }
 
     function agendarSyncSilenciosoVendas(detail) {
@@ -349,10 +349,20 @@
       mostrarToast('Tentando sincronizar novamente...');
     }
 
+    function initOrdenacao() {
+      window.AppListOrderUI?.mount?.({
+        containerId: 'ordenacaoVendas',
+        domain: 'vendas',
+        adapter: VendasStore,
+        onChange: renderListaAtual
+      });
+    }
+
     function init() {
       if (iniciado) return;
       registrarListenerMutacoesSeNecessario();
       window.AppOptimistic?.process?.();
+      initOrdenacao();
       carregarValidacoes();
       carregarEstoqueVendavel();
       carregarVendas();
@@ -380,25 +390,25 @@
         });
     }
 
-    function carregarEstoqueVendavel(onDone) {
+    function carregarEstoqueVendavel(onDone, ambiente = '') {
       window.AppRequest.runner()
         .withSuccessHandler(lista => {
           VendasUI.renderEstoqueVendavel?.(Array.isArray(lista) ? lista : []);
-          if (typeof onDone === 'function') onDone();
+          if (typeof onDone === 'function') onDone(true);
         })
         .withFailureHandler(() => {
           VendasUI.renderEstoqueVendavel?.([]);
-          if (typeof onDone === 'function') onDone();
+          if (typeof onDone === 'function') onDone(false);
         })
-        .listarItensEstoqueVendaveis();
+        .listarItensEstoqueVendaveis(String(ambiente || '').trim());
     }
 
-    function renderListaAtual() {
+    function renderListaAtual(onDone) {
       if (window.aplicarBuscaVendas) {
-        aplicarBuscaVendas();
+        aplicarBuscaVendas(onDone);
         return;
       }
-      VendasUI.renderLista(VendasStore.get());
+      VendasUI.renderLista(VendasStore.get(), onDone);
     }
 
     function hidratarVendasDoCache() {
@@ -408,15 +418,16 @@
       return true;
     }
 
-    function carregarVendas(forcarRecarregar = false, onDone) {
+    function carregarVendas(forcarRecarregar = false, onDone, ambiente = '') {
       const exibindoCache = !forcarRecarregar && hidratarVendasDoCache();
       window.AppRequest.runner()
         .withSuccessHandler(lista => {
           if (window.AppRuntime?.setReadOnly) {
             window.AppRuntime.setReadOnly(false);
           }
-          persistirEReRenderizarVendas(reconciliarListaVendasComMutacoes(lista));
-          if (typeof onDone === 'function') onDone();
+          persistirEReRenderizarVendas(reconciliarListaVendasComMutacoes(lista), () => {
+            if (typeof onDone === 'function') onDone(true);
+          });
         })
         .withFailureHandler(err => {
           if (exibindoCache) {
@@ -424,13 +435,13 @@
               window.AppRuntime.setReadOnly(true, 'Sem conexao com backend - exibindo cache local');
             }
             mostrarToast('Exibindo ultimo snapshot em cache', 'erro');
-            if (typeof onDone === 'function') onDone();
+            if (typeof onDone === 'function') onDone(false);
             return;
           }
           mostrarToast(err?.message || 'Erro ao carregar vendas', 'erro');
-          if (typeof onDone === 'function') onDone();
+          if (typeof onDone === 'function') onDone(false);
         })
-        .listarVendas(!!forcarRecarregar);
+        .listarVendas(!!forcarRecarregar, String(ambiente || '').trim());
     }
 
     function salvar() {
@@ -856,15 +867,23 @@
       contextoNovaVendaRecebimento = null;
     }
 
-    function syncFromBackend(onDone) {
+    function abrirDetalhes(id) {
+      const alvoId = String(id || '').trim();
+      if (!alvoId || typeof VendasUI?.abrirDetalhes !== 'function') return false;
+      return VendasUI.abrirDetalhes(alvoId) ?? true;
+    }
+
+    function syncFromBackend(onDone, ambiente = '') {
       let pendencias = 2;
-      const concluir = () => {
+      let sucesso = true;
+      const concluir = resultado => {
         pendencias -= 1;
+        sucesso = sucesso && resultado !== false;
         if (pendencias > 0) return;
-        if (typeof onDone === 'function') onDone();
+        if (typeof onDone === 'function') onDone(sucesso);
       };
-      carregarVendas(true, concluir);
-      carregarEstoqueVendavel(concluir);
+      carregarVendas(true, concluir, ambiente);
+      carregarEstoqueVendavel(concluir, ambiente);
       window.VendasRecebimentosController?.carregar?.();
     }
 
@@ -873,6 +892,7 @@
       salvar,
       editar,
       excluir,
+      abrirDetalhes,
       registrarRecebimento,
       criarVendaParaComprovanteRecebimento,
       confirmarRecebimento,

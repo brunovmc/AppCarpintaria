@@ -705,6 +705,7 @@
             ${tipoTag} - ${categoriaLabel}<br>
             ${quantidadeLabel} ${unidadeLabel}
             ${isMadeira ? `<br><span>(${comprimentoLabel} x ${larguraLabel} x ${espessuraLabel}) cm</span>` : ''}
+            ${window.AppListOrderUI?.cardDateHtml('estoque', i, window.EstoqueStore?.getSort?.()) || ''}
             <div class="card-resumo-valor">${resumoValor}</div>
           </div>
           ${localState.label ? `
@@ -1071,6 +1072,8 @@
 
       atualizarQuantidadeMadeira,
       handleFormaPagamentoChange,
+      abrirModalDetalhes,
+      abrirDetalhes: abrirModalDetalhes,
       fecharModalDetalhes
     };
 

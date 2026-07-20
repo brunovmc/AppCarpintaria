@@ -283,6 +283,9 @@ function pastasDocumentosCompraPorStatus_(status) {
 }
 
 function obterAmbienteDocumentosCompraDrive_() {
+  if (typeof getDbEnvironmentExecutionEffective_ === 'function') {
+    return getDbEnvironmentExecutionEffective_();
+  }
   if (typeof getUserDbEnvironment_ !== 'function') return 'prod';
   return String(getUserDbEnvironment_() || '').trim().toLowerCase() === 'dev' ? 'dev' : 'prod';
 }

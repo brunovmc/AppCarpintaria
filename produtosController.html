@@ -339,10 +339,20 @@
 
       registrarListenerMutacoesSeNecessario();
       window.AppOptimistic?.process?.();
+      initOrdenacao();
       carregarValidacoes();
       carregarProdutos();
 
       iniciado = true;
+    }
+
+    function initOrdenacao() {
+      window.AppListOrderUI?.mount?.({
+        containerId: 'ordenacaoProdutos',
+        domain: 'produtos',
+        adapter: ProdutosStore,
+        onChange: renderListaAtual
+      });
     }
 
     function atualizarOpcoesReceitas() {
@@ -441,12 +451,21 @@
       carregarProdutos(true, onDone);
     }
 
-    function carregarReceitas(produtoId, forcar = false) {
+    function carregarReceitas(produtoId, forcar = false, onDone) {
       const item = ProdutosStore.getById(produtoId);
-      if (!item) return;
-      if (getProdutoUiState(item).blockActions) return;
+      if (!item) {
+        if (typeof onDone === 'function') onDone(false);
+        return;
+      }
+      if (getProdutoUiState(item).blockActions) {
+        if (typeof onDone === 'function') onDone(false);
+        return;
+      }
 
-      if (item.receitasCarregadas && !forcar) return;
+      if (item.receitasCarregadas && !forcar) {
+        if (typeof onDone === 'function') onDone(true);
+        return;
+      }
 
       window.AppRequest.runner()
         .withSuccessHandler(receitas => {
@@ -469,9 +488,11 @@
                   receitasCarregadas: true
                 });
                 renderListaAtual();
+                if (typeof onDone === 'function') onDone(true);
               })
               .withFailureHandler(() => {
                 mostrarToast('Erro ao criar modelo inicial', 'erro');
+                if (typeof onDone === 'function') onDone(false);
               })
               .criarReceitaProduto(produtoId, {
                 nome_receita: 'Modelo principal'
@@ -490,9 +511,11 @@
             receitasCarregadas: true
           });
           renderListaAtual();
+          if (typeof onDone === 'function') onDone(true);
         })
         .withFailureHandler(() => {
           mostrarToast('Erro ao carregar modelos', 'erro');
+          if (typeof onDone === 'function') onDone(false);
         })
         .listarReceitasProduto(produtoId);
     }
@@ -865,12 +888,22 @@
       editandoId = null;
     }
 
+    function abrirDetalhes(id) {
+      const alvoId = String(id || '').trim();
+      if (!alvoId || typeof ProdutosUI?.abrirDetalhes !== 'function') return false;
+      const aberto = ProdutosUI.abrirDetalhes(alvoId);
+      return new Promise(resolve => {
+        carregarReceitas(alvoId, false, () => resolve(aberto !== false));
+      });
+    }
+
     return {
       init,
       syncFromBackend,
       salvar,
       editar,
       excluir,
+      abrirDetalhes,
       carregarReceitas,
       criarReceita,
       iniciarEdicaoReceita,

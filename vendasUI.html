@@ -7,8 +7,20 @@
     let qtdRenderizada = 0;
     let renderJobSeq = 0;
     let renderizandoLista = false;
+    let renderCompletionWaiters = [];
 
     const RENDER_CHUNK_SIZE = 12;
+
+    function registrarConclusaoRender(onDone) {
+      if (typeof onDone === 'function') renderCompletionWaiters.push(onDone);
+    }
+
+    function concluirRenderPendente() {
+      const waiters = renderCompletionWaiters.splice(0);
+      waiters.forEach(callback => {
+        try { callback(); } catch (error) { /* sem acao */ }
+      });
+    }
 
     function el() {
       return {
@@ -434,6 +446,14 @@
           <p><b>Parcelas</b></p>
           ${renderParcelasDetalhe(v.parcelas_detalhe)}
         </div>
+        <section class="finance-history-section">
+          <h4>Historico financeiro</h4>
+          <div
+            class="finance-history"
+            data-finance-history-type="VENDA"
+            data-finance-history-id="${escapeAttr(v.ID || '')}"
+          >Carregando historico...</div>
+        </section>
         <div class="acoes">
           ${podeReceber ? `<button onclick='VendasController.registrarRecebimento(${idJs})' ${bloquearAcoes ? 'disabled' : ''}>Registrar recebimento</button>` : ''}
           ${!v.estoque_baixado ? `<button onclick='VendasController.baixarEstoque(${idJs})' ${bloquearAcoes ? 'disabled' : ''}>Baixar estoque</button>` : ''}
@@ -480,6 +500,7 @@
             ${Number(v.quantidade || 0).toFixed(2)} ${unidade}<br>
             ${formatarMoeda(v.valor_total_venda || 0)}<br>
             ${status}
+            ${window.AppListOrderUI?.cardDateHtml('vendas', v, window.VendasStore?.getSort?.()) || ''}
           </div>
           ${localState.label ? `
             <div class="optimistic-local-state-row">
@@ -518,6 +539,7 @@
       f.modalDetalhesConteudo.innerHTML = montarDetalhesCard(item);
       detalhesModalAbertoId = alvoId;
       f.modalDetalhes.classList.remove('hidden');
+      return window.AppFinanceHistoryUI?.loadWithin?.(f.modalDetalhesConteudo) || true;
     }
 
     function fecharModalDetalhes() {
@@ -538,9 +560,13 @@
       abrirModalDetalhes(detalhesModalAbertoId);
     }
 
-    function renderLista(itens) {
+    function renderLista(itens, onDone) {
+      registrarConclusaoRender(onDone);
       const f = el();
-      if (!f.lista) return;
+      if (!f.lista) {
+        concluirRenderPendente();
+        return;
+      }
       renderJobSeq += 1;
       const jobId = renderJobSeq;
       f.lista.innerHTML = '';
@@ -555,6 +581,7 @@
           fecharModalDetalhes();
         }
         f.lista.innerHTML = '<p>Nenhuma venda cadastrada.</p>';
+        concluirRenderPendente();
         return;
       }
 
@@ -578,6 +605,7 @@
         renderizandoLista = false;
         initDelegation();
         atualizarModalDetalhesSeAberto();
+        concluirRenderPendente();
       };
 
       proximoFrame(processarChunk);
@@ -763,6 +791,8 @@
       handleQuantidadeOuTotalChange,
       handleFormaPagamentoChange,
       handleParcelasConfigChange,
+      abrirModalDetalhes,
+      abrirDetalhes: abrirModalDetalhes,
       fecharModalDetalhes,
       lerParcelasDetalheVenda,
       abrirModalRecebimento,

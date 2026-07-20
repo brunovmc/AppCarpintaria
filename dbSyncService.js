@@ -1,6 +1,7 @@
 const DB_ENV_PROD = 'prod';
 const DB_ENV_DEV = 'dev';
 const DB_ENV_USER_PROP_KEY = 'APP_DB_ENV_ACTIVE';
+let DB_ENV_EXECUTION_OVERRIDE_ = '';
 
 const DB_SYNC_ARMED_ACTION_KEY = 'DB_SYNC_ARMED_ACTION';
 const DB_SYNC_ARMED_UNTIL_MS_KEY = 'DB_SYNC_ARMED_UNTIL_MS';
@@ -62,6 +63,10 @@ function getUserDbEnvironment_() {
   }
 }
 
+function getDbEnvironmentExecutionEffective_() {
+  return normalizarAmbienteBancoDados_(DB_ENV_EXECUTION_OVERRIDE_ || getUserDbEnvironment_());
+}
+
 function setUserDbEnvironment_(ambiente) {
   const env = normalizarAmbienteBancoDados_(ambiente);
   getUserDbEnvProperties_().setProperty(DB_ENV_USER_PROP_KEY, env);
@@ -70,11 +75,59 @@ function setUserDbEnvironment_(ambiente) {
 
 function getDataSpreadsheetIdAtivo(opcoes) {
   const opts = opcoes || {};
-  const envExplicito = String(opts.targetEnv || opts.env || '').trim().toLowerCase();
+  const envExplicito = String(
+    opts.targetEnv || opts.env || DB_ENV_EXECUTION_OVERRIDE_ || ''
+  ).trim().toLowerCase();
   if (envExplicito) {
     return getSpreadsheetIdPorAmbiente_(envExplicito);
   }
-  return getSpreadsheetIdPorAmbiente_(getUserDbEnvironment_());
+  return getSpreadsheetIdPorAmbiente_(getDbEnvironmentExecutionEffective_());
+}
+
+/**
+ * Fixa o ambiente apenas durante a execucao atual. Isso evita que duas abas do
+ * mesmo usuario disputem a UserProperty enquanto uma operacao sensivel roda.
+ */
+function executarComAmbienteBancoDados_(ambiente, callback) {
+  if (typeof callback !== 'function') {
+    throw new Error('Callback de banco de dados invalido.');
+  }
+  const anterior = DB_ENV_EXECUTION_OVERRIDE_;
+  DB_ENV_EXECUTION_OVERRIDE_ = normalizarAmbienteBancoDados_(ambiente);
+  try {
+    return callback(DB_ENV_EXECUTION_OVERRIDE_);
+  } finally {
+    DB_ENV_EXECUTION_OVERRIDE_ = anterior;
+  }
+}
+
+/**
+ * Executa no ambiente solicitado sem alterar a preferencia persistida do usuario
+ * e aplica o mesmo controle de acesso usado pelo seletor DEV/PROD.
+ */
+function executarComAmbienteBancoDadosAutorizado_(ambiente, callback) {
+  if (typeof callback !== 'function') {
+    throw new Error('Callback de banco de dados invalido.');
+  }
+  const ambienteInformado = String(ambiente || '').trim().toLowerCase();
+  if (ambienteInformado && ambienteInformado !== DB_ENV_PROD && ambienteInformado !== DB_ENV_DEV) {
+    throw new Error('Ambiente de banco de dados invalido.');
+  }
+
+  const contexto = getDbEnvironmentContext_() || {};
+  const podeAlternar = contexto.can_toggle === true;
+  const ambienteExecucao = String(DB_ENV_EXECUTION_OVERRIDE_ || '').trim().toLowerCase();
+  const ambienteContexto = normalizarAmbienteBancoDados_(
+    ambienteExecucao || contexto.effective_env || contexto.selected_env || DB_ENV_PROD
+  );
+  if (ambienteInformado === DB_ENV_DEV && !podeAlternar) {
+    throw new Error('Ambiente DEV disponivel apenas para administradores.');
+  }
+
+  const ambienteAlvo = podeAlternar
+    ? normalizarAmbienteBancoDados_(ambienteInformado || ambienteContexto)
+    : DB_ENV_PROD;
+  return executarComAmbienteBancoDados_(ambienteAlvo, () => callback(ambienteAlvo));
 }
 
 function getDbEnvironmentContext_() {

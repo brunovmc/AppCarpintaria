@@ -4,6 +4,41 @@
     let carregado = false;
     let versao = 0;
     const CACHE_TAB = 'vendas';
+    let ordenacao = window.AppListOrder?.get?.(CACHE_TAB)
+      || { key: 'operation', direction: 'desc' };
+
+    function ordenar(lista) {
+      return window.AppListOrder?.sort
+        ? window.AppListOrder.sort(CACHE_TAB, lista, ordenacao)
+        : [...(Array.isArray(lista) ? lista : [])];
+    }
+
+    function getSort() {
+      return { ...ordenacao };
+    }
+
+    function getSortOptions() {
+      return window.AppListOrder?.getOptions?.(CACHE_TAB) || [];
+    }
+
+    function setSort(sortOrKey, direction) {
+      const next = window.AppListOrder?.normalize
+        ? window.AppListOrder.normalize(CACHE_TAB, sortOrKey, direction)
+        : {
+          key: typeof sortOrKey === 'string' ? sortOrKey : sortOrKey?.key,
+          direction: direction || sortOrKey?.direction
+        };
+      if (next.key === ordenacao.key && next.direction === ordenacao.direction) {
+        return getSort();
+      }
+
+      ordenacao = next;
+      itens = ordenar(itens);
+      tocarVersao();
+      salvarCache();
+      window.AppListOrder?.save?.(CACHE_TAB, ordenacao);
+      return getSort();
+    }
 
     function tocarVersao() {
       versao += 1;
@@ -15,32 +50,6 @@
 
     function removerCache() {
       window.AppTabCache?.remover?.(CACHE_TAB);
-    }
-
-    function parseData(valor) {
-      if (!valor) return 0;
-      if (valor instanceof Date) return valor.getTime() || 0;
-      const s = String(valor || '').trim();
-      if (!s) return 0;
-      if (/^\d{4}-\d{2}-\d{2}( \d{2}:\d{2})?$/.test(s)) {
-        const iso = s.includes(' ') ? s.replace(' ', 'T') : `${s}T00:00`;
-        const t = Date.parse(iso);
-        return isNaN(t) ? 0 : t;
-      }
-      const t = Date.parse(s);
-      return isNaN(t) ? 0 : t;
-    }
-
-    function ordenar(lista) {
-      return [...(Array.isArray(lista) ? lista : [])].sort((a, b) => {
-        const da = parseData(a?.data_venda);
-        const db = parseData(b?.data_venda);
-        if (da !== db) return db - da;
-        const ca = parseData(a?.criado_em);
-        const cb = parseData(b?.criado_em);
-        if (ca !== cb) return cb - ca;
-        return String(b?.ID || '').localeCompare(String(a?.ID || ''));
-      });
     }
 
     function set(lista) {
@@ -119,6 +128,10 @@
       isLoaded,
       getVersion,
       clear,
+      getSort,
+      getSortOptions,
+      setSort,
+      sort: ordenar,
       add,
       update,
       remove,

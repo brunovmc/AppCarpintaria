@@ -221,11 +221,29 @@
       mostrarToast('Tentando sincronizar novamente...');
     }
 
+    function renderListaAtual() {
+      if (typeof window.aplicarBuscaEstoque === 'function') {
+        window.aplicarBuscaEstoque();
+        return;
+      }
+      EstoqueUI.renderLista(EstoqueStore.get());
+    }
+
+    function initOrdenacao() {
+      window.AppListOrderUI?.mount?.({
+        containerId: 'ordenacaoEstoque',
+        domain: 'estoque',
+        adapter: EstoqueStore,
+        onChange: renderListaAtual
+      });
+    }
+
     function init() {
       if (iniciado) return;
 
       registrarListenerMutacoesSeNecessario();
       window.AppOptimistic?.process?.();
+      initOrdenacao();
       carregarValidacoes();
       carregarEstoque();
 
@@ -542,11 +560,18 @@
       editandoId = null;
     }
 
+    function abrirDetalhes(id) {
+      const alvoId = String(id || '').trim();
+      if (!alvoId || typeof EstoqueUI?.abrirDetalhes !== 'function') return false;
+      return EstoqueUI.abrirDetalhes(alvoId) ?? true;
+    }
+
     return {
       init,
       salvar,
       editar,
       excluir,
+      abrirDetalhes,
       retryEstoqueMutation,
       limparEdicao,
       syncFromBackend
