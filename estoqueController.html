@@ -6,6 +6,7 @@
     let salvando = false;
     let mutationLockToken = null;
     let listenerMutacoesRegistrado = false;
+    let estoqueLoadSeq = 0;
 
     let validacoes = null;
 
@@ -148,18 +149,33 @@
       });
     }
 
-    function persistirEReRenderizarEstoque(lista) {
+    function persistirEReRenderizarEstoque(lista, onDone) {
+      let alterou = false;
       if (Array.isArray(lista)) {
-        EstoqueStore.set(lista);
+        alterou = EstoqueStore.set(lista) !== false;
       }
+      if (!alterou && EstoqueStore.isLoaded()) {
+        if (typeof onDone === 'function') onDone();
+        return false;
+      }
+      if (window.AppTabRefresh?.shouldRender?.('estoque') === false) {
+        window.AppTabRefresh?.markRenderPending?.('estoque');
+        if (typeof onDone === 'function') onDone();
+        return true;
+      }
+      const concluir = () => {
+        window.AppTabRefresh?.notifyRendered?.('estoque', { changed: true });
+        if (typeof onDone === 'function') onDone();
+      };
       if (typeof aplicarBuscaEstoque === 'function') {
-        aplicarBuscaEstoque();
+        aplicarBuscaEstoque(concluir);
       } else {
-        EstoqueUI.renderLista(EstoqueStore.get());
+        EstoqueUI.renderLista(EstoqueStore.get(), concluir);
       }
       if (typeof popularFiltrosDoPainel === 'function') {
         popularFiltrosDoPainel();
       }
+      return true;
     }
 
     function agendarSyncSilenciosoEstoque() {
@@ -326,36 +342,52 @@
       return true;
     }
 
-    function carregarEstoque(forcarRecarregar = false, onDone) {
-      const exibindoCache = !forcarRecarregar && hidratarEstoqueDoCache();
+    function carregarEstoque(forcarRecarregar = false, onDone, options = {}) {
+      const seq = ++estoqueLoadSeq;
+      const ambienteSolicitado = String(
+        options.ambiente || window.AppClientScope?.get?.()?.environment || 'prod'
+      ).trim().toLowerCase();
+      const dirtyGeneration = window.AppTabRefresh?.getDirtyGeneration?.('estoque') || 0;
+      const exibindoCache = !forcarRecarregar && options.hydrate !== false && hidratarEstoqueDoCache();
       const perf = perfStart('rpc.estoque.listarEstoque');
       window.AppRequest.runner()
         .withSuccessHandler(lista => {
+          if (seq !== estoqueLoadSeq) {
+            if (typeof onDone === 'function') onDone('superseded');
+            return;
+          }
           if (window.AppRuntime?.setReadOnly) {
             window.AppRuntime.setReadOnly(false);
           }
           perfEnd(perf, { ok: true, total: Array.isArray(lista) ? lista.length : 0 });
-          persistirEReRenderizarEstoque(reconciliarListaEstoqueComMutacoes(lista));
-          if (typeof onDone === 'function') onDone();
+          persistirEReRenderizarEstoque(reconciliarListaEstoqueComMutacoes(lista), () => {
+            window.AppTabRefresh?.reportResult?.('estoque', true, dirtyGeneration);
+            if (typeof onDone === 'function') onDone(true);
+          });
         })
         .withFailureHandler(() => {
+          if (seq !== estoqueLoadSeq) {
+            if (typeof onDone === 'function') onDone('superseded');
+            return;
+          }
           perfEnd(perf, { ok: false });
+          window.AppTabRefresh?.reportResult?.('estoque', false, dirtyGeneration);
           if (exibindoCache) {
             if (window.AppRuntime?.setReadOnly) {
               window.AppRuntime.setReadOnly(true, 'Sem conexao com backend - exibindo cache local');
             }
             mostrarToast('Exibindo ultimo snapshot em cache', 'erro');
-            if (typeof onDone === 'function') onDone();
+            if (typeof onDone === 'function') onDone(false);
             return;
           }
           mostrarToast('Erro ao carregar estoque', 'erro');
-          if (typeof onDone === 'function') onDone();
+          if (typeof onDone === 'function') onDone(false);
         })
-        .listarEstoque(!!forcarRecarregar);
+        .listarEstoque(!!forcarRecarregar, ambienteSolicitado);
     }
 
-    function syncFromBackend(onDone) {
-      carregarEstoque(true, onDone);
+    function syncFromBackend(onDone, ambiente = '', options = {}) {
+      carregarEstoque(options.force === true, onDone, { hydrate: false, ambiente });
     }
 
     function salvar() {
@@ -566,12 +598,17 @@
       return EstoqueUI.abrirDetalhes(alvoId) ?? true;
     }
 
+    function revealRecord(options = {}) {
+      return window.EstoqueUI?.revelarRegistro?.(options) ?? false;
+    }
+
     return {
       init,
       salvar,
       editar,
       excluir,
       abrirDetalhes,
+      revealRecord,
       retryEstoqueMutation,
       limparEdicao,
       syncFromBackend
@@ -579,4 +616,3 @@
 
   })();
 </script>
-

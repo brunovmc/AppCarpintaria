@@ -947,7 +947,13 @@ function resolverProdutoSaidaProducao(produtoRefId, nomeSaida, mapas) {
   };
 }
 
-function listarProducao(forcarRecarregar) {
+function listarProducao(forcarRecarregar, ambiente) {
+  if (String(ambiente || '').trim()) {
+    if (typeof executarComAmbienteBancoDadosAutorizado_ !== 'function') {
+      throw new Error('Controle de ambiente indisponivel.');
+    }
+    return executarComAmbienteBancoDadosAutorizado_(ambiente, () => listarProducao(forcarRecarregar, ''));
+  }
   if (!forcarRecarregar) {
     const cached = lerCacheProducao();
     if (Array.isArray(cached)) {

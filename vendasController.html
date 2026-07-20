@@ -9,6 +9,8 @@
     let salvandoRecebimento = false;
     let contextoNovaVendaRecebimento = null;
     let listenerMutacoesRegistrado = false;
+    let vendasLoadSeq = 0;
+    let estoqueVendavelLoadSeq = 0;
 
     let validacoes = {};
 
@@ -256,10 +258,24 @@
     }
 
     function persistirEReRenderizarVendas(lista, onDone) {
+      let alterou = false;
       if (Array.isArray(lista)) {
-        VendasStore.set(lista);
+        alterou = VendasStore.set(lista) !== false;
       }
-      renderListaAtual(onDone);
+      if (!alterou && VendasStore.isLoaded()) {
+        if (typeof onDone === 'function') onDone();
+        return false;
+      }
+      if (window.AppTabRefresh?.shouldRender?.('vendas') === false) {
+        window.AppTabRefresh?.markRenderPending?.('vendas');
+        if (typeof onDone === 'function') onDone();
+        return true;
+      }
+      renderListaAtual(() => {
+        window.AppTabRefresh?.notifyRendered?.('vendas', { changed: true });
+        if (typeof onDone === 'function') onDone();
+      });
+      return true;
     }
 
     function agendarSyncSilenciosoVendas(detail) {
@@ -391,16 +407,28 @@
     }
 
     function carregarEstoqueVendavel(onDone, ambiente = '') {
+      const seq = ++estoqueVendavelLoadSeq;
+      const ambienteSolicitado = String(
+        ambiente || window.AppClientScope?.get?.()?.environment || 'prod'
+      ).trim().toLowerCase();
       window.AppRequest.runner()
         .withSuccessHandler(lista => {
+          if (seq !== estoqueVendavelLoadSeq) {
+            if (typeof onDone === 'function') onDone('superseded');
+            return;
+          }
           VendasUI.renderEstoqueVendavel?.(Array.isArray(lista) ? lista : []);
           if (typeof onDone === 'function') onDone(true);
         })
         .withFailureHandler(() => {
+          if (seq !== estoqueVendavelLoadSeq) {
+            if (typeof onDone === 'function') onDone('superseded');
+            return;
+          }
           VendasUI.renderEstoqueVendavel?.([]);
           if (typeof onDone === 'function') onDone(false);
         })
-        .listarItensEstoqueVendaveis(String(ambiente || '').trim());
+        .listarItensEstoqueVendaveis(ambienteSolicitado);
     }
 
     function renderListaAtual(onDone) {
@@ -418,18 +446,33 @@
       return true;
     }
 
-    function carregarVendas(forcarRecarregar = false, onDone, ambiente = '') {
-      const exibindoCache = !forcarRecarregar && hidratarVendasDoCache();
+    function carregarVendas(forcarRecarregar = false, onDone, ambiente = '', options = {}) {
+      const seq = ++vendasLoadSeq;
+      const ambienteSolicitado = String(
+        ambiente || window.AppClientScope?.get?.()?.environment || 'prod'
+      ).trim().toLowerCase();
+      const dirtyGeneration = window.AppTabRefresh?.getDirtyGeneration?.('vendas') || 0;
+      const exibindoCache = !forcarRecarregar && options.hydrate !== false && hidratarVendasDoCache();
       window.AppRequest.runner()
         .withSuccessHandler(lista => {
+          if (seq !== vendasLoadSeq) {
+            if (typeof onDone === 'function') onDone('superseded');
+            return;
+          }
           if (window.AppRuntime?.setReadOnly) {
             window.AppRuntime.setReadOnly(false);
           }
+          window.AppTabRefresh?.reportResult?.('vendas', true, dirtyGeneration);
           persistirEReRenderizarVendas(reconciliarListaVendasComMutacoes(lista), () => {
             if (typeof onDone === 'function') onDone(true);
           });
         })
         .withFailureHandler(err => {
+          if (seq !== vendasLoadSeq) {
+            if (typeof onDone === 'function') onDone('superseded');
+            return;
+          }
+          window.AppTabRefresh?.reportResult?.('vendas', false, dirtyGeneration);
           if (exibindoCache) {
             if (window.AppRuntime?.setReadOnly) {
               window.AppRuntime.setReadOnly(true, 'Sem conexao com backend - exibindo cache local');
@@ -441,7 +484,7 @@
           mostrarToast(err?.message || 'Erro ao carregar vendas', 'erro');
           if (typeof onDone === 'function') onDone(false);
         })
-        .listarVendas(!!forcarRecarregar, String(ambiente || '').trim());
+        .listarVendas(!!forcarRecarregar, ambienteSolicitado);
     }
 
     function salvar() {
@@ -639,7 +682,7 @@
           finalizarUX();
           carregarVendas(true);
           window.VendasRecebimentosController?.carregar?.();
-          window.DashboardController?.atualizar?.(true);
+          invalidarCacheDashboardPorImpacto(resultado, payloadRecebimento);
           mostrarToast('Venda criada e recebimento vinculado.');
         })
         .catch(error => {
@@ -758,7 +801,7 @@
           VendasUI.fecharModalDetalhes?.();
           syncFromBackend();
           window.EstoqueController?.syncFromBackend?.();
-          window.DashboardController?.atualizar?.(true);
+          invalidarCacheDashboardPorImpacto(resultado, item);
         })
         .catch(error => mostrarToast(error?.message || 'Erro ao baixar estoque', 'erro'));
     }
@@ -873,18 +916,25 @@
       return VendasUI.abrirDetalhes(alvoId) ?? true;
     }
 
-    function syncFromBackend(onDone, ambiente = '') {
-      let pendencias = 2;
+    function syncFromBackend(onDone, ambiente = '', options = {}) {
+      let pendencias = options.includeSecondary === true ? 3 : 2;
       let sucesso = true;
+      let superseded = false;
       const concluir = resultado => {
         pendencias -= 1;
+        superseded = superseded || resultado === 'superseded';
         sucesso = sucesso && resultado !== false;
         if (pendencias > 0) return;
-        if (typeof onDone === 'function') onDone(sucesso);
+        if (typeof onDone === 'function') onDone(sucesso ? (superseded ? 'superseded' : true) : false);
       };
-      carregarVendas(true, concluir, ambiente);
+      carregarVendas(options.force === true, concluir, ambiente, { hydrate: false });
       carregarEstoqueVendavel(concluir, ambiente);
-      window.VendasRecebimentosController?.carregar?.();
+      if (options.includeSecondary === true) {
+        Promise.resolve(window.VendasRecebimentosController?.carregar?.(options.force === true)).then(
+          () => concluir(true),
+          () => concluir(false)
+        );
+      }
     }
 
     return {

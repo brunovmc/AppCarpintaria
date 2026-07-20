@@ -10,6 +10,7 @@
     let pagamentoCompraId = null;
     let salvandoPagamento = false;
     let listenerMutacoesRegistrado = false;
+    let comprasLoadSeq = 0;
     const adicionandoAoEstoque = new Set();
 
     let validacoes = null;
@@ -305,13 +306,27 @@
     }
 
     function persistirEReRenderizarCompras(lista, onDone) {
+      let alterou = false;
       if (Array.isArray(lista)) {
-        ComprasStore.set(lista);
+        alterou = ComprasStore.set(lista) !== false;
       }
-      renderListaAtual(onDone);
+      if (!alterou && ComprasStore.isLoaded()) {
+        if (typeof onDone === 'function') onDone();
+        return false;
+      }
+      if (window.AppTabRefresh?.shouldRender?.('compras') === false) {
+        window.AppTabRefresh?.markRenderPending?.('compras');
+        if (typeof onDone === 'function') onDone();
+        return true;
+      }
+      renderListaAtual(() => {
+        window.AppTabRefresh?.notifyRendered?.('compras', { changed: true });
+        if (typeof onDone === 'function') onDone();
+      });
       if (typeof popularFiltrosDoPainelCompras === 'function') {
         popularFiltrosDoPainelCompras();
       }
+      return true;
     }
 
     function agendarSyncSilenciosoCompras(detail) {
@@ -499,21 +514,36 @@
       return true;
     }
 
-    function carregarCompras(forcarRecarregar = false, onDone, ambiente = '') {
-      const exibindoCache = !forcarRecarregar && hidratarComprasDoCache();
+    function carregarCompras(forcarRecarregar = false, onDone, ambiente = '', options = {}) {
+      const seq = ++comprasLoadSeq;
+      const ambienteSolicitado = String(
+        ambiente || window.AppClientScope?.get?.()?.environment || 'prod'
+      ).trim().toLowerCase();
+      const dirtyGeneration = window.AppTabRefresh?.getDirtyGeneration?.('compras') || 0;
+      const exibindoCache = !forcarRecarregar && options.hydrate !== false && hidratarComprasDoCache();
       const perf = perfStart('rpc.compras.listarCompras');
       window.AppRequest.runner()
         .withSuccessHandler(lista => {
+          if (seq !== comprasLoadSeq) {
+            if (typeof onDone === 'function') onDone('superseded');
+            return;
+          }
           if (window.AppRuntime?.setReadOnly) {
             window.AppRuntime.setReadOnly(false);
           }
           perfEnd(perf, { ok: true, total: Array.isArray(lista) ? lista.length : 0 });
+          window.AppTabRefresh?.reportResult?.('compras', true, dirtyGeneration);
           persistirEReRenderizarCompras(reconciliarListaComprasComMutacoes(lista), () => {
             if (typeof onDone === 'function') onDone(true);
           });
         })
         .withFailureHandler(() => {
+          if (seq !== comprasLoadSeq) {
+            if (typeof onDone === 'function') onDone('superseded');
+            return;
+          }
           perfEnd(perf, { ok: false });
+          window.AppTabRefresh?.reportResult?.('compras', false, dirtyGeneration);
           if (exibindoCache) {
             if (window.AppRuntime?.setReadOnly) {
               window.AppRuntime.setReadOnly(true, 'Sem conexao com backend - exibindo cache local');
@@ -525,12 +555,28 @@
           mostrarToast('Erro ao carregar compras', 'erro');
           if (typeof onDone === 'function') onDone(false);
         })
-        .listarCompras(!!forcarRecarregar, String(ambiente || '').trim());
+        .listarCompras(!!forcarRecarregar, ambienteSolicitado);
     }
 
-    function syncFromBackend(onDone, ambiente = '') {
-      carregarCompras(true, onDone, ambiente);
-      window.ComprasDocumentoController?.carregar?.(true);
+    function syncFromBackend(onDone, ambiente = '', options = {}) {
+      const incluirSecundarios = options.includeSecondary === true;
+      let pendencias = incluirSecundarios ? 2 : 1;
+      let sucesso = true;
+      let superseded = false;
+      const concluir = resultado => {
+        pendencias -= 1;
+        superseded = superseded || resultado === 'superseded';
+        sucesso = sucesso && resultado !== false;
+        if (pendencias > 0 || typeof onDone !== 'function') return;
+        onDone(sucesso ? (superseded ? 'superseded' : true) : false);
+      };
+      carregarCompras(options.force === true, concluir, ambiente, { hydrate: false });
+      if (options.includeSecondary === true) {
+        Promise.resolve(window.ComprasDocumentoController?.carregar?.(options.force === true)).then(
+          () => concluir(true),
+          () => concluir(false)
+        );
+      }
     }
 
     function salvar() {
@@ -1007,12 +1053,17 @@
       return ComprasUI.abrirDetalhes(alvoId) ?? true;
     }
 
+    function revealRecord(options = {}) {
+      return window.ComprasUI?.revelarRegistro?.(options) ?? false;
+    }
+
     return {
       init,
       syncFromBackend,
       salvar,
       editar,
       abrirDetalhes,
+      revealRecord,
       refazer,
       registrarPagamento,
       confirmarPagamentoCompra,

@@ -5,6 +5,7 @@
     let listaFiltradaAtual = [];
     let qtdRenderizada = 0;
     let renderJobSeq = 0;
+    let renderListaWaiters = [];
 
     let opcoesEstoque = [];
     let opcoesProdutos = [];
@@ -1047,9 +1048,19 @@
       `;
     }
 
-    function renderLista(itens) {
+    function renderLista(itens, onDone) {
       const { lista } = el();
-      if (!lista) return;
+      if (!lista) {
+        if (typeof onDone === 'function') onDone();
+        return;
+      }
+      if (typeof onDone === 'function') renderListaWaiters.push(onDone);
+      const concluirRenderLista = () => {
+        const waiters = renderListaWaiters.splice(0);
+        waiters.forEach(waiter => {
+          try { waiter(); } catch (error) { /* sem acao */ }
+        });
+      };
 
       renderJobSeq += 1;
       const jobId = renderJobSeq;
@@ -1064,6 +1075,7 @@
           fecharModalDetalhes();
         }
         lista.innerHTML = '<p>Nenhum produto cadastrado.</p>';
+        concluirRenderLista();
         return;
       }
 
@@ -1085,6 +1097,7 @@
 
         document.querySelectorAll('.linha-receita-entrada').forEach(sincronizarLinhaEntradaMadeira);
         atualizarModalDetalhesSeAberto();
+        concluirRenderLista();
       };
 
       proximoFrame(processarChunk);

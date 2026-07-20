@@ -255,7 +255,13 @@ function obterCategoriasPorTipoValidacao() {
   return obterConfigTipoCategoriaValidacao().categoriasPorTipo || {};
 }
 
-function obterValidacoes(forcarRecarregar) {
+function obterValidacoes(forcarRecarregar, ambiente) {
+  if (String(ambiente || '').trim()) {
+    if (typeof executarComAmbienteBancoDadosAutorizado_ !== 'function') {
+      throw new Error('Controle de ambiente indisponivel.');
+    }
+    return executarComAmbienteBancoDadosAutorizado_(ambiente, () => obterValidacoes(forcarRecarregar, ''));
+  }
   if (!forcarRecarregar) {
     const cached = lerValidacoesDoCache();
     if (cached) {

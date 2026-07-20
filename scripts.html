@@ -9,6 +9,7 @@
   const QUICK_FILTER_STOCK_TYPE_KEY = 'app:quickfilter:v1:estoque:tipo';
   const QUICK_FILTER_PURCHASE_TYPE_KEY = 'app:quickfilter:v1:compras:tipo';
   const DB_ENV_SESSION_STORAGE_KEY = 'app:db_env_session:v1';
+  const DB_ENV_RECONCILE_STORAGE_KEY = 'app:db_env_reconcile:v1';
   let listenerFecharMenuNavbarAtivo = false;
   let listenerBloqueioDrawerAtivo = false;
 
@@ -64,7 +65,9 @@
         Promise.resolve(promise),
         new Promise((_, reject) => {
           setTimeout(() => {
-            reject(new Error(String(timeoutMsg || 'Tempo limite excedido').trim()));
+            const error = new Error(String(timeoutMsg || 'Tempo limite excedido').trim());
+            error.code = 'APP_REQUEST_TIMEOUT';
+            reject(error);
           }, ms);
         })
       ]);
@@ -202,14 +205,14 @@
         }
         return ctx;
       } catch (error) {
-        const fallback = aplicar({
-          can_toggle: admin,
-          effective_env: 'prod',
-          selected_env: 'prod',
-          role: admin ? 'admin' : 'viewer'
+        // Nao inventa PROD/admin quando o backend nao confirmou o contexto.
+        // Este caminho legado deve falhar fechado; o bootstrap principal
+        // tambem bloqueia a interface quando a validacao remota falha.
+        window.AppDiag?.mark?.('db.env.legacy_bootstrap.failed_closed', {
+          desired_env: desiredEnv,
+          message: String(error?.message || error || '')
         });
-        salvarDbEnvSessaoFront('prod');
-        return fallback;
+        throw error;
       }
     }
 
@@ -225,11 +228,24 @@
         fecharMenuNavbar();
         return contexto;
       }
+      if (inFlight) return inFlight;
+      if (window.AppMutationUI?.isLocked?.()) {
+        if (typeof mostrarToast === 'function') {
+          mostrarToast('Aguarde a operacao em andamento antes de trocar o banco.', 'erro');
+        }
+        return contexto;
+      }
+      const preparoTroca = window.AppOptimistic?.prepareContextSwitch?.(alvo) || { ok: true };
+      if (preparoTroca.ok === false) {
+        if (typeof mostrarToast === 'function') {
+          mostrarToast(preparoTroca.reason || 'Aguarde a sincronizacao antes de trocar o banco.', 'erro');
+        }
+        return contexto;
+      }
       if (!window.AppRequest?.call) {
+        window.AppOptimistic?.cancelContextSwitch?.();
         throw new Error('google.script.run indisponivel');
       }
-      if (inFlight) return inFlight;
-
       inFlight = withTimeout(
         window.AppRequest.call('definirContextoBancoDados', [alvo], {
           context: 'db.env.toggle',
@@ -251,6 +267,30 @@
           }, 120);
           return ctx;
         })
+        .catch(error => {
+          if (String(error?.code || '') === 'APP_REQUEST_TIMEOUT') {
+            // A Promise do GAS nao e cancelavel e pode concluir depois do
+            // timeout local. Mantemos a outbox pausada, persistimos o destino
+            // desejado e recarregamos para o bootstrap consultar o estado real.
+            salvarDbEnvSessaoFront(alvo);
+            try {
+              window.sessionStorage?.setItem(DB_ENV_RECONCILE_STORAGE_KEY, JSON.stringify({
+                target: alvo,
+                requestedAt: Date.now()
+              }));
+            } catch (storageError) {
+              // A chave principal de sessao acima ainda orienta o bootstrap.
+            }
+            window.AppDiag?.mark?.('db.env.toggle.timeout_reconcile', { target: alvo });
+            if (typeof mostrarToast === 'function') {
+              mostrarToast('A troca demorou. Recarregando para confirmar o banco ativo...', 'erro');
+            }
+            setTimeout(() => recarregarAplicacaoAposTrocaDb_(), 80);
+          } else {
+            window.AppOptimistic?.cancelContextSwitch?.();
+          }
+          throw error;
+        })
         .finally(() => {
           inFlight = null;
           render();
@@ -267,7 +307,7 @@
       if (btnProd) {
         btnProd.addEventListener('click', () => {
           trocar('prod').catch(error => {
-            if (typeof mostrarToast === 'function') {
+            if (String(error?.code || '') !== 'APP_REQUEST_TIMEOUT' && typeof mostrarToast === 'function') {
               mostrarToast(error?.message || 'Falha ao trocar para PROD', 'erro');
             }
           });
@@ -276,7 +316,7 @@
       if (btnDev) {
         btnDev.addEventListener('click', () => {
           trocar('dev').catch(error => {
-            if (typeof mostrarToast === 'function') {
+            if (String(error?.code || '') !== 'APP_REQUEST_TIMEOUT' && typeof mostrarToast === 'function') {
               mostrarToast(error?.message || 'Falha ao trocar para DEV', 'erro');
             }
           });
@@ -640,8 +680,127 @@
      (carregados via include('appCore') no index)
   ========================== */
 
+  function createDataRevisionHelper() {
+    function signature(value) {
+      try {
+        return JSON.stringify(value ?? null);
+      } catch (error) {
+        return '';
+      }
+    }
+
+    function equal(left, right) {
+      if (left === right) return true;
+      const leftSignature = signature(left);
+      return !!leftSignature && leftSignature === signature(right);
+    }
+
+    return { signature, equal };
+  }
+
+  window.AppDataRevision = window.AppDataRevision || createDataRevisionHelper();
+
+  function createClientScopeHelper() {
+    let scope = null;
+    let contextSwitching = false;
+
+    function normalizarUsuario(email) {
+      const normalizado = String(email || '').trim().toLowerCase();
+      if (!normalizado) return '';
+
+      // Nao use uma substituicao por `_` aqui: enderecos diferentes como
+      // `nome+um@...` e `nome+dois@...` acabariam no mesmo namespace. A
+      // codificacao fixa de cada code unit e injetiva para strings JavaScript
+      // e tambem produz uma chave segura para localStorage/Web Locks.
+      let codificado = 'u_';
+      for (let i = 0; i < normalizado.length; i += 1) {
+        codificado += normalizado.charCodeAt(i).toString(16).padStart(4, '0');
+      }
+      return codificado;
+    }
+
+    function ativar(detail = {}) {
+      if (scope) return scope;
+      const acesso = detail.acesso || window.AppUserAccess?.getContext?.() || {};
+      const banco = detail.banco_dados || detail.bancoDados || window.AppDbEnv?.getContext?.() || {};
+      const email = normalizarUsuario(acesso.email);
+      scope = Object.freeze({
+        environment: normalizarDbEnvFront(banco.effective_env || banco.selected_env || 'prod'),
+        user: email || 'session-only',
+        canPersist: !!email
+      });
+      return scope;
+    }
+
+    function get() {
+      return scope;
+    }
+
+    function cacheNamespace(schema) {
+      if (!scope) return '';
+      return `${String(schema || '').trim()}:${scope.environment}:${scope.user}`;
+    }
+
+    function persistenceScope(schema) {
+      if (!scope) return null;
+      return {
+        schema: String(schema || '').trim(),
+        environment: scope.environment,
+        user: scope.user
+      };
+    }
+
+    function matchesPersistenceScope(candidate, schema) {
+      const expected = persistenceScope(schema);
+      if (!expected || !candidate || typeof candidate !== 'object') return false;
+      const candidateEnvironment = String(candidate.environment || '').trim().toLowerCase();
+      if (!['prod', 'dev'].includes(candidateEnvironment)) return false;
+      return String(candidate.schema || '') === expected.schema
+        && candidateEnvironment === expected.environment
+        && String(candidate.user || '') === expected.user;
+    }
+
+    function ambienteAtualConfere() {
+      if (!scope) return false;
+      const atual = window.AppDbEnv?.getContext?.() || {};
+      return normalizarDbEnvFront(atual.effective_env || atual.selected_env || 'prod') === scope.environment;
+    }
+
+    if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+      window.addEventListener('app:bootstrap-ready', evento => ativar(evento?.detail || {}), { once: true });
+      window.addEventListener('app:db-env:changed', evento => {
+        if (!scope) return;
+        const proximo = normalizarDbEnvFront(
+          evento?.detail?.effective_env || evento?.detail?.selected_env || 'prod'
+        );
+        if (proximo === scope.environment) return;
+        contextSwitching = true;
+        window.dispatchEvent(new CustomEvent('app:client-scope-changing', {
+          detail: { from: scope.environment, to: proximo }
+        }));
+      });
+    }
+
+    return {
+      activate: ativar,
+      get,
+      cacheNamespace,
+      persistenceScope,
+      matchesPersistenceScope,
+      matchesCurrentEnvironment: ambienteAtualConfere,
+      isContextSwitching: () => contextSwitching
+    };
+  }
+
+  window.AppClientScope = window.AppClientScope || createClientScopeHelper();
+
   function createTabCacheHelper() {
-    const STORAGE_PREFIX = 'app:tabcache:v1:';
+    // v3 inaugura namespaces de usuario injetivos e envelope com escopo.
+    // Entradas v2 nao possuem informacao suficiente para uma migracao segura
+    // (a chave de usuario antiga podia colidir), portanto sao apenas ignoradas.
+    const STORAGE_PREFIX = 'app:tabcache:v3:';
+    const LEGACY_STORAGE_PREFIX = 'app:tabcache:v1:';
+    const CACHE_SCHEMA = 'loading-ux-2026-07-scope-v2';
     const TABS_PERMITIDAS = {
       despesas: true,
       estoque: true,
@@ -650,7 +809,10 @@
       produtos: true,
       producao: true
     };
-    const TTL_MS = 1000 * 60 * 60 * 24 * 7; // 7 dias
+    const TTL_MS = 1000 * 60 * 60 * 24; // fallback local de ate 24h
+    const pendingWrites = new Map();
+    let storageDisponivelMemo = null;
+    let legadoLimpo = false;
 
     function normalizarTab(tab) {
       const chave = String(tab || '').trim().toLowerCase();
@@ -658,25 +820,66 @@
     }
 
     function storageDisponivel() {
+      if (storageDisponivelMemo !== null) return storageDisponivelMemo;
       try {
-        if (!window.localStorage) return false;
+        if (!window.localStorage) {
+          storageDisponivelMemo = false;
+          return false;
+        }
         const key = `${STORAGE_PREFIX}__ping__`;
         window.localStorage.setItem(key, '1');
         window.localStorage.removeItem(key);
-        return true;
+        storageDisponivelMemo = true;
+        return storageDisponivelMemo;
       } catch (error) {
-        return false;
+        storageDisponivelMemo = false;
+        return storageDisponivelMemo;
       }
+    }
+
+    function contextoCache() {
+      return window.AppClientScope?.cacheNamespace?.(CACHE_SCHEMA) || '';
+    }
+
+    function escopoPersistencia() {
+      return window.AppClientScope?.persistenceScope?.(CACHE_SCHEMA) || null;
+    }
+
+    function escopoPersistenciaValido(candidate) {
+      return window.AppClientScope?.matchesPersistenceScope?.(candidate, CACHE_SCHEMA) === true;
+    }
+
+    function storageKey(tab) {
+      const contexto = contextoCache();
+      return contexto ? `${STORAGE_PREFIX}${contexto}:${tab}` : '';
+    }
+
+    function limparLegado() {
+      if (legadoLimpo || !storageDisponivel()) return;
+      legadoLimpo = true;
+      Object.keys(TABS_PERMITIDAS).forEach(tab => {
+        try {
+          window.localStorage.removeItem(`${LEGACY_STORAGE_PREFIX}${tab}`);
+        } catch (error) {
+          // sem acao
+        }
+      });
     }
 
     function lerBruto(tab) {
       const chave = normalizarTab(tab);
       if (!chave || !storageDisponivel()) return null;
+      if (window.AppClientScope?.get?.()?.canPersist !== true) return null;
+      limparLegado();
       try {
-        const raw = window.localStorage.getItem(`${STORAGE_PREFIX}${chave}`);
+        const key = storageKey(chave);
+        if (!key) return null;
+        const pending = pendingWrites.get(key);
+        const raw = pending?.payload || window.localStorage.getItem(key);
         if (!raw) return null;
-        const parsed = JSON.parse(raw);
+        const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
         if (!parsed || typeof parsed !== 'object') return null;
+        if (!escopoPersistenciaValido(parsed.scope)) return null;
         const updatedAt = Number(parsed.updatedAt || 0);
         const data = parsed.data;
         if (!updatedAt || (Date.now() - updatedAt) > TTL_MS) return null;
@@ -694,46 +897,128 @@
     function salvar(tab, data) {
       const chave = normalizarTab(tab);
       if (!chave || !storageDisponivel()) return false;
-      try {
-        const payload = {
+      limparLegado();
+      const key = storageKey(chave);
+      if (!key || window.AppClientScope?.get?.()?.canPersist !== true) return false;
+      const anterior = pendingWrites.get(key);
+      if (anterior?.timer) clearTimeout(anterior.timer);
+      const entry = {
+        payload: {
+          scope: escopoPersistencia(),
           updatedAt: Date.now(),
           data: data ?? null
-        };
-        window.localStorage.setItem(`${STORAGE_PREFIX}${chave}`, JSON.stringify(payload));
-        return true;
-      } catch (error) {
-        return false;
-      }
+        },
+        timer: null
+      };
+      entry.timer = setTimeout(() => {
+        pendingWrites.delete(key);
+        try {
+          window.localStorage.setItem(key, JSON.stringify(entry.payload));
+        } catch (error) {
+          // sem acao
+        }
+      }, 120);
+      pendingWrites.set(key, entry);
+      return true;
     }
 
     function remover(tab) {
       const chave = normalizarTab(tab);
       if (!chave || !storageDisponivel()) return false;
+      if (window.AppClientScope?.get?.()?.canPersist !== true) return false;
+      limparLegado();
       try {
-        window.localStorage.removeItem(`${STORAGE_PREFIX}${chave}`);
+        const key = storageKey(chave);
+        if (!key) return false;
+        const pendente = pendingWrites.get(key);
+        if (pendente?.timer) clearTimeout(pendente.timer);
+        pendingWrites.delete(key);
+        window.localStorage.removeItem(key);
         return true;
       } catch (error) {
         return false;
       }
     }
 
+    function flush() {
+      [...pendingWrites.entries()].forEach(([key, entry]) => {
+        if (entry?.timer) clearTimeout(entry.timer);
+        pendingWrites.delete(key);
+        try {
+          window.localStorage.setItem(key, JSON.stringify(entry.payload));
+        } catch (error) {
+          // sem acao
+        }
+      });
+    }
+
+    if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+      window.addEventListener('pagehide', flush);
+    }
+
     return {
       ler,
+      lerBruto,
       salvar,
-      remover
+      remover,
+      flush
     };
   }
 
   window.AppTabCache = window.AppTabCache || createTabCacheHelper();
 
   function createValidacoesHelper() {
-    const STORAGE_KEY = 'app:validacoes:v1';
+    // v3 ignora com seguranca os envelopes v2 cujo namespace de usuario podia
+    // colidir e exige que o proprio payload confirme o escopo da chave.
+    const STORAGE_PREFIX = 'app:validacoes:v3:';
+    const LEGACY_STORAGE_KEY = 'app:validacoes:v1';
+    const CACHE_SCHEMA = 'loading-ux-2026-07-scope-v2';
     const DEFAULT_TTL_MS = 1000 * 60 * 60 * 12; // 12h
     let memoriaData = null;
     let memoriaTs = 0;
     let inFlightPromise = null;
     let storageDisponivelMemo = null;
     let backendSincronizadoNaSessao = false;
+    let contextoMemoria = '';
+    let legadoLimpo = false;
+
+    function contextoCache() {
+      return window.AppClientScope?.cacheNamespace?.(CACHE_SCHEMA) || '';
+    }
+
+    function escopoPersistencia() {
+      return window.AppClientScope?.persistenceScope?.(CACHE_SCHEMA) || null;
+    }
+
+    function escopoPersistenciaValido(candidate) {
+      return window.AppClientScope?.matchesPersistenceScope?.(candidate, CACHE_SCHEMA) === true;
+    }
+
+    function storageKey() {
+      const contexto = contextoCache();
+      return contexto ? `${STORAGE_PREFIX}${contexto}` : '';
+    }
+
+    function garantirContextoMemoria() {
+      const atual = contextoCache();
+      if (contextoMemoria === atual) return;
+      contextoMemoria = atual;
+      memoriaData = null;
+      memoriaTs = 0;
+      inFlightPromise = null;
+      backendSincronizadoNaSessao = false;
+      window.AppValidacoesCache = {};
+    }
+
+    function limparLegado() {
+      if (legadoLimpo || !storageDisponivel()) return;
+      legadoLimpo = true;
+      try {
+        window.localStorage.removeItem(LEGACY_STORAGE_KEY);
+      } catch (error) {
+        // sem acao
+      }
+    }
 
     function storageDisponivel() {
       if (storageDisponivelMemo !== null) return storageDisponivelMemo;
@@ -742,7 +1027,7 @@
           storageDisponivelMemo = false;
           return false;
         }
-        const key = `${STORAGE_KEY}:__probe__`;
+        const key = `${STORAGE_PREFIX}__probe__`;
         window.localStorage.setItem(key, '1');
         window.localStorage.removeItem(key);
         storageDisponivelMemo = true;
@@ -823,8 +1108,12 @@
 
     function salvarStorage(data, ts) {
       if (!storageDisponivel()) return;
+      garantirContextoMemoria();
+      if (!storageKey() || window.AppClientScope?.get?.()?.canPersist !== true) return;
+      limparLegado();
       try {
-        window.localStorage.setItem(STORAGE_KEY, JSON.stringify({
+        window.localStorage.setItem(storageKey(), JSON.stringify({
+          scope: escopoPersistencia(),
           ts: Number(ts || Date.now()),
           data
         }));
@@ -835,11 +1124,15 @@
 
     function lerStorage(maxAgeMs) {
       if (!storageDisponivel()) return null;
+      garantirContextoMemoria();
+      if (!storageKey() || window.AppClientScope?.get?.()?.canPersist !== true) return null;
+      limparLegado();
       try {
-        const raw = window.localStorage.getItem(STORAGE_KEY);
+        const raw = window.localStorage.getItem(storageKey());
         if (!raw) return null;
         const payload = JSON.parse(raw);
         if (!payload || typeof payload !== 'object') return null;
+        if (!escopoPersistenciaValido(payload.scope)) return null;
         const ts = Number(payload.ts || 0);
         if (!ts) return null;
         if ((Date.now() - ts) > Number(maxAgeMs || DEFAULT_TTL_MS)) return null;
@@ -854,12 +1147,14 @@
     }
 
     function lerMemoria(maxAgeMs) {
+      garantirContextoMemoria();
       if (!memoriaData || !memoriaTs) return null;
       if ((Date.now() - memoriaTs) > Number(maxAgeMs || DEFAULT_TTL_MS)) return null;
       return memoriaData;
     }
 
     function prime(rawData, ts = Date.now()) {
+      garantirContextoMemoria();
       const data = normalizar(rawData);
       const stamp = Number(ts || Date.now());
       memoriaData = data;
@@ -874,12 +1169,14 @@
     }
 
     function invalidate() {
+      garantirContextoMemoria();
       memoriaData = null;
       memoriaTs = 0;
       backendSincronizadoNaSessao = false;
       if (!storageDisponivel()) return;
+      if (!storageKey() || window.AppClientScope?.get?.()?.canPersist !== true) return;
       try {
-        window.localStorage.removeItem(STORAGE_KEY);
+        window.localStorage.removeItem(storageKey());
       } catch (error) {
         // sem acao
       }
@@ -905,10 +1202,18 @@
         return Promise.reject(new Error('google.script.run indisponivel'));
       }
 
-      inFlightPromise = window.AppRequest.call('obterValidacoes', [], {
+      const contextoRequisicao = contextoCache();
+      let requisicao = null;
+      requisicao = window.AppRequest.call('obterValidacoes', [false, window.AppClientScope?.get?.()?.environment || 'prod'], {
         context: 'validacoes.load',
         errorMessage: 'Falha ao carregar validacoes'
       }).then(raw => {
+        if (
+          contextoCache() !== contextoRequisicao ||
+          window.AppClientScope?.isContextSwitching?.()
+        ) {
+          throw new Error('Contexto alterado durante a leitura de validacoes.');
+        }
         const data = prime(raw);
         backendSincronizadoNaSessao = true;
         return { data, source: 'backend' };
@@ -918,10 +1223,11 @@
         }
         throw err || new Error('Falha ao carregar validacoes');
       }).finally(() => {
-        inFlightPromise = null;
+        if (inFlightPromise === requisicao) inFlightPromise = null;
       });
 
-      return inFlightPromise;
+      inFlightPromise = requisicao;
+      return requisicao;
     }
 
     return {
@@ -1074,22 +1380,82 @@
   window.AppActionButtons = window.AppActionButtons || createActionButtonHelper();
 
   function createOptimisticMutationHelper() {
-    const STORAGE_KEY = 'app:optimistic:v2';
-    const STORAGE_KEYS_LEGACY = ['app:optimistic:v1'];
+    // v4 usa namespace de usuario injetivo e valida o escopo dentro do
+    // envelope. O v3 e deliberadamente ignorado: como o namespace antigo
+    // podia colidir, nao e seguro atribuir suas mutacoes ao usuario atual.
+    const STORAGE_PREFIX = 'app:optimistic:v4:';
+    const STORAGE_SCHEMA = 'optimistic-outbox-v4';
+    const AMBIGUOUS_STORAGE_PREFIX = 'app:optimistic:v3:';
+    const STORAGE_KEYS_LEGACY = ['app:optimistic:v2', 'app:optimistic:v1'];
+    const LEGACY_QUARANTINE_PREFIX = 'app:optimistic:quarantine:v2:';
+    const LEGACY_QUARANTINE_SCHEMA = 'optimistic-quarantine-v2';
+    const LEGACY_QUARANTINE_TTL_MS = 1000 * 60 * 60 * 24 * 30;
+    const PROCESS_LOCK_PREFIX = 'app-optimistic-processor-v4:';
+    const PROCESS_LEASE_PREFIX = 'app:optimistic:processor-lease:v4:';
     const STORAGE_TTL_MS = 1000 * 60 * 60 * 24 * 14;
     const BASE_BACKOFF_MS = 1800;
     const MAX_BACKOFF_MS = 45000;
     const MAX_AUTO_ATTEMPTS = 4;
+    const PROCESS_LEASE_MS = 1000 * 60 * 2;
+    const PROCESS_LEASE_HEARTBEAT_MS = 1000 * 20;
     let seq = 0;
     let processing = false;
     let retryTimer = null;
+    let bootstrapReady = false;
+    let storageLoaded = false;
+    let contextSwitching = false;
+    let legacyQuarantineInfo = null;
+    let legacyWarningEmitted = false;
     const entries = new Map();
     const handlers = {};
+    const processorOwnerId = (() => {
+      try {
+        if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+          return crypto.randomUUID();
+        }
+      } catch (error) {
+        // usa o fallback abaixo
+      }
+      return `owner_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    })();
+
+    function contextoStorage() {
+      const scope = window.AppClientScope?.get?.();
+      return {
+        env: normalizarDbEnvFront(scope?.environment || 'prod'),
+        user: String(scope?.user || 'session-only'),
+        canPersist: scope?.canPersist === true
+      };
+    }
+
+    function storageKey() {
+      const ctx = contextoStorage();
+      return `${STORAGE_PREFIX}${ctx.env}:${ctx.user}`;
+    }
+
+    function escopoPersistencia(schema = STORAGE_SCHEMA) {
+      return window.AppClientScope?.persistenceScope?.(schema) || null;
+    }
+
+    function escopoPersistenciaValido(candidate, schema = STORAGE_SCHEMA) {
+      return window.AppClientScope?.matchesPersistenceScope?.(candidate, schema) === true;
+    }
+
+    function processorLockName() {
+      const ctx = contextoStorage();
+      return `${PROCESS_LOCK_PREFIX}${ctx.env}:${ctx.user}`;
+    }
+
+    function processorLeaseKey() {
+      const ctx = contextoStorage();
+      return `${PROCESS_LEASE_PREFIX}${ctx.env}:${ctx.user}`;
+    }
 
     function storageDisponivel() {
       try {
+        if (!contextoStorage().canPersist) return false;
         if (!window.localStorage) return false;
-        const key = `${STORAGE_KEY}:probe`;
+        const key = `${STORAGE_PREFIX}probe`;
         window.localStorage.setItem(key, '1');
         window.localStorage.removeItem(key);
         return true;
@@ -1127,7 +1493,19 @@
 
     function gerarId() {
       seq += 1;
-      return `opt_${Date.now()}_${seq}`;
+      try {
+        if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+          return `opt_${crypto.randomUUID()}`;
+        }
+        if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
+          const bytes = new Uint32Array(4);
+          crypto.getRandomValues(bytes);
+          return `opt_${Date.now()}_${seq}_${[...bytes].map(v => v.toString(36)).join('')}`;
+        }
+      } catch (error) {
+        // Mantem um fallback compativel com navegadores antigos.
+      }
+      return `opt_${Date.now()}_${seq}_${Math.random().toString(36).slice(2)}`;
     }
 
     function ordenarEntries(lista) {
@@ -1156,6 +1534,8 @@
         conflict: 0,
         active: 0,
         nextRetryAt: 0,
+        legacyQuarantine: !!legacyQuarantineInfo,
+        legacyQuarantineSources: Math.max(0, Number(legacyQuarantineInfo?.totalSources || 0)),
         online: typeof navigator === 'undefined' || navigator.onLine !== false
       };
       snapshotEntries().forEach(entry => {
@@ -1188,9 +1568,12 @@
     }
 
     function salvarStorage() {
-      if (!storageDisponivel()) return;
+      if (!bootstrapReady || !storageDisponivel()) return;
+      const scope = escopoPersistencia();
+      if (!scope) return;
       try {
-        window.localStorage.setItem(STORAGE_KEY, JSON.stringify({
+        window.localStorage.setItem(storageKey(), JSON.stringify({
+          scope,
           updatedAt: Date.now(),
           seq,
           entries: snapshotEntries()
@@ -1216,13 +1599,24 @@
       const id = String(raw.id || '').trim() || gerarId();
       const createdAt = Number(raw.createdAt || Date.now());
       const updatedAt = Number(raw.updatedAt || createdAt || Date.now());
+      const meta = clone(raw.meta ?? {});
+      const idempotencyToken = String(
+        raw.idempotencyToken || meta?._idempotency_token || id
+      ).trim() || id;
+      if (meta && typeof meta === 'object') {
+        meta._idempotency_token = idempotencyToken;
+      }
       return {
         id,
+        idempotencyToken,
         scope: String(raw.scope || '').trim(),
         handler: String(raw.handler || '').trim(),
         entityKey: String(raw.entityKey || '').trim(),
         payload: clone(raw.payload ?? null),
-        meta: clone(raw.meta ?? {}),
+        meta,
+        environment: normalizarDbEnvFront(
+          raw.environment || raw?.meta?._db_env || raw?.meta?.environment || contextoStorage().env
+        ),
         attempts: Math.max(0, Number(raw.attempts || 0)),
         status: normalizarStatus(raw.status),
         errorMessage: String(raw.errorMessage || '').trim(),
@@ -1234,30 +1628,170 @@
       };
     }
 
-    function carregarStorage() {
-      if (!storageDisponivel()) return;
+    function carregarStorage(options = {}) {
+      const force = options.force === true;
+      const recoverSending = options.recoverSending === true;
+      if (!bootstrapReady || (!force && storageLoaded) || !storageDisponivel()) return false;
+      storageLoaded = true;
       try {
-        const payloadAtual = lerStoragePorChave(STORAGE_KEY);
-        const payload = payloadAtual || STORAGE_KEYS_LEGACY.map(lerStoragePorChave).find(Boolean);
-        if (!payload || typeof payload !== 'object') return;
+        const keyAtual = storageKey();
+        const payload = lerStoragePorChave(keyAtual);
+        if (!payload || typeof payload !== 'object') {
+          if (force) entries.clear();
+          return false;
+        }
+        if (!escopoPersistenciaValido(payload.scope)) {
+          window.AppDiag?.mark?.('optimistic.storage.scope_mismatch', {
+            storage_key: keyAtual
+          });
+          return false;
+        }
         const updatedAt = Number(payload.updatedAt || 0);
         if (updatedAt && (Date.now() - updatedAt) > STORAGE_TTL_MS) {
-          window.localStorage.removeItem(STORAGE_KEY);
-          STORAGE_KEYS_LEGACY.forEach(key => window.localStorage.removeItem(key));
-          return;
+          window.localStorage.removeItem(keyAtual);
+          if (force) entries.clear();
+          return false;
         }
         seq = Math.max(seq, Number(payload.seq || 0));
         const lista = Array.isArray(payload.entries) ? payload.entries : [];
+        const carregadas = new Map();
+        let recuperadas = 0;
         lista.forEach(item => {
           const entry = normalizarEntry(item);
           if (!entry) return;
-          entries.set(entry.id, entry);
+          if (entry.environment !== contextoStorage().env) return;
+          if (recoverSending && normalizarStatus(entry.status) === 'sending') {
+            // O lock exclusivo garante que nao ha outro processador vivo antes
+            // de transformar uma tentativa interrompida em uma nova tentativa.
+            // O ID/token nao muda, permitindo deduplicacao no servidor quando
+            // a operacao correspondente oferece idempotencia.
+            entry.status = 'paused';
+            entry.errorKind = 'interrupted';
+            entry.errorMessage = 'Sincronizacao interrompida; nova tentativa agendada.';
+            entry.retryAt = Date.now() + BASE_BACKOFF_MS;
+            entry.updatedAt = Date.now();
+            recuperadas += 1;
+          }
+          carregadas.set(entry.id, entry);
         });
-        if (!payloadAtual && entries.size > 0) {
+        entries.clear();
+        carregadas.forEach((entry, id) => entries.set(id, entry));
+        if (recuperadas > 0) {
           salvarStorage();
+          window.AppDiag?.mark?.('optimistic.sending.recovered', { total: recuperadas });
         }
+        return true;
       } catch (error) {
         // sem acao
+        return false;
+      }
+    }
+
+    function quarantineStorageKey() {
+      const ctx = contextoStorage();
+      return `${LEGACY_QUARANTINE_PREFIX}${ctx.env}:${ctx.user}`;
+    }
+
+    function chaveAmbiguaV3DoContexto() {
+      const email = String(window.AppUserAccess?.getContext?.()?.email || '').trim().toLowerCase();
+      if (!email) return '';
+      const usuarioAntigo = email.replace(/[^a-z0-9@._-]+/g, '_');
+      return `${AMBIGUOUS_STORAGE_PREFIX}${contextoStorage().env}:${usuarioAntigo}`;
+    }
+
+    function avisarQuarentenaLegada() {
+      if (!legacyQuarantineInfo || legacyWarningEmitted) return;
+      legacyWarningEmitted = true;
+      const detail = {
+        total_sources: Math.max(0, Number(legacyQuarantineInfo.totalSources || 0)),
+        quarantined_at: Number(legacyQuarantineInfo.quarantinedAt || 0),
+        expires_at: Number(legacyQuarantineInfo.expiresAt || 0),
+        auto_replay: false
+      };
+      try {
+        window.dispatchEvent(new CustomEvent('app:optimistic-legacy-quarantine', { detail }));
+      } catch (error) {
+        // sem acao
+      }
+      if (typeof mostrarToast === 'function') {
+        mostrarToast('Ha alteracoes antigas isoladas que nao serao reenviadas automaticamente.', 'erro');
+      }
+    }
+
+    function quarentenarStorageLegado() {
+      if (!storageDisponivel()) return;
+      try {
+        const keyQuarentena = quarantineStorageKey();
+        const agora = Date.now();
+        let payloadExistente = null;
+        const rawExistente = window.localStorage.getItem(keyQuarentena);
+        if (rawExistente) {
+          try {
+            const parsed = JSON.parse(rawExistente);
+            if (
+              escopoPersistenciaValido(parsed?.scope, LEGACY_QUARANTINE_SCHEMA) &&
+              Number(parsed?.expiresAt || 0) > agora
+            ) {
+              payloadExistente = parsed;
+            } else if (Number(parsed?.expiresAt || 0) > 0 && Number(parsed.expiresAt) <= agora) {
+              window.localStorage.removeItem(keyQuarentena);
+            }
+          } catch (error) {
+            // Envelope invalido e ignorado; nunca e reproduzido.
+          }
+        }
+
+        const fontes = {
+          ...((payloadExistente?.sources && typeof payloadExistente.sources === 'object')
+            ? payloadExistente.sources
+            : {})
+        };
+        const candidatas = [
+          ...STORAGE_KEYS_LEGACY,
+          'app:optimistic:quarantine:v1',
+          chaveAmbiguaV3DoContexto()
+        ].filter(Boolean);
+        const novas = [];
+        candidatas.forEach(key => {
+          if (Object.prototype.hasOwnProperty.call(fontes, key)) return;
+          const raw = window.localStorage.getItem(key);
+          if (!raw) return;
+          fontes[key] = raw;
+          novas.push(key);
+        });
+
+        const totalSources = Object.keys(fontes).length;
+        if (totalSources === 0) {
+          legacyQuarantineInfo = null;
+          return;
+        }
+
+        const quarantinedAt = Number(payloadExistente?.quarantinedAt || agora);
+        const envelope = {
+          scope: escopoPersistencia(LEGACY_QUARANTINE_SCHEMA),
+          quarantinedAt,
+          updatedAt: agora,
+          expiresAt: quarantinedAt + LEGACY_QUARANTINE_TTL_MS,
+          reason: 'legacy_scope_unknown',
+          autoReplay: false,
+          totalSources,
+          sources: fontes
+        };
+        window.localStorage.setItem(keyQuarentena, JSON.stringify(envelope));
+        // So remove a fonte depois que a copia escopada foi confirmada.
+        novas.forEach(key => window.localStorage.removeItem(key));
+        legacyQuarantineInfo = {
+          quarantinedAt: envelope.quarantinedAt,
+          expiresAt: envelope.expiresAt,
+          totalSources: envelope.totalSources
+        };
+        window.AppDiag?.mark?.('optimistic.legacy.quarantined', {
+          total_sources: totalSources,
+          auto_replay: false
+        });
+        avisarQuarentenaLegada();
+      } catch (error) {
+        // Mantem o legado intacto se a quarentena nao puder ser gravada.
       }
     }
 
@@ -1287,6 +1821,154 @@
       retryTimer = null;
     }
 
+    function esperar(ms) {
+      return new Promise(resolve => setTimeout(resolve, Math.max(0, Number(ms || 0))));
+    }
+
+    function lerLeaseProcessador() {
+      try {
+        const raw = window.localStorage?.getItem(processorLeaseKey());
+        if (!raw) return null;
+        const lease = JSON.parse(raw);
+        if (!lease || typeof lease !== 'object') return null;
+        if (!escopoPersistenciaValido(lease.scope)) return null;
+        return lease;
+      } catch (error) {
+        return null;
+      }
+    }
+
+    async function adquirirLeaseProcessador() {
+      if (!storageDisponivel()) return null;
+      const key = processorLeaseKey();
+      const agora = Date.now();
+      const atual = lerLeaseProcessador();
+      if (
+        atual &&
+        String(atual.owner || '') !== processorOwnerId &&
+        Number(atual.expiresAt || 0) > agora
+      ) {
+        return null;
+      }
+
+      const nonce = `${processorOwnerId}_${agora}_${Math.random().toString(36).slice(2)}`;
+      const gravar = () => {
+        window.localStorage.setItem(key, JSON.stringify({
+          scope: escopoPersistencia(),
+          owner: processorOwnerId,
+          nonce,
+          updatedAt: Date.now(),
+          expiresAt: Date.now() + PROCESS_LEASE_MS
+        }));
+      };
+
+      try {
+        gravar();
+        // localStorage nao oferece compare-and-swap. Uma pequena janela de
+        // confirmacao resolve a disputa usual; Web Locks, quando disponivel,
+        // continua sendo a garantia primaria.
+        await esperar(36 + Math.floor(Math.random() * 28));
+        const confirmado = lerLeaseProcessador();
+        if (
+          String(confirmado?.owner || '') !== processorOwnerId ||
+          String(confirmado?.nonce || '') !== nonce
+        ) {
+          return null;
+        }
+
+        let ativo = true;
+        const isOwner = () => {
+          if (!ativo) return false;
+          const lease = lerLeaseProcessador();
+          return String(lease?.owner || '') === processorOwnerId
+            && String(lease?.nonce || '') === nonce
+            && Number(lease?.expiresAt || 0) > Date.now();
+        };
+        const heartbeat = setInterval(() => {
+          if (!isOwner()) {
+            ativo = false;
+            clearInterval(heartbeat);
+            return;
+          }
+          try {
+            gravar();
+          } catch (error) {
+            ativo = false;
+            clearInterval(heartbeat);
+          }
+        }, PROCESS_LEASE_HEARTBEAT_MS);
+
+        return {
+          isOwner,
+          release() {
+            if (!ativo) return;
+            ativo = false;
+            clearInterval(heartbeat);
+            try {
+              const lease = lerLeaseProcessador();
+              if (
+                String(lease?.owner || '') === processorOwnerId &&
+                String(lease?.nonce || '') === nonce
+              ) {
+                window.localStorage.removeItem(key);
+              }
+            } catch (error) {
+              // O lease expira sozinho em caso de falha.
+            }
+          }
+        };
+      } catch (error) {
+        return null;
+      }
+    }
+
+    async function executarComExclusaoProcessador(callback) {
+      const locks = typeof navigator !== 'undefined' ? navigator.locks : null;
+      if (locks && typeof locks.request === 'function') {
+        let adquirido = false;
+        try {
+          const result = await locks.request(
+            processorLockName(),
+            { mode: 'exclusive', ifAvailable: true },
+            async lock => {
+              if (!lock) return undefined;
+              adquirido = true;
+              return callback({ isOwner: () => true, strategy: 'web-locks' });
+            }
+          );
+          return { acquired: adquirido, result };
+        } catch (error) {
+          // Uma falha do callback depois de adquirir o lock nao pode cair no
+          // fallback, pois isso executaria a mesma mutacao uma segunda vez.
+          if (adquirido) throw error;
+          // Navegadores com implementacao parcial caem no lease abaixo.
+          window.AppDiag?.mark?.('optimistic.processor.web_lock_unavailable', {
+            message: String(error?.message || error || '')
+          });
+        }
+      }
+
+      // Sem persistencia nao ha uma fila compartilhada entre abas; o flag
+      // `processing` desta instancia ja e suficiente para a fila em memoria.
+      if (!storageDisponivel()) {
+        return {
+          acquired: true,
+          result: await callback({ isOwner: () => true, strategy: 'memory-only' })
+        };
+      }
+
+      const lease = await adquirirLeaseProcessador();
+      if (!lease) return { acquired: false, result: undefined };
+      try {
+        return {
+          acquired: true,
+          result: await callback({ isOwner: lease.isOwner, strategy: 'local-storage-lease' })
+        };
+      } finally {
+        lease.release();
+      }
+    }
+
     function calcularBackoff(attempts) {
       const tentativa = Math.max(1, Number(attempts || 1));
       return Math.min(MAX_BACKOFF_MS, BASE_BACKOFF_MS * Math.pow(2, tentativa - 1));
@@ -1295,7 +1977,7 @@
     function obterProximaElegivel(now = Date.now()) {
       const online = typeof navigator === 'undefined' || navigator.onLine !== false;
       return snapshotEntries().find(item => {
-        if (!handlers[item.handler]) return false;
+        if (!handlers[item.handler] || item.environment !== contextoStorage().env) return false;
         const status = normalizarStatus(item.status);
         if (!['pending', 'paused', 'offline'].includes(status)) return false;
         if (!online) return false;
@@ -1306,15 +1988,21 @@
 
     function agendarProcessamento(delayMs = null) {
       limparRetryTimer();
+      if (!bootstrapReady || contextSwitching) {
+        emitirEstado();
+        return;
+      }
       if (processing) {
         emitirEstado();
         return;
       }
 
       const pendentes = snapshotEntries().filter(item => {
-        if (!handlers[item.handler]) return false;
+        if (!handlers[item.handler] || item.environment !== contextoStorage().env) return false;
         const status = normalizarStatus(item.status);
-        return ['pending', 'paused', 'offline'].includes(status);
+        // `sending` persistido tambem precisa chegar ao processador: somente
+        // depois de adquirir o lock ele pode ser recuperado como interrompido.
+        return ['pending', 'sending', 'paused', 'offline'].includes(status);
       });
       if (pendentes.length === 0) {
         emitirEstado();
@@ -1322,13 +2010,15 @@
       }
 
       const online = typeof navigator === 'undefined' || navigator.onLine !== false;
-      if (!online) {
+      const precisaRecuperarSending = pendentes.some(item => normalizarStatus(item.status) === 'sending');
+      if (!online && !precisaRecuperarSending) {
         emitirEstado();
         return;
       }
 
       const now = Date.now();
       const immediata = pendentes.some(item => {
+        if (normalizarStatus(item.status) === 'sending') return true;
         const retryAt = Number(item.retryAt || 0);
         return !retryAt || retryAt <= now;
       });
@@ -1380,6 +2070,9 @@
     }
 
     function enqueue(config = {}) {
+      if (!bootstrapReady || contextSwitching) {
+        throw new Error('Aguarde a inicializacao do ambiente antes de salvar.');
+      }
       const entry = normalizarEntry({
         ...config,
         id: config.id || gerarId(),
@@ -1390,7 +2083,12 @@
         errorMessage: '',
         errorKind: '',
         retryAt: 0,
-        lastAttemptAt: 0
+        lastAttemptAt: 0,
+        environment: contextoStorage().env,
+        meta: {
+          ...(config.meta || {}),
+          _db_env: contextoStorage().env
+        }
       });
       if (!entry || !entry.handler) {
         throw new Error('Mutacao otimista invalida.');
@@ -1454,8 +2152,8 @@
       const lower = mensagemNormalizada;
       const offlinePorNavegador = typeof navigator !== 'undefined' && navigator.onLine === false;
       let conflito = rawCode.includes('CONFLICT')
-        || /conflit|vers[aã]o|stale|atualizad[oa] por outro|modificad[oa] por outro|updated by another|already changed/i.test(mensagem);
-      conflito = conflito || /conflit|versao|stale|atualizad[oa] por outro|modificad[oa] por outro|updated by another|already changed/i.test(mensagemNormalizada);
+        || /conflit|incert|tentativa anterior|vers[aã]o|stale|atualizad[oa] por outro|modificad[oa] por outro|updated by another|already changed/i.test(mensagem);
+      conflito = conflito || /conflit|incert|tentativa anterior|versao|stale|atualizad[oa] por outro|modificad[oa] por outro|updated by another|already changed/i.test(mensagemNormalizada);
       const offline = offlinePorNavegador
         || (!conflito && /offline|sem conexao|google\.script\.run indisponivel|network|internet|dns|failed to fetch|tempo limite|timeout|temporari/i.test(lower));
       const invalido = /obrigat|invalido|permissa|nao encontrado|proibido|forbidden|unauthori|denied/i.test(lower);
@@ -1497,54 +2195,71 @@
     }
 
     async function processarFila() {
+      if (!bootstrapReady || contextSwitching) return;
       if (processing) return;
-      const entry = obterProximaElegivel();
-      if (!entry) {
-        agendarProcessamento();
-        return;
-      }
-      const original = entries.get(entry.id);
-      if (!original) {
-        agendarProcessamento();
-        return;
-      }
-
       processing = true;
-      original.status = 'sending';
-      original.lastAttemptAt = Date.now();
-      original.updatedAt = Date.now();
-      salvarStorage();
-      emitir('sending', { entry: original });
-
+      let lockAdquirido = false;
       try {
-        const result = await Promise.resolve(handlers[entry.handler](clone(entry)));
-        const atual = entries.get(entry.id);
-        const snapshot = clone(atual || entry);
-        entries.delete(entry.id);
-        salvarStorage();
-        emitir('success', {
-          entry: snapshot,
-          result
-        });
-      } catch (error) {
-        const atual = entries.get(entry.id);
-        if (atual) {
-          const info = classificarErro(error, atual);
-          atual.status = info.status;
-          atual.errorKind = info.kind;
-          atual.errorMessage = info.message;
-          atual.retryAt = Math.max(0, Number(info.retryAt || 0));
-          atual.attempts = Math.max(0, Number(atual.attempts || 0)) + 1;
-          atual.updatedAt = Date.now();
+        const exclusivo = await executarComExclusaoProcessador(async guard => {
+          // Sob o lock, o storage volta a ser a fonte autoritativa. E somente
+          // aqui que `sending` pode ser considerado resto de um crash/reload.
+          carregarStorage({ force: true, recoverSending: true });
+          const entry = obterProximaElegivel();
+          if (!entry) return false;
+          const original = entries.get(entry.id);
+          if (!original || !guard.isOwner()) return false;
+
+          original.status = 'sending';
+          original.lastAttemptAt = Date.now();
+          original.updatedAt = Date.now();
           salvarStorage();
-          emitir(info.status || 'error', {
-            entry: atual,
-            errorMessage: atual.errorMessage
-          });
-        }
+          emitir('sending', { entry: original });
+
+          try {
+            if (
+              !guard.isOwner() ||
+              contextSwitching ||
+              !window.AppClientScope?.matchesCurrentEnvironment?.() ||
+              entry.environment !== contextoStorage().env
+            ) {
+              throw new Error('Contexto de banco alterado antes da sincronizacao.');
+            }
+            const result = await Promise.resolve(handlers[entry.handler](clone(entry)));
+            const atual = entries.get(entry.id);
+            const snapshot = clone(atual || entry);
+            entries.delete(entry.id);
+            salvarStorage();
+            emitir('success', {
+              entry: snapshot,
+              result
+            });
+          } catch (error) {
+            const atual = entries.get(entry.id);
+            if (atual) {
+              const info = classificarErro(error, atual);
+              atual.status = info.status;
+              atual.errorKind = info.kind;
+              atual.errorMessage = info.message;
+              atual.retryAt = Math.max(0, Number(info.retryAt || 0));
+              atual.attempts = Math.max(0, Number(atual.attempts || 0)) + 1;
+              atual.updatedAt = Date.now();
+              salvarStorage();
+              emitir(info.status || 'error', {
+                entry: atual,
+                errorMessage: atual.errorMessage
+              });
+            }
+          }
+          return true;
+        });
+        lockAdquirido = exclusivo.acquired === true;
+      } catch (error) {
+        window.AppDiag?.mark?.('optimistic.processor.failed', {
+          message: String(error?.message || error || '')
+        });
       } finally {
         processing = false;
-        agendarProcessamento();
+        agendarProcessamento(lockAdquirido ? null : 180);
       }
     }
 
@@ -1572,17 +2287,59 @@
       });
       window.addEventListener('storage', evento => {
         const key = String(evento?.key || '').trim();
-        if (!key || key !== STORAGE_KEY) return;
-        entries.clear();
-        carregarStorage();
+        if (!key || key !== storageKey()) return;
+        carregarStorage({ force: true, recoverSending: false });
         emitirEstado();
         agendarProcessamento(120);
       });
+      window.addEventListener('app:bootstrap-ready', () => {
+        bootstrapReady = true;
+        contextSwitching = false;
+        entries.clear();
+        storageLoaded = false;
+        quarentenarStorageLegado();
+        carregarStorage();
+        emitirEstado();
+        agendarProcessamento(120);
+      }, { once: true });
+      window.addEventListener('app:client-scope-changing', () => {
+        contextSwitching = true;
+        limparRetryTimer();
+        salvarStorage();
+        emitirEstado();
+      });
     }
 
-    carregarStorage();
     emitirEstado();
-    agendarProcessamento(120);
+
+    function prepareContextSwitch(targetEnvironment) {
+      const alvo = normalizarDbEnvFront(targetEnvironment);
+      const atual = contextoStorage().env;
+      if (alvo === atual) return { ok: true };
+      const summary = resumoFila();
+      if (summary.total > 0 && !contextoStorage().canPersist) {
+        return {
+          ok: false,
+          reason: 'Ha alteracoes locais nao persistidas. Sincronize-as antes de trocar o banco.'
+        };
+      }
+      if (processing || summary.sending > 0) {
+        return {
+          ok: false,
+          reason: 'Aguarde a sincronizacao em andamento antes de trocar o banco.'
+        };
+      }
+      contextSwitching = true;
+      limparRetryTimer();
+      salvarStorage();
+      emitirEstado();
+      return { ok: true };
+    }
+
+    function cancelContextSwitch() {
+      contextSwitching = false;
+      agendarProcessamento(80);
+    }
 
     return {
       enqueue,
@@ -1592,7 +2349,9 @@
       get,
       getState,
       registerHandler,
-      process: agendarProcessamento
+      process: agendarProcessamento,
+      prepareContextSwitch,
+      cancelContextSwitch
     };
   }
 
@@ -2414,6 +3173,25 @@
 
   window.AppEntityMutations = window.AppEntityMutations || createEntityMutationHelper();
 
+  function chamarMutacaoOtimistaNoAmbiente(entry, nomeOperacao, argumentos, options) {
+    if (!window.AppRequest?.call) {
+      return Promise.reject(new Error('google.script.run indisponivel'));
+    }
+    const ambiente = normalizarDbEnvFront(
+      entry?.environment || entry?.meta?._db_env || window.AppClientScope?.get?.()?.environment || 'prod'
+    );
+    return window.AppRequest.call(
+      'executarMutacaoOtimistaNoAmbiente',
+      [
+        nomeOperacao,
+        Array.isArray(argumentos) ? argumentos : [],
+        ambiente,
+        String(entry?.idempotencyToken || entry?.id || '').trim()
+      ],
+      options || {}
+    );
+  }
+
   if (window.AppOptimistic?.registerHandler) {
     window.AppOptimistic.registerHandler('despesa.create', entry => {
       if (!window.AppRequest?.call) {
@@ -2428,7 +3206,7 @@
           ''
         ).trim();
       }
-      return window.AppRequest.call('criarDespesaGeral', [payload], {
+      return chamarMutacaoOtimistaNoAmbiente(entry, 'criarDespesaGeral', [payload], {
         context: 'optimistic.despesa.create',
         errorMessage: 'Erro ao sincronizar nova despesa'
       });
@@ -2438,7 +3216,7 @@
       if (!window.AppRequest?.call) {
         return Promise.reject(new Error('google.script.run indisponivel'));
       }
-      return window.AppRequest.call('atualizarDespesaGeral', [entry.meta?.target_id, entry.payload], {
+      return chamarMutacaoOtimistaNoAmbiente(entry, 'atualizarDespesaGeral', [entry.meta?.target_id, entry.payload], {
         context: 'optimistic.despesa.update',
         errorMessage: 'Erro ao sincronizar alteracoes da despesa'
       });
@@ -2448,7 +3226,7 @@
       if (!window.AppRequest?.call) {
         return Promise.reject(new Error('google.script.run indisponivel'));
       }
-      return window.AppRequest.call('deletarDespesaGeral', [entry.meta?.target_id], {
+      return chamarMutacaoOtimistaNoAmbiente(entry, 'deletarDespesaGeral', [entry.meta?.target_id], {
         context: 'optimistic.despesa.delete',
         errorMessage: 'Erro ao sincronizar exclusao da despesa'
       });
@@ -2458,7 +3236,7 @@
       if (!window.AppRequest?.call) {
         return Promise.reject(new Error('google.script.run indisponivel'));
       }
-      return window.AppRequest.call('registrarPagamentoDespesaGeral', [entry.meta?.target_id, entry.payload], {
+      return chamarMutacaoOtimistaNoAmbiente(entry, 'registrarPagamentoDespesaGeral', [entry.meta?.target_id, entry.payload], {
         context: 'optimistic.despesa.payment',
         errorMessage: 'Erro ao sincronizar pagamento da despesa'
       });
@@ -2468,7 +3246,7 @@
       if (!window.AppRequest?.call) {
         return Promise.reject(new Error('google.script.run indisponivel'));
       }
-      return window.AppRequest.call('criarItemCompra', [entry.payload], {
+      return chamarMutacaoOtimistaNoAmbiente(entry, 'criarItemCompra', [entry.payload], {
         context: 'optimistic.compra.create',
         errorMessage: 'Erro ao sincronizar nova compra'
       });
@@ -2478,7 +3256,7 @@
       if (!window.AppRequest?.call) {
         return Promise.reject(new Error('google.script.run indisponivel'));
       }
-      return window.AppRequest.call('atualizarItemCompra', [entry.meta?.target_id, entry.payload], {
+      return chamarMutacaoOtimistaNoAmbiente(entry, 'atualizarItemCompra', [entry.meta?.target_id, entry.payload], {
         context: 'optimistic.compra.update',
         errorMessage: 'Erro ao sincronizar alteracoes da compra'
       });
@@ -2488,7 +3266,7 @@
       if (!window.AppRequest?.call) {
         return Promise.reject(new Error('google.script.run indisponivel'));
       }
-      return window.AppRequest.call('deletarItemCompra', [entry.meta?.target_id], {
+      return chamarMutacaoOtimistaNoAmbiente(entry, 'deletarItemCompra', [entry.meta?.target_id], {
         context: 'optimistic.compra.delete',
         errorMessage: 'Erro ao sincronizar exclusao da compra'
       });
@@ -2498,7 +3276,7 @@
       if (!window.AppRequest?.call) {
         return Promise.reject(new Error('google.script.run indisponivel'));
       }
-      return window.AppRequest.call('registrarPagamentoCompra', [entry.meta?.target_id, entry.payload], {
+      return chamarMutacaoOtimistaNoAmbiente(entry, 'registrarPagamentoCompra', [entry.meta?.target_id, entry.payload], {
         context: 'optimistic.compra.payment',
         errorMessage: 'Erro ao sincronizar pagamento da compra'
       });
@@ -2508,7 +3286,7 @@
       if (!window.AppRequest?.call) {
         return Promise.reject(new Error('google.script.run indisponivel'));
       }
-      return window.AppRequest.call('adicionarCompraAoEstoque', [entry.meta?.target_id], {
+      return chamarMutacaoOtimistaNoAmbiente(entry, 'adicionarCompraAoEstoque', [entry.meta?.target_id], {
         context: 'optimistic.compra.add_stock',
         errorMessage: 'Erro ao sincronizar adicao da compra ao estoque'
       });
@@ -2518,7 +3296,7 @@
       if (!window.AppRequest?.call) {
         return Promise.reject(new Error('google.script.run indisponivel'));
       }
-      return window.AppRequest.call('criarVenda', [entry.payload], {
+      return chamarMutacaoOtimistaNoAmbiente(entry, 'criarVenda', [entry.payload], {
         context: 'optimistic.venda.create',
         errorMessage: 'Erro ao sincronizar nova venda'
       });
@@ -2528,7 +3306,7 @@
       if (!window.AppRequest?.call) {
         return Promise.reject(new Error('google.script.run indisponivel'));
       }
-      return window.AppRequest.call('atualizarVenda', [entry.meta?.target_id, entry.payload], {
+      return chamarMutacaoOtimistaNoAmbiente(entry, 'atualizarVenda', [entry.meta?.target_id, entry.payload], {
         context: 'optimistic.venda.update',
         errorMessage: 'Erro ao sincronizar alteracoes da venda'
       });
@@ -2538,7 +3316,7 @@
       if (!window.AppRequest?.call) {
         return Promise.reject(new Error('google.script.run indisponivel'));
       }
-      return window.AppRequest.call('deletarVenda', [entry.meta?.target_id], {
+      return chamarMutacaoOtimistaNoAmbiente(entry, 'deletarVenda', [entry.meta?.target_id], {
         context: 'optimistic.venda.delete',
         errorMessage: 'Erro ao sincronizar exclusao da venda'
       });
@@ -2552,7 +3330,7 @@
         ...(entry.payload || {}),
         client_request_id: String(entry.payload?.client_request_id || `VNDREC_${entry.id || ''}`).slice(0, 120)
       };
-      return window.AppRequest.call('registrarRecebimentoVenda', [entry.meta?.target_id, payload], {
+      return chamarMutacaoOtimistaNoAmbiente(entry, 'registrarRecebimentoVenda', [entry.meta?.target_id, payload], {
         context: 'optimistic.venda.receive',
         errorMessage: 'Erro ao sincronizar recebimento da venda'
       });
@@ -2562,7 +3340,7 @@
       if (!window.AppRequest?.call) {
         return Promise.reject(new Error('google.script.run indisponivel'));
       }
-      return window.AppRequest.call('criarItemEstoque', [entry.payload], {
+      return chamarMutacaoOtimistaNoAmbiente(entry, 'criarItemEstoque', [entry.payload], {
         context: 'optimistic.estoque.create',
         errorMessage: 'Erro ao sincronizar novo item de estoque'
       });
@@ -2572,7 +3350,7 @@
       if (!window.AppRequest?.call) {
         return Promise.reject(new Error('google.script.run indisponivel'));
       }
-      return window.AppRequest.call('atualizarItemEstoque', [entry.meta?.target_id, entry.payload], {
+      return chamarMutacaoOtimistaNoAmbiente(entry, 'atualizarItemEstoque', [entry.meta?.target_id, entry.payload], {
         context: 'optimistic.estoque.update',
         errorMessage: 'Erro ao sincronizar alteracoes do estoque'
       });
@@ -2582,7 +3360,7 @@
       if (!window.AppRequest?.call) {
         return Promise.reject(new Error('google.script.run indisponivel'));
       }
-      return window.AppRequest.call('deletarItemEstoque', [entry.meta?.target_id], {
+      return chamarMutacaoOtimistaNoAmbiente(entry, 'deletarItemEstoque', [entry.meta?.target_id], {
         context: 'optimistic.estoque.delete',
         errorMessage: 'Erro ao sincronizar exclusao do estoque'
       });
@@ -2592,7 +3370,7 @@
       if (!window.AppRequest?.call) {
         return Promise.reject(new Error('google.script.run indisponivel'));
       }
-      return window.AppRequest.call('salvarProdutoComModelo', [
+      return chamarMutacaoOtimistaNoAmbiente(entry, 'salvarProdutoComModelo', [
         entry.meta?.target_id || '',
         entry.payload?.dadosProduto || {},
         entry.payload?.modelo?.dados || {},
@@ -2609,7 +3387,7 @@
       if (!window.AppRequest?.call) {
         return Promise.reject(new Error('google.script.run indisponivel'));
       }
-      return window.AppRequest.call('deletarProduto', [entry.meta?.target_id], {
+      return chamarMutacaoOtimistaNoAmbiente(entry, 'deletarProduto', [entry.meta?.target_id], {
         context: 'optimistic.produto.delete',
         errorMessage: 'Erro ao sincronizar exclusao do produto'
       });
@@ -2619,7 +3397,7 @@
       if (!window.AppRequest?.call) {
         return Promise.reject(new Error('google.script.run indisponivel'));
       }
-      return window.AppRequest.call('criarProducao', [entry.payload], {
+      return chamarMutacaoOtimistaNoAmbiente(entry, 'criarProducao', [entry.payload], {
         context: 'optimistic.producao.create',
         errorMessage: 'Erro ao sincronizar nova producao'
       });
@@ -2629,7 +3407,7 @@
       if (!window.AppRequest?.call) {
         return Promise.reject(new Error('google.script.run indisponivel'));
       }
-      return window.AppRequest.call('atualizarProducao', [entry.meta?.target_id, entry.payload], {
+      return chamarMutacaoOtimistaNoAmbiente(entry, 'atualizarProducao', [entry.meta?.target_id, entry.payload], {
         context: 'optimistic.producao.update',
         errorMessage: 'Erro ao sincronizar alteracoes da producao'
       });
@@ -2639,7 +3417,7 @@
       if (!window.AppRequest?.call) {
         return Promise.reject(new Error('google.script.run indisponivel'));
       }
-      return window.AppRequest.call('deletarProducao', [entry.meta?.target_id], {
+      return chamarMutacaoOtimistaNoAmbiente(entry, 'deletarProducao', [entry.meta?.target_id], {
         context: 'optimistic.producao.delete',
         errorMessage: 'Erro ao sincronizar exclusao da producao'
       });
@@ -2670,7 +3448,7 @@
         painel.classList.toggle('hidden', !bloqueado);
       }
 
-      const alvos = document.querySelectorAll('.navbar, #appSyncBanner, .top-bar, #painelFiltroEstoque, #painelFiltroCompras, .aba, .bottom-bar');
+      const alvos = document.querySelectorAll('.navbar, .app-workspace-header, #appBootSkeleton, #appDbEnvBanner, #appSyncBanner, .top-bar, #painelFiltroEstoque, #painelFiltroCompras, .aba, .bottom-bar');
       if (bloqueado) {
         alvos.forEach(el => {
           if (!el.classList.contains('hidden')) {
@@ -2876,6 +3654,22 @@
       const token = start(label, meta);
       try {
         const out = fn();
+        if (out && typeof out.then === 'function') {
+          return Promise.resolve(out).then(
+            value => {
+              end(token, { async: true });
+              return value;
+            },
+            error => {
+              end(token, {
+                async: true,
+                erro: true,
+                mensagem: String(error?.message || '')
+              });
+              throw error;
+            }
+          );
+        }
         end(token);
         return out;
       } catch (error) {
@@ -3004,18 +3798,19 @@
   };
 
   const ABA_REFRESH_INTERVAL_MS = {
-    dashboard: 15000,
-    despesas: 30000,
-    estoque: 30000,
-    compras: 30000,
-    vendas: 30000,
-    produtos: 30000,
-    producao: 20000
+    dashboard: 120000,
+    despesas: 120000,
+    estoque: 120000,
+    compras: 120000,
+    vendas: 120000,
+    produtos: 120000,
+    producao: 120000
   };
   const abaRefreshState = {};
   const TAB_SYNC_COALESCE_MS = 380;
   const TAB_SYNC_MIN_GAP_MS = 850;
   const abaSyncState = {};
+  let tabRefreshLeaseSeq = 0;
 
   function obterNomeAbaAtiva() {
     const ativa = document.querySelector('.aba:not(.hidden)');
@@ -3389,6 +4184,7 @@
     let navegacaoSeq = 0;
     let suspensaoAtiva = null;
     let navegacaoEmVoo = null;
+    let navegacaoFixada = null;
     let destinoTrocaInterna = '';
 
     function esperar(ms) {
@@ -3646,9 +4442,59 @@
       contexto.restauracoes.push(restaurar);
     }
 
+    function liberarNavegacaoFixada(contexto = navegacaoFixada) {
+      if (!contexto) return false;
+      if (contexto.releaseTimer) {
+        clearTimeout(contexto.releaseTimer);
+        contexto.releaseTimer = null;
+      }
+      if (contexto.modalObserver) {
+        contexto.modalObserver.disconnect();
+        contexto.modalObserver = null;
+      }
+      if (contexto.lease) {
+        window.AppTabRefresh?.releaseLease?.(contexto.lease);
+        contexto.lease = null;
+      }
+      if (navegacaoFixada === contexto) navegacaoFixada = null;
+      return true;
+    }
+
+    function fixarNavegacaoAteFecharDetalhes(contexto) {
+      if (!contexto?.lease) return;
+      liberarNavegacaoFixada();
+      navegacaoFixada = contexto;
+      const modal = contexto.detailsTarget?.matches?.('.modal:not(.hidden)')
+        ? contexto.detailsTarget
+        : null;
+      const disclosure = contexto.detailsTarget?.matches?.('details[open]')
+        ? contexto.detailsTarget
+        : (encontrarRegistro(contexto.aba, contexto.id)?.querySelector?.('details[open]') || null);
+      const observado = modal || disclosure;
+      if (!observado || typeof MutationObserver !== 'function') {
+        contexto.releaseTimer = setTimeout(() => liberarNavegacaoFixada(contexto), 2400);
+        return;
+      }
+      contexto.modalObserver = new MutationObserver(() => {
+        const continuaAberto = modal
+          ? !modal.classList.contains('hidden')
+          : disclosure.hasAttribute('open');
+        if (continuaAberto) return;
+        liberarNavegacaoFixada(contexto);
+      });
+      contexto.modalObserver.observe(observado, {
+        attributes: true,
+        attributeFilter: modal ? ['class'] : ['open']
+      });
+    }
+
     function cancelarNavegacao(contexto) {
       if (!contexto || contexto.cancelado) return;
       contexto.cancelado = true;
+      if (contexto.lease) {
+        window.AppTabRefresh?.releaseLease?.(contexto.lease);
+        contexto.lease = null;
+      }
       executarRestauracoes(contexto.restauracoes.splice(0));
       if (navegacaoEmVoo === contexto) navegacaoEmVoo = null;
     }
@@ -3671,6 +4517,9 @@
     function antesDeTrocarAba(origem, destino) {
       const de = normalizarNomeAba(origem);
       const para = normalizarNomeAba(destino);
+      if (navegacaoFixada && navegacaoFixada.aba !== para) {
+        liberarNavegacaoFixada(navegacaoFixada);
+      }
       const trocaInterna = !!destinoTrocaInterna
         && destinoTrocaInterna === para
         && navegacaoEmVoo?.aba === para;
@@ -3685,6 +4534,31 @@
       restaurarFiltrosSuspensos();
     }
 
+    function renderizarPendenteAbaAtiva(aba, timeoutMs = 1800) {
+      const lifecycle = window.AppTabRefresh?.getState?.(aba);
+      if (!lifecycle?.renderPending || obterNomeAbaAtiva() !== aba) {
+        return Promise.resolve(false);
+      }
+      return new Promise(resolve => {
+        let finalizado = false;
+        let timer = null;
+        const finalizar = renderizou => {
+          if (finalizado) return;
+          finalizado = true;
+          if (timer) clearTimeout(timer);
+          window.removeEventListener('app:tab:rendered', onRendered);
+          resolve(!!renderizou);
+        };
+        const onRendered = evento => {
+          if (normalizarNomeAba(evento?.detail?.tab) !== aba) return;
+          finalizar(true);
+        };
+        window.addEventListener('app:tab:rendered', onRendered);
+        timer = setTimeout(() => finalizar(false), Math.max(250, Number(timeoutMs) || 1800));
+        executarCicloAba(aba);
+      });
+    }
+
     function sincronizarAbaUmaVez(aba) {
       return new Promise(resolve => {
         if (!window.AppTabRefresh?.requestSync) {
@@ -3697,19 +4571,46 @@
           finalizado = true;
           resolve(false);
         }, 9000);
-        const concluir = () => {
+        const finalizar = resultado => {
           if (finalizado) return;
           finalizado = true;
           clearTimeout(timer);
-          resolve(true);
+          resolve(resultado !== false);
+        };
+        const concluirAposResposta = () => {
+          renderizarPendenteAbaAtiva(aba).then(() => finalizar(true));
+        };
+        const concluir = resultado => {
+          if (resultado === false) {
+            finalizar(false);
+            return;
+          }
+          if (resultado !== 'superseded') {
+            concluirAposResposta();
+            return;
+          }
+          const inicioEspera = Date.now();
+          const aguardarSubstituta = () => {
+            if (finalizado) return;
+            const lifecycle = window.AppTabRefresh?.getState?.(aba);
+            const assentou = lifecycle?.status !== 'refreshing' || lifecycle?.renderPending;
+            if (assentou || (Date.now() - inicioEspera) >= 1800) {
+              concluirAposResposta();
+              return;
+            }
+            setTimeout(aguardarSubstituta, 60);
+          };
+          aguardarSubstituta();
         };
         const solicitado = window.AppTabRefresh.requestSync(aba, {
           immediate: true,
           prefetch: true,
           timeoutMs: 8500,
+          markDirty: false,
+          ignoreLease: true,
           onDone: concluir
         });
-        if (!solicitado) concluir();
+        if (!solicitado) finalizar(false);
       });
     }
 
@@ -3753,6 +4654,7 @@
     }
 
     async function abrirDetalhesRegistro(aba, id, card, subresource) {
+      const modaisAntes = new Set(document.querySelectorAll('.modal:not(.hidden)'));
       const ui = obterUiAba(aba);
       const abrirPublico = ui?.openDetails || ui?.abrirDetalhes || ui?.abrirModalDetalhes;
       if (typeof abrirPublico === 'function') {
@@ -3765,6 +4667,11 @@
         else card.click();
       }
       if (subresource) await focarSubrecurso(subresource);
+      const modalAberto = [...document.querySelectorAll('.modal:not(.hidden)')]
+        .reverse()
+        .find(item => !modaisAntes.has(item)) || null;
+      const disclosure = encontrarRegistro(aba, id)?.querySelector?.('details[open]') || null;
+      return modalAberto || disclosure;
     }
 
     async function abrir(options = {}) {
@@ -3780,12 +4687,18 @@
         cancelarNavegacao(navegacaoEmVoo);
         window.AppModalUI?.closeAll?.();
       }
+      liberarNavegacaoFixada();
       restaurarFiltrosSuspensos();
       const contextoNavegacao = {
         seq,
         aba,
+        id,
         restauracoes: [],
-        cancelado: false
+        cancelado: false,
+        lease: window.AppTabRefresh?.acquireLease?.(aba, 'record-navigation') || null,
+        modalObserver: null,
+        releaseTimer: null,
+        detailsTarget: null
       };
       navegacaoEmVoo = contextoNavegacao;
       try {
@@ -3797,6 +4710,10 @@
           destinoTrocaInterna = '';
         }
       }
+      if (window.AppTabRefresh?.waitForSync) {
+        await window.AppTabRefresh.waitForSync(aba);
+      }
+      await renderizarPendenteAbaAtiva(aba);
       const pronta = window.AppBootGate?.waitForTabReady
         ? await window.AppBootGate.waitForTabReady(aba, { timeoutMs: 4500 })
         : true;
@@ -3805,7 +4722,7 @@
         return false;
       }
 
-      let alvo = pronta ? await localizarComPaginacao(aba, id) : null;
+      let alvo = pronta ? await aguardarRegistro(aba, id, 260) : null;
       if (!navegacaoContinuaValida(contextoNavegacao)) {
         cancelarNavegacao(contextoNavegacao);
         return false;
@@ -3820,6 +4737,14 @@
           return false;
         }
         if (hook.usado) alvo = await localizarComPaginacao(aba, id);
+        if (!navegacaoContinuaValida(contextoNavegacao)) {
+          cancelarNavegacao(contextoNavegacao);
+          return false;
+        }
+      }
+
+      if (!alvo) {
+        alvo = await localizarComPaginacao(aba, id);
         if (!navegacaoContinuaValida(contextoNavegacao)) {
           cancelarNavegacao(contextoNavegacao);
           return false;
@@ -3887,13 +4812,19 @@
           cancelarNavegacao(contextoNavegacao);
           return false;
         }
-        await abrirDetalhesRegistro(aba, id, alvo, options.subresource);
+        contextoNavegacao.detailsTarget = await abrirDetalhesRegistro(
+          aba,
+          id,
+          alvo,
+          options.subresource
+        );
         if (!navegacaoContinuaValida(contextoNavegacao)) {
           cancelarNavegacao(contextoNavegacao);
           return false;
         }
       }
 
+      fixarNavegacaoAteFecharDetalhes(contextoNavegacao);
       if (navegacaoEmVoo === contextoNavegacao) navegacaoEmVoo = null;
       if (contextoNavegacao.restauracoes.length > 0) {
         suspensaoAtiva = {
@@ -3910,6 +4841,19 @@
         window.AppModalUI?.closeAll?.();
         throw error;
       }
+    }
+
+    if (!window.__appRecordNavigatorRenderBound) {
+      window.addEventListener('app:tab:rendered', evento => {
+        const contexto = navegacaoFixada;
+        const abaEvento = normalizarNomeAba(evento?.detail?.tab);
+        if (!contexto || contexto.aba !== abaEvento || obterNomeAbaAtiva() !== abaEvento) return;
+        requestAnimationFrame(() => {
+          const alvo = encontrarRegistro(contexto.aba, contexto.id);
+          if (alvo) destacarElementoEntradaOutbox(alvo);
+        });
+      });
+      window.__appRecordNavigatorRenderBound = true;
     }
 
     return {
@@ -3996,13 +4940,21 @@
   }
 
   function obterEstadoRefreshAba(nome) {
-    const aba = String(nome || '').trim();
+    const aba = normalizarNomeAba(nome);
     if (!aba) return null;
     if (!abaRefreshState[aba]) {
       abaRefreshState[aba] = {
-        last: 0,
+        lastSuccessfulAt: 0,
+        lastAttemptAt: 0,
         initialized: false,
-        dirty: false
+        controllerInitialized: false,
+        dirty: false,
+        dirtyGeneration: 0,
+        appliedDirtyGeneration: 0,
+        renderRevision: 0,
+        renderPending: false,
+        status: 'empty',
+        leases: new Set()
       };
     }
     return abaRefreshState[aba];
@@ -4012,12 +4964,18 @@
     const state = obterEstadoRefreshAba(nome);
     if (!state) return false;
     state.dirty = true;
+    state.dirtyGeneration += 1;
     return true;
   }
 
-  function limparAbaSuja(nome) {
+  function limparAbaSuja(nome, generation) {
     const state = obterEstadoRefreshAba(nome);
     if (!state) return false;
+    const alvo = Number.isFinite(Number(generation))
+      ? Number(generation)
+      : state.dirtyGeneration;
+    state.appliedDirtyGeneration = Math.max(state.appliedDirtyGeneration, alvo);
+    if (state.dirtyGeneration > alvo) return false;
     state.dirty = false;
     return true;
   }
@@ -4035,49 +4993,176 @@
         timer: null,
         running: false,
         pendingCallbacks: [],
+        activeCallbacks: [],
+        queuedCallbacks: [],
         queued: false,
         queuedPrefetch: false,
+        queuedForce: false,
+        queuedIncludeSecondary: false,
         scheduledAt: 0,
         lastStartedAt: 0,
-        lastFinishedAt: 0
+        lastFinishedAt: 0,
+        startedDirtyGeneration: 0,
+        requestGeneration: 0,
+        activePromise: null,
+        activeResolve: null,
+        deferredByLease: false
       };
     }
     return abaSyncState[aba];
   }
 
   function deveRecarregarAba(nome, force = false) {
-    const aba = String(nome || '').trim();
+    const aba = normalizarNomeAba(nome);
     if (!aba) return false;
     const agoraMs = Date.now();
     const state = obterEstadoRefreshAba(aba);
     if (!state) return false;
     const ttl = Number(ABA_REFRESH_INTERVAL_MS[aba] || 30000);
 
-    if (force || !state.initialized || !!state.dirty) {
-      state.initialized = true;
-      state.last = agoraMs;
-      state.dirty = false;
+    if (force || !state.initialized || !!state.dirty) return true;
+    const referencia = Math.max(
+      Number(state.lastSuccessfulAt || 0),
+      Number(state.lastAttemptAt || 0)
+    );
+    return !referencia || (agoraMs - referencia) >= ttl;
+  }
+
+  function marcarAbaInicializada(nome, options = {}) {
+    const state = obterEstadoRefreshAba(nome);
+    if (!state) return false;
+    state.initialized = true;
+    state.lastAttemptAt = Date.now();
+    if (state.status === 'empty') {
+      state.status = options.hydrated ? 'hydrated' : 'refreshing';
+    }
+    return true;
+  }
+
+  function marcarResultadoAba(nome, sucesso, generation) {
+    const state = obterEstadoRefreshAba(nome);
+    if (!state) return false;
+    state.initialized = true;
+    state.lastAttemptAt = Date.now();
+    if (sucesso === true) {
+      state.lastSuccessfulAt = Date.now();
+      state.status = 'ready';
+      limparAbaSuja(nome, generation);
       return true;
     }
-
-    if (agoraMs - Number(state.last || 0) >= ttl) {
-      state.initialized = true;
-      state.last = agoraMs;
-      state.dirty = false;
-      return true;
-    }
-
+    state.status = 'error';
+    state.dirty = true;
     return false;
   }
 
-  function executarSincronizacaoForcadaAba(nome, onDone) {
+  function notificarRenderAba(nome, detail = {}) {
     const aba = normalizarNomeAba(nome);
+    const state = obterEstadoRefreshAba(aba);
+    if (!state) return 0;
+    state.renderRevision += 1;
+    state.renderPending = false;
+    try {
+      window.dispatchEvent(new CustomEvent('app:tab:rendered', {
+        detail: {
+          tab: aba,
+          revision: state.renderRevision,
+          changed: detail?.changed !== false
+        }
+      }));
+    } catch (error) {
+      // sem acao
+    }
+    return state.renderRevision;
+  }
+
+  function marcarRenderPendenteAba(nome) {
+    const state = obterEstadoRefreshAba(nome);
+    if (!state) return false;
+    state.renderPending = true;
+    return true;
+  }
+
+  function deveRenderizarAba(nome) {
+    const aba = normalizarNomeAba(nome);
+    const state = obterEstadoRefreshAba(aba);
+    if (obterNomeAbaAtiva() !== aba) return false;
+    // Durante a navegacao para um registro, permite o primeiro desenho da aba,
+    // mas congela redesenhos posteriores ate o usuario fechar os detalhes.
+    return !state || state.leases.size === 0 || state.renderRevision === 0;
+  }
+
+  function adquirirLeaseRefreshAba(nome, reason = '') {
+    const aba = normalizarNomeAba(nome);
+    const state = obterEstadoRefreshAba(aba);
+    if (!state) return null;
+    const token = `${aba}:lease:${++tabRefreshLeaseSeq}`;
+    state.leases.add(token);
+    const syncState = obterEstadoSyncAba(aba);
+    if (syncState?.timer && !syncState.running) {
+      clearTimeout(syncState.timer);
+      syncState.timer = null;
+      syncState.scheduledAt = 0;
+      syncState.deferredByLease = true;
+    }
+    window.AppDiag?.mark?.('tab.refresh.lease.acquire', {
+      tab: aba,
+      reason: String(reason || ''),
+      lease_count: state.leases.size
+    });
+    return { tab: aba, token };
+  }
+
+  function liberarLeaseRefreshAba(lease) {
+    const aba = normalizarNomeAba(lease?.tab);
+    const token = String(lease?.token || '').trim();
+    const state = obterEstadoRefreshAba(aba);
+    if (!state || !token) return false;
+    const removed = state.leases.delete(token);
+    window.AppDiag?.mark?.('tab.refresh.lease.release', {
+      tab: aba,
+      lease_count: state.leases.size
+    });
+    const syncState = obterEstadoSyncAba(aba);
+    if (removed && state.leases.size === 0 && syncState?.deferredByLease) {
+      syncState.deferredByLease = false;
+      requestSyncAba(aba, {
+        immediate: true,
+        prefetch: obterNomeAbaAtiva() !== aba,
+        force: false,
+        markDirty: false
+      });
+    }
+    if (removed && state.leases.size === 0 && state.renderPending && obterNomeAbaAtiva() === aba) {
+      setTimeout(() => executarCicloAba(aba), 0);
+    }
+    return removed;
+  }
+
+  function abaPossuiLeaseRefresh(nome) {
+    const state = obterEstadoRefreshAba(nome);
+    return !!state && state.leases.size > 0;
+  }
+
+  function aguardarSyncAba(nome) {
+    const state = obterEstadoSyncAba(nome);
+    return state?.activePromise || Promise.resolve(true);
+  }
+
+  function executarSincronizacaoAba(nome, onDone, options = {}) {
+    const aba = normalizarNomeAba(nome);
+    const force = options.force === true;
+    const includeSecondary = options.includeSecondary === true;
+    const ambiente = window.AppClientScope?.get?.()?.environment
+      || window.AppDbEnv?.getContext?.()?.effective_env
+      || 'prod';
     const concluir = (() => {
       let finalizado = false;
-      return () => {
+      return resultado => {
         if (finalizado) return;
         finalizado = true;
-        if (typeof onDone === 'function') onDone();
+        if (typeof onDone === 'function') {
+          onDone(resultado === 'superseded' ? 'superseded' : resultado !== false);
+        }
       };
     })();
 
@@ -4088,7 +5173,16 @@
 
     if (aba === 'dashboard') {
       if (window.DashboardController?.atualizar) {
-        window.AppPerf?.measure('tab.dashboard.sync', () => DashboardController.atualizar(true, concluir));
+        const resultado = window.AppPerf?.measure(
+          'tab.dashboard.sync',
+          () => DashboardController.atualizar(force, concluir)
+        );
+        if (resultado && typeof resultado.then === 'function') {
+          Promise.resolve(resultado).then(
+            () => concluir(true),
+            () => concluir(false)
+          );
+        }
         return;
       }
       if (window.DashboardController?.init) {
@@ -4145,10 +5239,13 @@
 
     if (typeof alvo.sync === 'function') {
       if (alvo.sync.length >= 1) {
-        window.AppPerf?.measure(alvo.labelSync, () => alvo.sync(concluir));
+        window.AppPerf?.measure(
+          alvo.labelSync,
+          () => alvo.sync(concluir, ambiente, { force, includeSecondary })
+        );
       } else {
         window.AppPerf?.measure(alvo.labelSync, () => alvo.sync());
-        concluir();
+        concluir(true);
       }
       return;
     }
@@ -4156,22 +5253,20 @@
     if (typeof alvo.init === 'function') {
       window.AppPerf?.measure(alvo.labelInit, () => alvo.init());
     }
-    concluir();
+    concluir(true);
   }
 
   function requestSyncAba(nome, options = {}) {
     const aba = normalizarNomeAba(nome);
     if (!aba) return false;
-
-    marcarAbaComoSuja(aba);
-
+    const refreshState = obterEstadoRefreshAba(aba);
     const state = obterEstadoSyncAba(aba);
-    if (!state) return false;
-    const onDone = typeof options.onDone === 'function' ? options.onDone : null;
-    if (onDone) {
-      state.pendingCallbacks.push(onDone);
-    }
+    if (!state || !refreshState) return false;
 
+    const deveInvalidar = options.markDirty !== false;
+    if (deveInvalidar) marcarAbaComoSuja(aba);
+    const dirtyGeneration = refreshState.dirtyGeneration;
+    const onDone = typeof options.onDone === 'function' ? options.onDone : null;
     const delayBase = Number(options.delayMs);
     const delayMs = Number.isFinite(delayBase) && delayBase >= 0
       ? delayBase
@@ -4182,6 +5277,8 @@
       : 35000;
     const immediate = !!options.immediate;
     const prefetch = !!options.prefetch;
+    const force = options.force === true;
+    const includeSecondary = options.includeSecondary === true;
     const abaAtiva = obterNomeAbaAtiva();
     const agoraMs = Date.now();
     const referenciaGap = Math.max(
@@ -4193,17 +5290,25 @@
       : 0;
 
     if (state.running) {
-      state.queued = true;
-      state.queuedPrefetch = state.queuedPrefetch || prefetch;
+      const existeInvalidacaoNova = dirtyGeneration > Number(state.startedDirtyGeneration || 0);
+      const precisaSecundarios = includeSecondary && !state.activeIncludeSecondary;
+      if (existeInvalidacaoNova || (force && !state.activeForce) || precisaSecundarios) {
+        state.queued = true;
+        state.queuedPrefetch = state.queuedPrefetch || prefetch;
+        state.queuedForce = state.queuedForce || force;
+        state.queuedIncludeSecondary = state.queuedIncludeSecondary || includeSecondary;
+        if (onDone) state.queuedCallbacks.push(onDone);
+      } else if (onDone) {
+        state.activeCallbacks.push(onDone);
+      }
       return true;
     }
 
     const deveExecutarAgora = abaAtiva === aba || prefetch;
     if (!deveExecutarAgora) {
       if (onDone) {
-        state.pendingCallbacks = state.pendingCallbacks.filter(fn => fn !== onDone);
         try {
-          onDone();
+          onDone(false);
         } catch (error) {
           // sem acao
         }
@@ -4211,29 +5316,58 @@
       return true;
     }
 
+    if (abaPossuiLeaseRefresh(aba) && options.ignoreLease !== true) {
+      if (onDone) state.pendingCallbacks.push(onDone);
+      state.pendingPrefetch = !!(state.pendingPrefetch || prefetch);
+      state.pendingForce = !!(state.pendingForce || force);
+      state.pendingIncludeSecondary = !!(state.pendingIncludeSecondary || includeSecondary);
+      state.deferredByLease = true;
+      return true;
+    }
+
     const delayEfetivo = (immediate || delayMs <= 0)
       ? Math.min(180, cooldownRestante)
       : Math.max(delayMs, cooldownRestante);
 
+    if (onDone) state.pendingCallbacks.push(onDone);
+    state.pendingPrefetch = !!(state.pendingPrefetch || prefetch);
+    state.pendingForce = !!(state.pendingForce || force);
+    state.pendingIncludeSecondary = !!(state.pendingIncludeSecondary || includeSecondary);
+
     const iniciarExecucao = () => {
       if (state.running) {
         state.queued = true;
-        state.queuedPrefetch = state.queuedPrefetch || prefetch;
+        state.queuedPrefetch = state.queuedPrefetch || state.pendingPrefetch;
+        state.queuedForce = state.queuedForce || state.pendingForce;
+        state.queuedIncludeSecondary = state.queuedIncludeSecondary || state.pendingIncludeSecondary;
+        state.queuedCallbacks.push(...state.pendingCallbacks.splice(0));
         return;
       }
 
       state.scheduledAt = 0;
       state.running = true;
-      state.queued = false;
-      state.queuedPrefetch = false;
+      state.activeCallbacks = state.pendingCallbacks.splice(0);
+      state.activeForce = !!state.pendingForce;
+      state.activeIncludeSecondary = !!state.pendingIncludeSecondary;
+      state.pendingPrefetch = false;
+      state.pendingForce = false;
+      state.pendingIncludeSecondary = false;
       state.lastStartedAt = Date.now();
+      state.startedDirtyGeneration = refreshState.dirtyGeneration;
+      state.requestGeneration += 1;
+      refreshState.initialized = true;
+      refreshState.lastAttemptAt = state.lastStartedAt;
+      refreshState.status = 'refreshing';
+      state.activePromise = new Promise(resolve => {
+        state.activeResolve = resolve;
+      });
       const tokenSync = window.AppSyncStatus?.iniciar
         ? window.AppSyncStatus.iniciar(aba, '')
         : null;
       let finalizado = false;
       let watchdog = null;
 
-      const finalizarExecucao = (origem) => {
+      const finalizarExecucao = (origem, resultado) => {
         if (finalizado) return;
         finalizado = true;
 
@@ -4244,7 +5378,9 @@
 
         state.running = false;
         state.lastFinishedAt = Date.now();
-        limparAbaSuja(aba);
+        const neutro = origem === 'done' && resultado === 'superseded';
+        const sucesso = neutro || (origem === 'done' && resultado !== false);
+        if (!neutro) marcarResultadoAba(aba, sucesso, state.startedDirtyGeneration);
         if (tokenSync) {
           window.AppSyncStatus.finalizar(tokenSync);
         }
@@ -4259,32 +5395,60 @@
           }
         }
 
-        const callbacks = state.pendingCallbacks.splice(0);
+        const callbacks = state.activeCallbacks.splice(0);
         callbacks.forEach(fn => {
           try {
-            fn();
+            fn(neutro ? 'superseded' : sucesso);
           } catch (error) {
             // sem acao
           }
         });
 
+        if (typeof state.activeResolve === 'function') {
+          state.activeResolve(sucesso);
+        }
+        state.activeResolve = null;
+        state.activePromise = null;
+        state.activeForce = false;
+        state.activeIncludeSecondary = false;
+
         if (!state.queued) return;
         const queuedPrefetch = !!state.queuedPrefetch;
+        const queuedForce = !!state.queuedForce;
+        const queuedIncludeSecondary = !!state.queuedIncludeSecondary;
+        state.pendingCallbacks.push(...state.queuedCallbacks.splice(0));
         state.queued = false;
         state.queuedPrefetch = false;
+        state.queuedForce = false;
+        state.queuedIncludeSecondary = false;
+        if (abaPossuiLeaseRefresh(aba)) {
+          state.pendingPrefetch = !!(state.pendingPrefetch || queuedPrefetch);
+          state.pendingForce = !!(state.pendingForce || queuedForce);
+          state.pendingIncludeSecondary = !!(
+            state.pendingIncludeSecondary || queuedIncludeSecondary
+          );
+          state.deferredByLease = true;
+          return;
+        }
         requestSyncAba(aba, {
           immediate: true,
-          prefetch: queuedPrefetch
+          prefetch: queuedPrefetch,
+          force: queuedForce,
+          includeSecondary: queuedIncludeSecondary,
+          markDirty: false
         });
       };
 
       watchdog = setTimeout(() => {
-        finalizarExecucao('timeout');
+        finalizarExecucao('timeout', false);
       }, timeoutMs);
 
       try {
-        executarSincronizacaoForcadaAba(aba, () => {
-          finalizarExecucao('done');
+        executarSincronizacaoAba(aba, resultado => {
+          finalizarExecucao('done', resultado);
+        }, {
+          force: state.activeForce,
+          includeSecondary: state.activeIncludeSecondary
         });
       } catch (error) {
         window.AppDiag?.mark?.('sync.error', {
@@ -4294,7 +5458,7 @@
         if (typeof console !== 'undefined' && console.error) {
           console.error(`[sync] erro ao sincronizar ${aba}`, error);
         }
-        finalizarExecucao('error');
+        finalizarExecucao('error', false);
       }
     };
 
@@ -4326,108 +5490,149 @@
   appTabRefreshApi.clearDirty = limparAbaSuja;
   appTabRefreshApi.isDirty = abaEstaSuja;
   appTabRefreshApi.requestSync = requestSyncAba;
+  appTabRefreshApi.waitForSync = aguardarSyncAba;
+  appTabRefreshApi.acquireLease = adquirirLeaseRefreshAba;
+  appTabRefreshApi.releaseLease = liberarLeaseRefreshAba;
+  appTabRefreshApi.isLeased = abaPossuiLeaseRefresh;
+  appTabRefreshApi.shouldRender = deveRenderizarAba;
+  appTabRefreshApi.markRenderPending = marcarRenderPendenteAba;
+  appTabRefreshApi.notifyRendered = notificarRenderAba;
+  appTabRefreshApi.markInitialized = marcarAbaInicializada;
+  appTabRefreshApi.reportResult = marcarResultadoAba;
+  appTabRefreshApi.getDirtyGeneration = nome => Number(
+    obterEstadoRefreshAba(nome)?.dirtyGeneration || 0
+  );
+  appTabRefreshApi.getState = nome => {
+    const state = obterEstadoRefreshAba(nome);
+    if (!state) return null;
+    return {
+      initialized: state.initialized,
+      dirty: state.dirty,
+      status: state.status,
+      lastSuccessfulAt: state.lastSuccessfulAt,
+      renderRevision: state.renderRevision,
+      renderPending: state.renderPending,
+      leased: state.leases.size > 0
+    };
+  };
   window.AppTabRefresh = appTabRefreshApi;
 
+  function revalidarAbaAtivaAoRetomar() {
+    if (document?.body?.classList?.contains('app-booting')) return;
+    const aba = normalizarNomeAba(obterNomeAbaAtiva());
+    if (!aba || abaPossuiLeaseRefresh(aba) || !deveRecarregarAba(aba, false)) return;
+    requestSyncAba(aba, {
+      immediate: false,
+      delayMs: 240,
+      prefetch: false,
+      force: false,
+      markDirty: false
+    });
+  }
+
+  if (!window.__appResumeRefreshBound) {
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') revalidarAbaAtivaAoRetomar();
+    });
+    window.addEventListener('online', revalidarAbaAtivaAoRetomar);
+    window.__appResumeRefreshBound = true;
+  }
+
   function executarCicloAba(nome) {
-    ensureTabUiInfra(nome);
+    const aba = normalizarNomeAba(nome);
+    if (!aba) return;
+    ensureTabUiInfra(aba);
 
-    if (nome === 'estoque') {
-      const loaded = !!window.EstoqueStore?.isLoaded?.();
-      const recarregar = deveRecarregarAba(nome, !loaded);
-      if (window.EstoqueController) {
-        if (recarregar && loaded && typeof window.EstoqueController.syncFromBackend === 'function') {
-          window.AppTabRefresh?.requestSync?.('estoque', { immediate: true, prefetch: true });
-        } else if (!loaded || recarregar) {
-          window.AppPerf?.measure('tab.estoque.init', () => EstoqueController.init());
-        }
-      }
-      if (typeof aplicarBuscaEstoque === 'function') aplicarBuscaEstoque();
-      return;
-    }
-
-    if (nome === 'dashboard') {
+    if (aba === 'dashboard') {
       const refMes = document.getElementById('dashMesReferencia');
       const mesAtual = getMesAtualReferencia();
       const referenciaVazia = !!refMes && !String(refMes.value || '').trim();
       if (refMes && referenciaVazia) refMes.value = mesAtual;
-      const recarregar = deveRecarregarAba(nome, referenciaVazia);
-      if (window.DashboardController) {
-        if (recarregar || referenciaVazia) {
-          window.AppPerf?.measure('tab.dashboard.refresh', () => DashboardController.init());
-        }
+      const refreshState = obterEstadoRefreshAba(aba);
+      const primeiroCiclo = !refreshState?.controllerInitialized || referenciaVazia || !!refreshState?.renderPending;
+      const recarregar = deveRecarregarAba(aba, referenciaVazia);
+      if (window.DashboardController && primeiroCiclo) {
+        refreshState.controllerInitialized = true;
+        marcarAbaInicializada(aba);
+        const resultado = window.AppPerf?.measure(
+          'tab.dashboard.init',
+          () => DashboardController.init()
+        );
+        if (resultado && typeof resultado.catch === 'function') resultado.catch(() => {});
+      } else if (recarregar) {
+        window.AppTabRefresh?.requestSync?.(aba, {
+          immediate: true,
+          prefetch: false,
+          force: false,
+          markDirty: false
+        });
       }
       return;
     }
 
-    if (nome === 'despesas') {
-      const loaded = !!window.DespesasController?.isLoaded?.();
-      const recarregar = deveRecarregarAba(nome, !loaded);
-      if (window.DespesasController) {
-        if (!loaded || recarregar) {
-          if (recarregar && loaded && typeof window.DespesasController.syncFromBackend === 'function') {
-            window.AppTabRefresh?.requestSync?.('despesas', { immediate: true, prefetch: true });
-          } else {
-            window.AppPerf?.measure('tab.despesas.init', () => DespesasController.init());
-          }
-        }
+    const config = {
+      despesas: {
+        loaded: () => !!window.DespesasController?.isLoaded?.(),
+        controller: () => window.DespesasController,
+        aplicar: onDone => window.DespesasController?.setFiltroTexto?.(
+          buscaStateDespesas.texto,
+          onDone,
+          { refreshFilters: true }
+        )
+      },
+      estoque: {
+        loaded: () => !!window.EstoqueStore?.isLoaded?.(),
+        controller: () => window.EstoqueController,
+        aplicar: onDone => window.aplicarBuscaEstoque?.(onDone)
+      },
+      compras: {
+        loaded: () => !!window.ComprasStore?.isLoaded?.(),
+        controller: () => window.ComprasController,
+        aplicar: onDone => window.aplicarBuscaCompras?.(onDone)
+      },
+      vendas: {
+        loaded: () => !!window.VendasStore?.isLoaded?.(),
+        controller: () => window.VendasController,
+        aplicar: onDone => window.aplicarBuscaVendas?.(onDone)
+      },
+      produtos: {
+        loaded: () => !!window.ProdutosStore?.isLoaded?.(),
+        controller: () => window.ProdutosController,
+        aplicar: onDone => window.aplicarBuscaProdutos?.(onDone)
+      },
+      producao: {
+        loaded: () => !!window.ProducaoStore?.isLoaded?.(),
+        controller: () => window.ProducaoController,
+        aplicar: onDone => window.aplicarBuscaProducao?.(onDone)
       }
-      if (typeof aplicarBuscaDespesas === 'function') aplicarBuscaDespesas();
-      return;
+    }[aba];
+    if (!config) return;
+
+    const loaded = config.loaded();
+    const state = obterEstadoRefreshAba(aba);
+    const recarregar = deveRecarregarAba(aba, false);
+    const controller = config.controller();
+
+    if (!state?.controllerInitialized) {
+      state.controllerInitialized = true;
+      marcarAbaInicializada(aba, { hydrated: loaded });
+      if (controller?.init) {
+        window.AppPerf?.measure(`tab.${aba}.init`, () => controller.init());
+      }
+    } else if (recarregar) {
+      window.AppTabRefresh?.requestSync?.(aba, {
+        immediate: true,
+        prefetch: false,
+        force: false,
+        markDirty: false
+      });
     }
 
-    if (nome === 'compras') {
-      const loaded = !!window.ComprasStore?.isLoaded?.();
-      const recarregar = deveRecarregarAba(nome, !loaded);
-      if (window.ComprasController) {
-        if (recarregar && loaded && typeof window.ComprasController.syncFromBackend === 'function') {
-          window.AppTabRefresh?.requestSync?.('compras', { immediate: true, prefetch: true });
-        } else if (!loaded || recarregar) {
-          window.AppPerf?.measure('tab.compras.init', () => ComprasController.init());
-        }
+    if (loaded) {
+      const precisaRenderizar = !!state?.renderPending || Number(state?.renderRevision || 0) === 0;
+      if (precisaRenderizar) {
+        config.aplicar(() => notificarRenderAba(aba, { changed: true }));
       }
-      if (typeof aplicarBuscaCompras === 'function') aplicarBuscaCompras();
-      return;
-    }
-
-    if (nome === 'vendas') {
-      const loaded = !!window.VendasStore?.isLoaded?.();
-      const recarregar = deveRecarregarAba(nome, !loaded);
-      if (window.VendasController) {
-        if (recarregar && loaded && typeof window.VendasController.syncFromBackend === 'function') {
-          window.AppTabRefresh?.requestSync?.('vendas', { immediate: true, prefetch: true });
-        } else if (!loaded || recarregar) {
-          window.AppPerf?.measure('tab.vendas.init', () => VendasController.init());
-        }
-      }
-      if (typeof aplicarBuscaVendas === 'function') aplicarBuscaVendas();
-      return;
-    }
-
-    if (nome === 'produtos') {
-      const loaded = !!window.ProdutosStore?.isLoaded?.();
-      const recarregar = deveRecarregarAba(nome, !loaded);
-      if (window.ProdutosController) {
-        if (recarregar && loaded && typeof window.ProdutosController.syncFromBackend === 'function') {
-          window.AppTabRefresh?.requestSync?.('produtos', { immediate: true, prefetch: true });
-        } else if (!loaded || recarregar) {
-          window.AppPerf?.measure('tab.produtos.init', () => ProdutosController.init());
-        }
-      }
-      if (typeof aplicarBuscaProdutos === 'function') aplicarBuscaProdutos();
-      return;
-    }
-
-    if (nome === 'producao') {
-      const loaded = !!window.ProducaoStore?.isLoaded?.();
-      const recarregar = deveRecarregarAba(nome, !loaded);
-      if (window.ProducaoController) {
-        if (recarregar && loaded && typeof window.ProducaoController.syncFromBackend === 'function') {
-          window.AppTabRefresh?.requestSync?.('producao', { immediate: true, prefetch: true });
-        } else if (!loaded || recarregar) {
-          window.AppPerf?.measure('tab.producao.init', () => ProducaoController.init());
-        }
-      }
-      if (typeof aplicarBuscaProducao === 'function') aplicarBuscaProducao();
     }
   }
 
@@ -4746,11 +5951,17 @@
     salvarFiltroRapidoNoCache(QUICK_FILTER_PURCHASE_TYPE_KEY, buscaStateCompras.tipo);
   }
 
-  function aplicarBuscaEstoque() {
-    if (!estoqueEstaAtivo()) return;
+  function aplicarBuscaEstoque(onDone) {
+    const concluir = typeof onDone === 'function' ? onDone : null;
+    if (!estoqueEstaAtivo()) {
+      concluir?.();
+      return;
+    }
 
-    if (!window.EstoqueStore || !window.EstoqueUI) return;
-    if (!EstoqueStore.isLoaded()) return;
+    if (!window.EstoqueStore || !window.EstoqueUI || !EstoqueStore.isLoaded()) {
+      concluir?.();
+      return;
+    }
 
     const perf = window.AppPerf?.start('busca.estoque.aplicar');
 
@@ -4769,6 +5980,7 @@
         categoria,
         unidade
       });
+      concluir?.();
       return;
     }
 
@@ -4779,7 +5991,7 @@
       unidade: unidade || undefined
     });
 
-    EstoqueUI.renderLista(lista);
+    EstoqueUI.renderLista(lista, concluir);
     window.AppPerf?.end(perf, {
       total: Array.isArray(lista) ? lista.length : 0,
       texto_len: texto.length,
@@ -4882,14 +6094,24 @@
 
   const aplicarBuscaVendasDebounced = debounce(aplicarBuscaVendas, 350);
 
-  function aplicarBuscaDespesas() {
-    if (!despesasEstaAtivo()) return;
-    if (!window.DespesasController || typeof window.DespesasController.setFiltroTexto !== 'function') return;
-    if (window.DespesasController.isLoaded && !window.DespesasController.isLoaded()) return;
+  function aplicarBuscaDespesas(onDone) {
+    const concluir = typeof onDone === 'function' ? onDone : null;
+    if (!despesasEstaAtivo()) {
+      concluir?.();
+      return;
+    }
+    if (!window.DespesasController || typeof window.DespesasController.setFiltroTexto !== 'function') {
+      concluir?.();
+      return;
+    }
+    if (window.DespesasController.isLoaded && !window.DespesasController.isLoaded()) {
+      concluir?.();
+      return;
+    }
 
     const perf = window.AppPerf?.start('busca.despesas.aplicar');
     const texto = (buscaStateDespesas.texto || '').trim();
-    window.DespesasController.setFiltroTexto(texto);
+    window.DespesasController.setFiltroTexto(texto, concluir);
     window.AppPerf?.end(perf, {
       texto_len: texto.length
     });
@@ -4897,11 +6119,17 @@
 
   const aplicarBuscaDespesasDebounced = debounce(aplicarBuscaDespesas, 350);
 
-  function aplicarBuscaProdutos() {
-    if (!produtosEstaAtivo()) return;
+  function aplicarBuscaProdutos(onDone) {
+    const concluir = typeof onDone === 'function' ? onDone : null;
+    if (!produtosEstaAtivo()) {
+      concluir?.();
+      return;
+    }
 
-    if (!window.ProdutosStore || !window.ProdutosUI) return;
-    if (!ProdutosStore.isLoaded()) return;
+    if (!window.ProdutosStore || !window.ProdutosUI || !ProdutosStore.isLoaded()) {
+      concluir?.();
+      return;
+    }
 
     const perf = window.AppPerf?.start('busca.produtos.aplicar');
 
@@ -4914,6 +6142,7 @@
         skipped_render: true,
         texto_len: texto.length
       });
+      concluir?.();
       return;
     }
 
@@ -4921,7 +6150,7 @@
       texto: texto || undefined
     });
 
-    ProdutosUI.renderLista(lista);
+    ProdutosUI.renderLista(lista, concluir);
     window.AppPerf?.end(perf, {
       total: Array.isArray(lista) ? lista.length : 0,
       texto_len: texto.length
@@ -4930,11 +6159,17 @@
 
   const aplicarBuscaProdutosDebounced = debounce(aplicarBuscaProdutos, 350);
 
-  function aplicarBuscaProducao() {
-    if (!producaoEstaAtivo()) return;
+  function aplicarBuscaProducao(onDone) {
+    const concluir = typeof onDone === 'function' ? onDone : null;
+    if (!producaoEstaAtivo()) {
+      concluir?.();
+      return;
+    }
 
-    if (!window.ProducaoStore || !window.ProducaoUI) return;
-    if (!ProducaoStore.isLoaded()) return;
+    if (!window.ProducaoStore || !window.ProducaoUI || !ProducaoStore.isLoaded()) {
+      concluir?.();
+      return;
+    }
 
     const perf = window.AppPerf?.start('busca.producao.aplicar');
 
@@ -4947,6 +6182,7 @@
         skipped_render: true,
         texto_len: texto.length
       });
+      concluir?.();
       return;
     }
 
@@ -4954,7 +6190,7 @@
       texto: texto || undefined
     });
 
-    ProducaoUI.renderLista(lista);
+    ProducaoUI.renderLista(lista, concluir);
     window.AppPerf?.end(perf, {
       total: Array.isArray(lista) ? lista.length : 0,
       texto_len: texto.length
@@ -5167,14 +6403,23 @@
       if (!aba) return true;
 
       if (aba === 'dashboard') return dashboardPronto();
-      if (aba === 'despesas') return !!window.DespesasController?.isLoaded?.();
-      if (aba === 'estoque') return !!window.EstoqueStore?.isLoaded?.();
-      if (aba === 'compras') return !!window.ComprasStore?.isLoaded?.();
-      if (aba === 'vendas') return !!window.VendasStore?.isLoaded?.();
-      if (aba === 'produtos') return !!window.ProdutosStore?.isLoaded?.();
-      if (aba === 'producao') return !!window.ProducaoStore?.isLoaded?.();
+      const loaded = aba === 'despesas'
+        ? !!window.DespesasController?.isLoaded?.()
+        : aba === 'estoque'
+          ? !!window.EstoqueStore?.isLoaded?.()
+          : aba === 'compras'
+            ? !!window.ComprasStore?.isLoaded?.()
+            : aba === 'vendas'
+              ? !!window.VendasStore?.isLoaded?.()
+              : aba === 'produtos'
+                ? !!window.ProdutosStore?.isLoaded?.()
+                : aba === 'producao'
+                  ? !!window.ProducaoStore?.isLoaded?.()
+                  : true;
+      if (!loaded) return false;
+      const lifecycle = window.AppTabRefresh?.getState?.(aba);
+      return Number(lifecycle?.renderRevision || 0) > 0;
 
-      return true;
     }
 
     function waitForTabReady(tab, options = {}) {
@@ -5202,6 +6447,7 @@
             timer = null;
           }
           window.removeEventListener('app:store:loaded', onStoreLoaded);
+          window.removeEventListener('app:tab:rendered', onTabRendered);
           resolve(!!ok);
         };
 
@@ -5211,6 +6457,12 @@
           if (abaPronta(aba)) {
             finalizar(true);
           }
+        };
+
+        const onTabRendered = evento => {
+          const tabEvento = String(evento?.detail?.tab || '').trim().toLowerCase();
+          if (tabEvento !== aba) return;
+          if (abaPronta(aba)) finalizar(true);
         };
 
         const tick = () => {
@@ -5226,6 +6478,7 @@
         };
 
         window.addEventListener('app:store:loaded', onStoreLoaded);
+        window.addEventListener('app:tab:rendered', onTabRendered);
         tick();
       });
     }
@@ -5240,6 +6493,64 @@
   function finalizarBootVisual() {
     if (!document?.body) return;
     document.body.classList.remove('app-booting');
+  }
+
+  async function carregarContextoInicialAplicacao() {
+    window.AppUserAccess?.apply?.({
+      can_read: true,
+      can_write: false,
+      role: 'viewer',
+      motivo: 'Validando perfil de acesso...'
+    });
+
+    const ambienteDesejado = salvarDbEnvSessaoFront(lerDbEnvSessaoFront());
+    if (window.AppRequest?.call) {
+      try {
+        const payload = await Promise.race([
+          window.AppRequest.call(
+            'obterContextoInicialAplicacao',
+            [ambienteDesejado, false],
+            {
+              context: 'app.bootstrap',
+              errorMessage: 'Falha ao inicializar acesso e ambiente.'
+            }
+          ),
+          new Promise((_, reject) => setTimeout(() => {
+            reject(new Error('Tempo limite ao validar acesso e ambiente.'));
+          }, 7500))
+        ]);
+        const acesso = window.AppUserAccess?.apply?.(payload?.acesso || {}) || payload?.acesso || {};
+        if (acesso?.can_read === false) {
+          return { acesso, bancoDados: null, source: 'bootstrap' };
+        }
+        const bancoDados = window.AppDbEnv?.apply?.(payload?.banco_dados || {}) || payload?.banco_dados || {};
+        salvarDbEnvSessaoFront(bancoDados?.can_toggle ? bancoDados?.effective_env : 'prod');
+        try {
+          window.sessionStorage?.removeItem(DB_ENV_RECONCILE_STORAGE_KEY);
+        } catch (storageError) {
+          // sem acao
+        }
+        return { acesso, bancoDados, source: 'bootstrap' };
+      } catch (error) {
+        window.AppDiag?.mark?.('app.bootstrap.fallback', {
+          message: String(error?.message || error || '')
+        });
+        const acesso = window.AppUserAccess?.apply?.({
+          can_read: false,
+          can_write: false,
+          role: 'viewer',
+          motivo: error?.message || 'Nao foi possivel validar seu acesso e o banco ativo.'
+        }) || { can_read: false };
+        return { acesso, bancoDados: null, source: 'bootstrap-error' };
+      }
+    }
+    const acesso = window.AppUserAccess?.apply?.({
+      can_read: false,
+      can_write: false,
+      role: 'viewer',
+      motivo: 'Backend indisponivel - nao foi possivel validar seu acesso.'
+    }) || { can_read: false };
+    return { acesso, bancoDados: null, source: 'backend-unavailable' };
   }
 
   /* =========================
@@ -5943,29 +7254,20 @@
       syncLongTaskMonitor();
       resetarEstadoInicialFiltros();
 
-      let contextoAcesso = null;
-      if (window.AppUserAccess?.load) {
-        try {
-          contextoAcesso = await window.AppUserAccess.load();
-        } catch (error) {
-          contextoAcesso = null;
-        }
-      }
-
-      if (contextoAcesso && contextoAcesso.can_read === false) return;
-
       if (window.AppDbEnv?.initMenu) {
         window.AppDbEnv.initMenu();
       }
-      if (window.AppDbEnv?.bootstrap) {
-        try {
-          await window.AppDbEnv.bootstrap(contextoAcesso || {});
-        } catch (error) {
-          if (typeof mostrarToast === 'function') {
-            mostrarToast(error?.message || 'Falha ao configurar ambiente de banco de dados.', 'erro');
-          }
+      const contextoInicial = await carregarContextoInicialAplicacao();
+      const contextoAcesso = contextoInicial?.acesso || null;
+      if (contextoAcesso?.can_read === false) return;
+
+      window.dispatchEvent(new CustomEvent('app:bootstrap-ready', {
+        detail: {
+          acesso: contextoAcesso,
+          banco_dados: contextoInicial?.bancoDados || null,
+          source: contextoInicial?.source || ''
         }
-      }
+      }));
 
       initNavbarHamburger();
       registrarListenersFiltrosStore();
@@ -5973,10 +7275,7 @@
       initCampoAjudaA11y();
       const abaInicial = lerUltimaAba() || ABA_INICIAL_PADRAO;
       trocarAba(abaInicial);
-
-      if (window.AppBootGate?.waitForTabReady) {
-        await window.AppBootGate.waitForTabReady(abaInicial, { timeoutMs: 2600 });
-      }
+      finalizarBootVisual();
       preaquecerInfraTabsSecundarias(abaInicial);
     } finally {
       clearTimeout(bootWatchdog);

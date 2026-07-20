@@ -5,6 +5,7 @@ function listarCasosRegressaoSprint3_() {
   return [
     ['sheetRepo:updateById', regressionSheetRepoUpdateById],
     ['ambiente:override-execucao', regressionAmbienteOverrideExecucao],
+    ['acesso:bootstrap-contexto', regressionBootstrapContextoInicial],
     ['cache:app+validacoes+producao', regressionCacheCore],
     ['financeiro:parcelas', regressionFinanceiroParcelas],
     ['producao:agregacao+custo', regressionProducaoCalculos],
@@ -25,6 +26,7 @@ function listarGruposRegressaoSprint3_() {
     parte1: [
       'sheetRepo:updateById',
       'ambiente:override-execucao',
+      'acesso:bootstrap-contexto',
       'cache:app+validacoes+producao',
       'financeiro:parcelas',
       'producao:agregacao+custo'
@@ -622,6 +624,77 @@ function regressionAmbienteOverrideExecucao() {
     return { ok: true };
   } finally {
     DB_ENV_EXECUTION_OVERRIDE_ = ambienteOriginal;
+  }
+}
+
+function regressionBootstrapContextoInicial() {
+  const ambienteOriginal = getUserDbEnvironment_();
+  const acessoNegado = {
+    email: 'negado@regressao.local',
+    role: 'viewer',
+    ativo: false,
+    can_read: false,
+    can_write: false,
+    read_only: true,
+    motivo: 'Fixture de acesso negado.'
+  };
+  const acessoAdmin = {
+    email: 'admin@regressao.local',
+    role: 'admin',
+    ativo: true,
+    can_read: true,
+    can_write: true,
+    read_only: false,
+    motivo: ''
+  };
+  const acessoViewer = {
+    email: 'viewer@regressao.local',
+    role: 'viewer',
+    ativo: true,
+    can_read: true,
+    can_write: false,
+    read_only: true,
+    motivo: 'Perfil somente leitura.'
+  };
+
+  try {
+    const ambienteAntesNegado = getUserDbEnvironment_();
+    const negado = obterContextoInicialAplicacaoComAcesso_(DB_ENV_DEV, acessoNegado);
+    assertRegressao(negado?.acesso === acessoNegado, 'Bootstrap deve preservar o contexto de acesso negado.');
+    assertRegressao(negado?.banco_dados === null, 'Acesso negado nao deve receber contexto de banco.');
+    assertRegressao(
+      getUserDbEnvironment_() === ambienteAntesNegado,
+      'Acesso negado nao deve alterar a preferencia de ambiente.'
+    );
+
+    const adminProd = obterContextoInicialAplicacaoComAcesso_(DB_ENV_PROD, acessoAdmin);
+    assertRegressao(adminProd?.banco_dados?.can_toggle === true, 'Admin deve poder alternar o banco.');
+    assertRegressao(
+      adminProd?.banco_dados?.effective_env === DB_ENV_PROD,
+      'Bootstrap admin PROD deve aplicar o ambiente PROD.'
+    );
+
+    const adminDev = obterContextoInicialAplicacaoComAcesso_(DB_ENV_DEV, acessoAdmin);
+    assertRegressao(
+      adminDev?.banco_dados?.effective_env === DB_ENV_DEV,
+      'Bootstrap admin DEV deve aplicar o ambiente DEV.'
+    );
+
+    const viewerDev = obterContextoInicialAplicacaoComAcesso_(DB_ENV_DEV, acessoViewer);
+    assertRegressao(viewerDev?.banco_dados?.can_toggle === false, 'Viewer nao deve poder alternar o banco.');
+    assertRegressao(
+      viewerDev?.banco_dados?.effective_env === DB_ENV_PROD,
+      'Bootstrap viewer deve ser forcado a PROD mesmo quando DEV foi solicitado.'
+    );
+
+    return {
+      acesso_negado_sem_contexto: true,
+      admin_prod: adminProd.banco_dados.effective_env,
+      admin_dev: adminDev.banco_dados.effective_env,
+      viewer_forcado: viewerDev.banco_dados.effective_env
+    };
+  } finally {
+    setUserDbEnvironment_(ambienteOriginal);
   }
 }
 

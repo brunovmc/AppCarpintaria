@@ -170,7 +170,13 @@ function recarregarCacheEstoque() {
   };
 }
 
-function listarEstoque(forcarRecarregar) {
+function listarEstoque(forcarRecarregar, ambiente) {
+  if (String(ambiente || '').trim()) {
+    if (typeof executarComAmbienteBancoDadosAutorizado_ !== 'function') {
+      throw new Error('Controle de ambiente indisponivel.');
+    }
+    return executarComAmbienteBancoDadosAutorizado_(ambiente, () => listarEstoque(forcarRecarregar, ''));
+  }
   if (!forcarRecarregar) {
     const cached = lerCacheListaEstoque();
     if (Array.isArray(cached)) {

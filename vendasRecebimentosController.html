@@ -9,6 +9,10 @@
     let carregando = false;
     let processando = false;
     let importando = false;
+    let carregamentoPromise = null;
+    let recargaPendente = false;
+    let carregamentoChave = '';
+    let statusErroOperacao = '';
     let filtro = 'PENDENTES';
     let comprovantes = [];
     let destinos = [];
@@ -89,13 +93,50 @@
 
     function atualizarBotoes() {
       const f = el();
-      const bloqueado = carregando || processando || importando;
-      [f.input, f.btnUpload, f.btnDrive, f.btnAtualizar].forEach(node => {
-        if (node) node.disabled = bloqueado;
-      });
-      if (f.btnUpload) f.btnUpload.textContent = processando ? 'Processando...' : 'Adicionar comprovante';
-      if (f.btnDrive) f.btnDrive.textContent = importando ? 'Buscando...' : 'Buscar no Drive';
-      if (f.btnAtualizar) f.btnAtualizar.textContent = carregando ? 'Atualizando...' : 'Atualizar';
+      if (f.input) f.input.disabled = processando;
+      if (f.btnUpload) {
+        f.btnUpload.disabled = processando;
+        f.btnUpload.textContent = processando ? 'Processando...' : 'Adicionar comprovante';
+        f.btnUpload.setAttribute('aria-busy', processando ? 'true' : 'false');
+      }
+      if (f.btnDrive) {
+        f.btnDrive.disabled = importando;
+        f.btnDrive.textContent = importando ? 'Buscando...' : 'Buscar no Drive';
+        f.btnDrive.setAttribute('aria-busy', importando ? 'true' : 'false');
+      }
+      if (f.btnAtualizar) {
+        f.btnAtualizar.disabled = carregando;
+        f.btnAtualizar.textContent = carregando ? 'Atualizando...' : 'Atualizar';
+        f.btnAtualizar.setAttribute('aria-busy', carregando ? 'true' : 'false');
+      }
+      atualizarStatusOperacoes();
+    }
+
+    function mensagemListaVazia() {
+      return filtro === 'CONCILIADOS'
+        ? 'Nenhum recebimento conciliado.'
+        : filtro === 'TODOS' ? 'Nenhum comprovante encontrado.' : 'Nenhum recebimento pendente.';
+    }
+
+    function atualizarStatusOperacoes() {
+      if (processando) {
+        setStatus('Processando comprovante de recebimento...', 'info');
+      } else if (importando) {
+        setStatus('Buscando comprovantes na pasta do Drive...', 'info');
+      } else if (carregando) {
+        setStatus(comprovantes.length ? 'Atualizando recebimentos...' : 'Carregando recebimentos...', 'info');
+      } else if (statusErroOperacao) {
+        setStatus(statusErroOperacao, 'erro');
+      } else if (!comprovantes.length) {
+        setStatus(mensagemListaVazia());
+      } else {
+        setStatus('');
+      }
+    }
+
+    function registrarErroOperacao(mensagem) {
+      statusErroOperacao = String(mensagem || '').trim();
+      atualizarStatusOperacoes();
     }
 
     function bind() {
@@ -191,10 +232,11 @@
       const input = evento?.target;
       const file = input?.files?.[0];
       if (!file || !podeAlterar('Upload bloqueado em modo somente leitura')) return;
+      if (processando) return;
+      statusErroOperacao = '';
       processando = true;
       atualizarBotoes();
       setExpandida(true);
-      setStatus('Processando comprovante de recebimento...', 'info');
       prepararArquivo(file)
         .then(payload => window.AppRequest.call('processarComprovanteRecebimentoUpload', [{
           ...payload,
@@ -208,11 +250,11 @@
           else if (String(item?.status || '').toUpperCase() === 'ERRO') {
             mostrarToast(item?.erro || 'Arquivo recebido, mas a leitura falhou', 'erro');
           } else mostrarToast('Comprovante de recebimento adicionado.');
-          return carregar();
+          return carregar(true);
         })
         .catch(error => {
           mostrarToast(error?.message || 'Erro ao enviar comprovante', 'erro');
-          setStatus(error?.message || 'Erro ao enviar comprovante', 'erro');
+          registrarErroOperacao(error?.message || 'Erro ao enviar comprovante');
         })
         .finally(() => {
           if (input) input.value = '';
@@ -221,15 +263,29 @@
         });
     }
 
-    function carregar() {
+    function carregar(forcar = false) {
       if (!window.AppRequest?.call) return Promise.resolve([]);
+      const filtroSolicitado = filtro;
+      const ambienteSolicitado = ambienteAtivo();
+      const chaveSolicitada = `${ambienteSolicitado}:${filtroSolicitado}`;
+      if (carregamentoPromise) {
+        if (forcar || chaveSolicitada !== carregamentoChave) recargaPendente = true;
+        return carregamentoPromise;
+      }
+
+      carregamentoChave = chaveSolicitada;
+      statusErroOperacao = '';
       carregando = true;
       atualizarBotoes();
-      return window.AppRequest.call('obterContextoComprovantesRecebimentos', [filtro, ambienteAtivo()], {
+      carregamentoPromise = window.AppRequest.call('obterContextoComprovantesRecebimentos', [filtroSolicitado, ambienteSolicitado], {
         context: 'vendas.recebimentos.list',
         errorMessage: 'Erro ao carregar comprovantes de recebimento'
       })
         .then(contexto => {
+          if (filtroSolicitado !== filtro || ambienteSolicitado !== ambienteAtivo()) {
+            recargaPendente = true;
+            return comprovantes;
+          }
           comprovantes = Array.isArray(contexto?.comprovantes) ? contexto.comprovantes : [];
           destinos = Array.isArray(contexto?.destinos) ? contexto.destinos : [];
           resumo = contexto?.resumo && typeof contexto.resumo === 'object' ? contexto.resumo : {};
@@ -237,22 +293,29 @@
           return comprovantes;
         })
         .catch(error => {
-          setStatus(error?.message || 'Erro ao carregar recebimentos', 'erro');
-          return [];
+          registrarErroOperacao(error?.message || 'Erro ao carregar recebimentos');
+          return comprovantes;
         })
         .finally(() => {
+          carregamentoPromise = null;
+          if (recargaPendente) {
+            recargaPendente = false;
+            return carregar(true);
+          }
+          carregamentoChave = '';
           carregando = false;
           atualizarBotoes();
         });
+      return carregamentoPromise;
     }
 
     function importarDrive() {
       if (!podeAlterar('Importacao bloqueada em modo somente leitura') || importando) return;
+      statusErroOperacao = '';
       importando = true;
       atualizarBotoes();
       setExpandida(true);
-      setStatus('Buscando comprovantes na pasta do Drive...', 'info');
-      window.AppRequest.call('importarComprovantesRecebimentosDrive', [5, ambienteAtivo()], {
+      return window.AppRequest.call('importarComprovantesRecebimentosDrive', [5, ambienteAtivo()], {
         context: 'vendas.recebimentos.drive',
         errorMessage: 'Erro ao buscar recebimentos no Drive'
       })
@@ -260,11 +323,14 @@
           const adicionados = Number(resultado?.adicionados || 0);
           const erros = Number(resultado?.erros || 0);
           mostrarToast(`${adicionados} recebimento${adicionados === 1 ? '' : 's'} adicionado${adicionados === 1 ? '' : 's'}${erros ? `; ${erros} erro(s)` : ''}.`);
-          return carregar();
+          // Uma importacao pode terminar enquanto a listagem anterior ainda
+          // esta em voo. Forcar preserva a intencao e agenda uma segunda
+          // leitura, evitando que o resultado anterior esconda o novo item.
+          return carregar(true);
         })
         .catch(error => {
           mostrarToast(error?.message || 'Erro ao buscar recebimentos', 'erro');
-          setStatus(error?.message || 'Erro ao buscar recebimentos', 'erro');
+          registrarErroOperacao(error?.message || 'Erro ao buscar recebimentos');
         })
         .finally(() => {
           importando = false;
@@ -305,7 +371,7 @@
       return `<div class="despesas-inbox-alertas">${alertas.map(alerta => `<span>${escapeHtml(alerta)}</span>`).join('')}</div>`;
     }
 
-    function montarAlocacoes(item, busy) {
+    function montarAlocacoes(item) {
       const lista = Array.isArray(item?.alocacoes) ? item.alocacoes : [];
       if (!lista.length) return '<span class="despesas-inbox-vazio">Nenhum vinculo registrado.</span>';
       return lista.map(alocacao => `
@@ -314,18 +380,18 @@
             <strong>${escapeHtml(alocacao.origem_rotulo || alocacao.origem_id)}</strong>
             <span>${escapeHtml(formatarMoeda(alocacao.valor_alocado))} · parcela ${Number(alocacao.parcela_numero || 1)}/${Number(alocacao.parcelas_total || 1)}</span>
           </div>
-          <button type="button" class="btn-secundario" onclick="VendasRecebimentosController.desfazer('${escapeHtml(item.ID)}','${escapeHtml(alocacao.pagamento_id)}')" ${busy ? 'disabled' : ''}>Desfazer</button>
+          <button type="button" class="btn-secundario" onclick="VendasRecebimentosController.desfazer('${escapeHtml(item.ID)}','${escapeHtml(alocacao.pagamento_id)}')">Desfazer</button>
         </div>
       `).join('');
     }
 
-    function montarSugestoes(item, busy) {
+    function montarSugestoes(item) {
       const sugestoes = Array.isArray(item?.sugestoes) ? item.sugestoes : [];
       if (!sugestoes.length) return '<div class="despesas-inbox-sugestoes"><span>Nenhuma correspondencia forte encontrada.</span></div>';
       return `<div class="despesas-inbox-sugestoes">
         <span class="despesa-card-resumo-label">Sugestoes</span>
         ${sugestoes.map(sugestao => `
-          <button type="button" class="despesas-inbox-sugestao" onclick="VendasRecebimentosController.selecionarSugestao('${escapeHtml(item.ID)}','${escapeHtml(chaveDestino(sugestao))}')" ${busy ? 'disabled' : ''}>
+          <button type="button" class="despesas-inbox-sugestao" onclick="VendasRecebimentosController.selecionarSugestao('${escapeHtml(item.ID)}','${escapeHtml(chaveDestino(sugestao))}')">
             <strong>${escapeHtml(sugestao.label || '')}</strong>
             <span>${Number(sugestao.score || 0)}% · ${escapeHtml((sugestao.motivos || []).join(', '))}</span>
           </button>
@@ -339,7 +405,6 @@
       const alocado = Number(item?.valor_alocado || 0);
       const saldo = Number(item?.saldo_nao_alocado || 0);
       const conciliado = saldo <= 0.009 && Number(item?.valor_total || 0) > 0;
-      const busy = busyIds.has(id);
       const confianca = Math.round(Number(item?.confianca || 0) * 100);
       const dataRecebimento = window.AppListOrderUI?.formatDate?.(
         item?.data_recebimento || item?.criado_em
@@ -378,18 +443,18 @@
           </div>
           <label class="campo-ajuda-wrap despesas-inbox-observacao"><span class="campo-ajuda-tag">Observacao</span><textarea data-campo="observacao">${escapeHtml(item?.observacao || '')}</textarea></label>
         </details>
-        <div class="despesas-inbox-vinculos"><span class="despesa-card-resumo-label">Vinculos registrados</span>${montarAlocacoes(item, busy)}</div>
+        <div class="despesas-inbox-vinculos"><span class="despesa-card-resumo-label">Vinculos registrados</span>${montarAlocacoes(item)}</div>
         ${!conciliado ? `
-          ${montarSugestoes(item, busy)}
+          ${montarSugestoes(item)}
           <div class="despesas-inbox-conciliar">
             <label class="campo-ajuda-wrap despesas-inbox-destino"><span class="campo-ajuda-tag">Vincular saldo a</span><select data-campo="destino_vinculo" onchange="VendasRecebimentosController.atualizarValorDestino('${escapeHtml(id)}')">${montarOptionsDestino(item)}</select></label>
             <label class="campo-ajuda-wrap despesas-inbox-valor-vinculo"><span class="campo-ajuda-tag">Valor deste vinculo (R$)</span><input data-campo="valor_alocado" type="number" min="0.01" max="${escapeHtml(saldo)}" step="0.01" value="${saldo > 0 ? escapeHtml(saldo.toFixed(2)) : ''}"></label>
-            <button type="button" onclick="VendasRecebimentosController.vincular('${escapeHtml(id)}')" ${busy ? 'disabled' : ''}>Vincular recebimento</button>
+            <button type="button" onclick="VendasRecebimentosController.vincular('${escapeHtml(id)}')">Vincular recebimento</button>
           </div>
           <div class="despesas-inbox-card-acoes">
-            <button type="button" class="btn-secundario" onclick="VendasRecebimentosController.salvarRevisao('${escapeHtml(id)}')" ${busy ? 'disabled' : ''}>Salvar revisao</button>
-            <button type="button" class="btn-secundario" onclick="VendasRecebimentosController.criarVenda('${escapeHtml(id)}')" ${busy ? 'disabled' : ''}>Criar venda e vincular</button>
-            <button type="button" class="btn-perigo" onclick="VendasRecebimentosController.descartar('${escapeHtml(id)}')" ${busy || alocado > 0.009 ? 'disabled' : ''}>Descartar</button>
+            <button type="button" class="btn-secundario" onclick="VendasRecebimentosController.salvarRevisao('${escapeHtml(id)}')">Salvar revisao</button>
+            <button type="button" class="btn-secundario" onclick="VendasRecebimentosController.criarVenda('${escapeHtml(id)}')">Criar venda e vincular</button>
+            <button type="button" class="btn-perigo" onclick="VendasRecebimentosController.descartar('${escapeHtml(id)}')" ${alocado > 0.009 ? 'disabled' : ''}>Descartar</button>
           </div>
         ` : '<div class="despesas-inbox-concluido">Recebimento totalmente conciliado.</div>'}
       `;
@@ -414,16 +479,14 @@
       }
       f.lista.innerHTML = '';
       if (!comprovantes.length) {
-        const vazio = filtro === 'CONCILIADOS'
-          ? 'Nenhum recebimento conciliado.'
-          : filtro === 'TODOS' ? 'Nenhum comprovante encontrado.' : 'Nenhum recebimento pendente.';
-        setStatus(carregando ? 'Carregando recebimentos...' : vazio, carregando ? 'info' : '');
+        atualizarStatusOperacoes();
         return;
       }
-      setStatus('');
       const fragmento = document.createDocumentFragment();
       comprovantes.forEach(item => fragmento.appendChild(montarCard(item)));
       f.lista.appendChild(fragmento);
+      busyIds.forEach(id => setBusy(id, true));
+      atualizarStatusOperacoes();
     }
 
     function getCard(id) {
@@ -460,7 +523,23 @@
     function setBusy(id, ativo) {
       const alvo = String(id || '').trim();
       if (ativo) busyIds.add(alvo); else busyIds.delete(alvo);
-      getCard(alvo)?.querySelectorAll('button, input, select, textarea').forEach(node => { node.disabled = !!ativo; });
+      const card = getCard(alvo);
+      if (!card) return;
+      card.classList.toggle('is-busy', !!ativo);
+      card.setAttribute('aria-busy', ativo ? 'true' : 'false');
+      card.querySelectorAll('button, input, select, textarea').forEach(node => {
+        if (ativo) {
+          if (!Object.prototype.hasOwnProperty.call(node.dataset, 'busyWasDisabled')) {
+            node.dataset.busyWasDisabled = node.disabled ? '1' : '0';
+          }
+          node.disabled = true;
+          return;
+        }
+        if (Object.prototype.hasOwnProperty.call(node.dataset, 'busyWasDisabled')) {
+          node.disabled = node.dataset.busyWasDisabled === '1';
+          delete node.dataset.busyWasDisabled;
+        }
+      });
     }
 
     function destinoSelecionado(id) {
@@ -492,9 +571,15 @@
     }
 
     function atualizarAposConciliacao() {
-      carregar();
+      const recarga = carregar(true);
       window.VendasController?.syncFromBackend?.();
-      window.DashboardController?.atualizar?.(true);
+      window.DashboardController?.invalidarCacheMeses?.();
+      window.AppTabRefresh?.requestSync?.('dashboard', {
+        delayMs: 420,
+        prefetch: true,
+        markDirty: false
+      });
+      return recarga;
     }
 
     function vincular(id) {
@@ -530,7 +615,7 @@
         .then(resultado => {
           if (!resultado?.ok) throw new Error('O vinculo nao foi confirmado pelo servidor.');
           mostrarToast('Recebimento vinculado com sucesso.');
-          atualizarAposConciliacao();
+          return atualizarAposConciliacao();
         })
         .catch(error => mostrarToast(error?.message || 'Erro ao vincular recebimento', 'erro'))
         .finally(() => setBusy(id, false));
@@ -551,7 +636,7 @@
         .then(resultado => {
           if (!resultado?.ok) throw new Error('A revisao nao foi confirmada.');
           mostrarToast('Revisao do recebimento salva.');
-          carregar();
+          return carregar(true);
         })
         .catch(error => mostrarToast(error?.message || 'Erro ao salvar revisao', 'erro'))
         .finally(() => setBusy(id, false));
@@ -586,7 +671,7 @@
         .then(resultado => {
           if (!resultado?.ok) throw new Error('O vinculo nao foi removido.');
           mostrarToast('Vinculo de recebimento desfeito.');
-          atualizarAposConciliacao();
+          return atualizarAposConciliacao();
         })
         .catch(error => mostrarToast(error?.message || 'Erro ao desfazer vinculo', 'erro'))
         .finally(() => setBusy(id, false));
@@ -600,7 +685,10 @@
         context: 'vendas.recebimentos.discard',
         errorMessage: 'Erro ao descartar recebimento'
       })
-        .then(() => { mostrarToast('Comprovante descartado.'); carregar(); })
+        .then(() => {
+          mostrarToast('Comprovante descartado.');
+          return carregar(true);
+        })
         .catch(error => mostrarToast(error?.message || 'Erro ao descartar recebimento', 'erro'))
         .finally(() => setBusy(id, false));
     }

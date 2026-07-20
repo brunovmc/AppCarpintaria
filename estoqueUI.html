@@ -11,6 +11,7 @@
     let qtdRenderizada = 0;
     let carregandoMais = false;
     let renderJobSeq = 0;
+    let renderListaWaiters = [];
 
     const PAGE_SIZE = 30;
     const RENDER_CHUNK_SIZE = 8;
@@ -893,6 +894,28 @@
       proximoFrame(processarChunk);
     }
 
+    function revelarRegistro(idOuOpcoes) {
+      const id = String(
+        (idOuOpcoes && typeof idOuOpcoes === 'object' ? idOuOpcoes.id : idOuOpcoes) || ''
+      ).trim();
+      const indice = listaFiltradaAtual.findIndex(item => String(item?.ID || '').trim() === id);
+      if (!id || indice < 0) return Promise.resolve(false);
+      return new Promise(resolve => {
+        const avancar = () => {
+          if (indice < qtdRenderizada) {
+            resolve(true);
+            return;
+          }
+          if (carregandoMais) {
+            setTimeout(avancar, 32);
+            return;
+          }
+          renderMaisItens(avancar);
+        };
+        avancar();
+      });
+    }
+
     function normalizarTipos(lista) {
       const unicos = [];
       limparVazios(lista).forEach(v => {
@@ -980,9 +1003,19 @@
     /* =========================
        LISTA + CARDS
     ========================== */
-    function renderLista(itens) {
+    function renderLista(itens, onDone) {
       const { lista, listaControles } = el();
-      if (!lista) return;
+      if (!lista) {
+        if (typeof onDone === 'function') onDone();
+        return;
+      }
+      if (typeof onDone === 'function') renderListaWaiters.push(onDone);
+      const concluirRenderLista = () => {
+        const waiters = renderListaWaiters.splice(0);
+        waiters.forEach(waiter => {
+          try { waiter(); } catch (error) { /* sem acao */ }
+        });
+      };
       lista.classList.remove('lista-loading');
       lista.setAttribute('aria-busy', 'false');
 
@@ -1004,6 +1037,7 @@
         }
         lista.innerHTML = '<p>Nenhum item no estoque.</p>';
         window.AppPerf?.end(perf, { vazio: true });
+        concluirRenderLista();
         return;
       }
 
@@ -1013,6 +1047,7 @@
           total: listaFiltradaAtual.length
         });
         atualizarModalDetalhesSeAberto();
+        concluirRenderLista();
       });
     }
 
@@ -1056,6 +1091,7 @@
       handleCustoUnitarioInput,
       handleCustoTotalInput,
       renderLista,
+      revelarRegistro,
 
       renderTipos,
       renderUnidades,

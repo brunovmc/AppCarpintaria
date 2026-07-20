@@ -1147,6 +1147,28 @@
       proximoFrame(processarChunk);
     }
 
+    function revelarRegistro(idOuOpcoes) {
+      const id = String(
+        (idOuOpcoes && typeof idOuOpcoes === 'object' ? idOuOpcoes.id : idOuOpcoes) || ''
+      ).trim();
+      const indice = listaFiltradaAtual.findIndex(item => String(item?.ID || '').trim() === id);
+      if (!id || indice < 0) return Promise.resolve(false);
+      return new Promise(resolve => {
+        const avancar = () => {
+          if (indice < qtdRenderizada) {
+            resolve(true);
+            return;
+          }
+          if (carregandoMais) {
+            setTimeout(avancar, 32);
+            return;
+          }
+          renderMaisItens(avancar);
+        };
+        avancar();
+      });
+    }
+
     function normalizarTipos(lista) {
       const unicos = [];
       limparVazios(lista).forEach(v => {
@@ -1501,6 +1523,7 @@
       handleFormaPagamentoChange,
       handleParcelasConfigChange,
       renderLista,
+      revelarRegistro,
 
       renderTipos,
       renderUnidades,
