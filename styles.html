@@ -1068,6 +1068,210 @@
     margin-top: 8px;
   }
 
+  .despesas-inbox-filtro {
+    min-width: 132px;
+    margin: 0;
+  }
+
+  .despesas-inbox-filtro select {
+    margin: 0;
+  }
+
+  .despesa-inbox-item.is-busy {
+    opacity: 0.72;
+  }
+
+  .despesa-inbox-item-parcial {
+    border-color: #bfdbfe;
+  }
+
+  .despesa-inbox-item-conciliado {
+    border-color: #bbf7d0;
+    background: #fbfffc;
+  }
+
+  .despesa-inbox-item-parcial .despesa-inbox-badge {
+    border-color: #bfdbfe;
+    background: #eff6ff;
+    color: #1d4ed8;
+  }
+
+  .despesa-inbox-item-conciliado .despesa-inbox-badge {
+    border-color: #bbf7d0;
+    background: #f0fdf4;
+    color: #166534;
+  }
+
+  .despesas-inbox-valores {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+    margin: 10px 0;
+  }
+
+  .despesas-inbox-valores div {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 8px 10px;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    background: #f8fafc;
+  }
+
+  .despesas-inbox-valores span,
+  .despesas-inbox-vazio {
+    color: #64748b;
+    font-size: 12px;
+  }
+
+  .despesas-inbox-valores strong {
+    color: #172033;
+    font-size: 14px;
+  }
+
+  .despesas-inbox-dados {
+    margin: 10px 0;
+    border-top: 1px solid #e2e8f0;
+    border-bottom: 1px solid #e2e8f0;
+    padding: 8px 0;
+  }
+
+  .despesas-inbox-dados summary {
+    cursor: pointer;
+    color: #334155;
+    font-size: 12.5px;
+    font-weight: 800;
+  }
+
+  .despesas-inbox-dados[open] summary {
+    margin-bottom: 8px;
+  }
+
+  .despesas-inbox-vinculos,
+  .despesas-inbox-sugestoes {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-top: 10px;
+  }
+
+  .despesas-inbox-alocacao {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 8px 10px;
+    border: 1px solid #dbeafe;
+    border-radius: 8px;
+    background: #f8fbff;
+  }
+
+  .despesas-inbox-alocacao div {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+  }
+
+  .despesas-inbox-alocacao strong,
+  .despesas-inbox-alocacao span {
+    overflow-wrap: anywhere;
+  }
+
+  .despesas-inbox-alocacao strong {
+    color: #1e3a5f;
+    font-size: 12.5px;
+  }
+
+  .despesas-inbox-alocacao span {
+    color: #475569;
+    font-size: 12px;
+  }
+
+  .despesas-inbox-alocacao .despesas-inbox-legado {
+    color: #64748b;
+    font-size: 11.5px;
+    font-style: italic;
+  }
+
+  .despesas-inbox-alocacao button,
+  .despesas-inbox-sugestao {
+    width: auto;
+    margin: 0;
+  }
+
+  .despesas-inbox-sugestao {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 10px;
+    border: 1px solid #e2e8f0;
+    background: #fff;
+    color: #334155;
+    text-align: left;
+  }
+
+  .despesas-inbox-sugestao:hover {
+    border-color: #93c5fd;
+    background: #eff6ff;
+  }
+
+  .despesas-inbox-sugestao strong {
+    font-size: 12.5px;
+  }
+
+  .despesas-inbox-sugestao span {
+    color: #64748b;
+    font-size: 11.5px;
+  }
+
+  .despesas-inbox-conciliar {
+    display: grid;
+    grid-template-columns: minmax(220px, 1fr) minmax(150px, 0.35fr) auto;
+    align-items: end;
+    gap: 8px;
+    margin-top: 10px;
+    padding: 10px;
+    border: 1px solid #dbe3ef;
+    border-radius: 8px;
+    background: #f8fafc;
+  }
+
+  .despesas-inbox-conciliar .campo-ajuda-wrap,
+  .despesas-inbox-conciliar button {
+    margin: 0;
+  }
+
+  .despesas-inbox-conciliar button {
+    width: auto;
+    white-space: nowrap;
+  }
+
+  .despesas-inbox-card-acoes .btn-secundario,
+  .despesas-inbox-alocacao .btn-secundario {
+    border: 1px solid #cbd5e1;
+    background: #fff;
+    color: #334155;
+  }
+
+  .despesas-inbox-card-acoes .btn-perigo {
+    border: 1px solid #fecaca;
+    background: #fff;
+    color: #b91c1c;
+  }
+
+  .despesas-inbox-concluido {
+    margin-top: 10px;
+    padding: 8px 10px;
+    border: 1px solid #bbf7d0;
+    border-radius: 8px;
+    background: #f0fdf4;
+    color: #166534;
+    font-size: 12.5px;
+    font-weight: 700;
+  }
+
   .despesas-resumo-linha {
     margin: 6px 0 10px;
     padding: 8px 10px;
@@ -1641,6 +1845,18 @@
       grid-template-columns: 1fr;
     }
 
+    .despesas-inbox-conciliar {
+      grid-template-columns: 1fr;
+    }
+
+    .despesas-inbox-conciliar button {
+      width: 100%;
+    }
+
+    .despesas-inbox-sugestao {
+      flex-direction: column;
+    }
+
     .tipo-filtro-linha {
       min-height: 72px;
     }
@@ -1651,6 +1867,15 @@
   }
 
   @media (max-width: 560px) {
+    .despesas-inbox-valores {
+      grid-template-columns: 1fr;
+    }
+
+    .despesas-inbox-alocacao {
+      align-items: stretch;
+      flex-direction: column;
+    }
+
     .despesa-card-header {
       flex-direction: column;
       align-items: flex-start;
@@ -4438,6 +4663,165 @@
     .dashx-shell *::after {
       animation-duration: 0.01ms !important;
       transition-duration: 0.01ms !important;
+    }
+  }
+
+  .compras-documentos-inbox {
+    margin: 14px 0 20px;
+  }
+
+  .compras-documentos-inbox a {
+    color: #286a62;
+    font-weight: 700;
+  }
+
+  .compras-documentos-inbox .despesas-inbox-status button {
+    display: inline-flex;
+    font-size: 11px;
+    margin: 0 0 0 5px;
+    padding: 5px 8px;
+    width: auto;
+  }
+
+  .compra-documento-card {
+    display: grid;
+    gap: 16px;
+  }
+
+  .compra-documento-grid,
+  .compra-documento-item-grid {
+    display: grid;
+    gap: 11px;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .compra-documento-grid .campo-ajuda-wrap,
+  .compra-documento-item-grid .campo-ajuda-wrap,
+  .compras-documento-observacao {
+    margin: 0;
+  }
+
+  .compra-documento-checks {
+    align-items: center;
+    background: #f4f8f6;
+    border: 1px solid #dce9e4;
+    border-radius: 12px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px 22px;
+    padding: 12px 14px;
+  }
+
+  .compra-documento-checks label,
+  .compra-documento-item-recebido {
+    align-items: center;
+    color: #3f5753;
+    display: inline-flex;
+    font-size: 13px;
+    font-weight: 700;
+    gap: 7px;
+  }
+
+  .compra-documento-checks input,
+  .compra-documento-item-recebido input {
+    height: 17px;
+    margin: 0;
+    width: 17px;
+  }
+
+  .compra-documento-pagamento {
+    background: #fff9ed;
+    border: 1px solid #ead9b5;
+    border-radius: 12px;
+    display: grid;
+    gap: 11px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    padding: 12px;
+  }
+
+  .compra-documento-pagamento .campo-ajuda-wrap {
+    margin: 0;
+  }
+
+  .compra-documento-itens-head {
+    align-items: baseline;
+    border-bottom: 1px solid #dce5e1;
+    display: flex;
+    gap: 10px;
+    justify-content: space-between;
+    padding-bottom: 8px;
+  }
+
+  .compra-documento-itens-head strong {
+    color: #223b36;
+    font: 800 14px 'Manrope', sans-serif;
+  }
+
+  .compra-documento-itens-head span {
+    color: #71817d;
+    font-size: 12px;
+  }
+
+  .compra-documento-itens-head button,
+  .compra-documento-item-origem button {
+    display: inline-flex;
+    font-size: 11px;
+    padding: 6px 9px;
+    width: auto;
+  }
+
+  .compra-documento-itens {
+    display: grid;
+    gap: 12px;
+  }
+
+  .compra-documento-item {
+    background: #f8faf9;
+    border: 1px solid #dfe8e4;
+    border-radius: 13px;
+    display: grid;
+    gap: 12px;
+    padding: 13px;
+  }
+
+  .compra-documento-item-origem {
+    align-items: baseline;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 10px;
+  }
+
+  .compra-documento-item-origem strong {
+    color: #263f39;
+    font-size: 13px;
+  }
+
+  .compra-documento-item-origem span {
+    color: #7a8b86;
+    font-size: 11px;
+  }
+
+  .compra-documento-item-origem button {
+    margin-left: auto;
+  }
+
+  @media (max-width: 980px) {
+    .compra-documento-grid,
+    .compra-documento-item-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+
+  @media (max-width: 620px) {
+    .compra-documento-grid,
+    .compra-documento-item-grid,
+    .compra-documento-pagamento {
+      grid-template-columns: 1fr;
+    }
+
+    .compra-documento-itens-head {
+      align-items: flex-start;
+      flex-direction: column;
     }
   }
 </style>

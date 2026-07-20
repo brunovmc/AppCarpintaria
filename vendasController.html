@@ -7,6 +7,7 @@
     let mutationLockTokenRecebimento = null;
     let recebimentoVendaId = null;
     let salvandoRecebimento = false;
+    let contextoNovaVendaRecebimento = null;
     let listenerMutacoesRegistrado = false;
 
     let validacoes = {};
@@ -86,7 +87,10 @@
       const payload = dados ? { ...dados } : {};
       const editando = !!opcoes.editando;
       editandoId = editando ? String(opcoes.id || '') : null;
-      VendasUI.preencherFormulario(payload);
+      VendasUI.preencherFormulario(payload, contextoNovaVendaRecebimento ? {
+        nova: true,
+        titulo: 'Nova venda a partir do recebimento'
+      } : {});
       VendasUI.mostrarFormulario();
     }
 
@@ -199,9 +203,7 @@
           quantidade_pagamentos: atualizado.quantidade_pagamentos,
           data_ultimo_pagamento: atualizado.data_ultimo_pagamento,
           forma_ultimo_pagamento: atualizado.forma_ultimo_pagamento,
-          parcelas_detalhe: atualizado.parcelas_detalhe,
-          estoque_baixado: true,
-          data_baixa_estoque: atualizado.data_pagamento || base?.data_baixa_estoque || ''
+          parcelas_detalhe: atualizado.parcelas_detalhe
         };
       }
 
@@ -213,9 +215,7 @@
         total_pendente: Math.max(0, totalPrevisto - totalPago),
         status_pagamento: totalPago >= totalPrevisto ? 'PAGO' : 'PARCIAL',
         data_pagamento: String(payload?.data_pagamento || '').trim() || base?.data_pagamento || '',
-        forma_pagamento: String(payload?.forma_pagamento || '').trim() || base?.forma_pagamento || '',
-        estoque_baixado: true,
-        data_baixa_estoque: String(payload?.data_pagamento || '').trim() || base?.data_baixa_estoque || ''
+        forma_pagamento: String(payload?.forma_pagamento || '').trim() || base?.forma_pagamento || ''
       };
     }
 
@@ -356,6 +356,7 @@
       carregarValidacoes();
       carregarEstoqueVendavel();
       carregarVendas();
+      window.VendasRecebimentosController?.init?.();
       iniciado = true;
     }
 
@@ -372,6 +373,7 @@
 
           VendasUI.renderRecebidosPor?.(validacoes.pagosPor);
           VendasUI.renderFormasPagamento?.(validacoes.formasPagamento);
+          window.VendasRecebimentosController?.setValidacoes?.(validacoes);
         })
         .catch(() => {
           validacoes = {};
@@ -440,6 +442,8 @@
         estoque_id: String(get('vendaEstoqueItem') || '').trim(),
         quantidade: parseNumeroInput(get('vendaQuantidade')),
         valor_total_venda: parseNumeroInput(get('vendaValorTotal')),
+        cliente: String(get('vendaCliente') || '').trim(),
+        referencia_venda: String(get('vendaReferencia') || '').trim(),
         recebido_por: String(get('vendaRecebidoPor') || '').trim(),
         data_venda: String(get('vendaData') || '').trim(),
         forma_pagamento: String(get('vendaFormaPagamento') || '').trim(),
@@ -485,6 +489,12 @@
         }
       }
       dados.parcelas_detalhe = parcelasDetalhe;
+      dadosFormulario.parcelas_detalhe = parcelasDetalhe;
+
+      if (contextoNovaVendaRecebimento && !editandoId) {
+        salvarNovaVendaDoComprovante(dados, dadosFormulario);
+        return;
+      }
 
       setSalvando(true);
       const eraEdicao = !!editandoId;
@@ -538,8 +548,105 @@
       VendasUI.fecharFormulario();
     }
 
+    function gerarClientRequestIdNovaVendaRecebimento(id) {
+      const base = String(id || '').trim().slice(-12);
+      const aleatorio = globalThis.crypto?.randomUUID?.() || `${Date.now()}_${Math.random().toString(16).slice(2)}`;
+      return `RECVENDA_${base}_${aleatorio}`.replace(/[^a-zA-Z0-9_-]+/g, '').slice(0, 112);
+    }
+
+    function criarVendaParaComprovanteRecebimento(comprovante, payloadRevisado) {
+      if (!podeAlterarDados('Criacao de venda bloqueada em modo somente leitura')) return;
+      const item = { ...(comprovante || {}), ...(payloadRevisado || {}) };
+      const comprovanteId = String(item.ID || comprovante?.ID || '').trim();
+      if (!comprovanteId) {
+        mostrarToast('Comprovante de recebimento invalido', 'erro');
+        return;
+      }
+      contextoNovaVendaRecebimento = {
+        comprovante: item,
+        client_request_id: gerarClientRequestIdNovaVendaRecebimento(comprovanteId)
+      };
+      editandoId = null;
+      VendasUI.resetFormulario();
+      VendasUI.preencherFormulario({
+        cliente: item.pagador_nome || '',
+        referencia_venda: item.referencia_transacao || '',
+        valor_total_venda: Number(item.saldo_nao_alocado || item.valor_total || 0),
+        recebido_por: item.recebido_por || '',
+        data_venda: item.data_recebimento || '',
+        forma_pagamento: item.forma_pagamento || '',
+        parcelas: 1,
+        observacao: item.descricao || item.observacao || ''
+      }, {
+        nova: true,
+        titulo: 'Nova venda a partir do recebimento'
+      });
+      VendasUI.mostrarFormulario();
+    }
+
+    function salvarNovaVendaDoComprovante(dados, dadosFormulario) {
+      const contexto = contextoNovaVendaRecebimento;
+      const comprovante = contexto?.comprovante || {};
+      const comprovanteId = String(comprovante.ID || '').trim();
+      if (!comprovanteId || !window.AppRequest?.call) {
+        contextoNovaVendaRecebimento = null;
+        mostrarToast('Contexto do comprovante indisponivel', 'erro');
+        return;
+      }
+      setSalvando(true);
+      const saldo = Math.max(0,
+        Number(comprovante.valor_total || 0) - Number(comprovante.valor_alocado || 0)
+      );
+      const payloadRecebimento = {
+        pagador_nome: comprovante.pagador_nome || '',
+        banco_pagador: comprovante.banco_pagador || '',
+        recebido_por: dados.recebido_por || comprovante.recebido_por || '',
+        valor_total: Number(comprovante.valor_total || saldo),
+        data_recebimento: comprovante.data_recebimento || dados.data_venda,
+        forma_pagamento: comprovante.forma_pagamento || dados.forma_pagamento,
+        referencia_transacao: comprovante.referencia_transacao || '',
+        descricao: comprovante.descricao || '',
+        observacao: comprovante.observacao || '',
+        valor_alocado: Math.min(saldo, Number(dados.valor_total_venda || 0)),
+        client_request_id: contexto.client_request_id,
+        _db_env: getAmbienteBancoAtivoVendas_()
+      };
+      window.AppRequest.call('criarVendaEAlocarComprovanteRecebimento', [
+        comprovanteId,
+        dados,
+        payloadRecebimento
+      ], {
+        context: 'vendas.recebimentos.create-sale',
+        errorMessage: 'Erro ao criar venda e vincular recebimento'
+      })
+        .then(resultado => {
+          if (!resultado?.ok || !resultado?.venda?.ID) {
+            throw new Error('A venda e o recebimento nao foram confirmados pelo servidor.');
+          }
+          contextoNovaVendaRecebimento = null;
+          setSalvando(false);
+          finalizarUX();
+          carregarVendas(true);
+          window.VendasRecebimentosController?.carregar?.();
+          window.DashboardController?.atualizar?.(true);
+          mostrarToast('Venda criada e recebimento vinculado.');
+        })
+        .catch(error => {
+          setSalvando(false);
+          mostrarToast(error?.message || 'Erro ao criar venda pelo comprovante', 'erro');
+          reabrirFormularioAposErro(dadosFormulario, { editando: false });
+        });
+    }
+
+    function getAmbienteBancoAtivoVendas_() {
+      const contexto = window.AppDbEnv?.getContext?.() || {};
+      const env = String(contexto.effective_env || contexto.selected_env || '').trim().toLowerCase();
+      return env === 'dev' ? 'dev' : 'prod';
+    }
+
     function editar(id) {
       if (!podeAlterarDados('Edicao bloqueada em modo somente leitura')) return;
+      contextoNovaVendaRecebimento = null;
       const item = VendasStore.getById(id);
       if (!item) {
         mostrarToast('Venda nao encontrada', 'erro');
@@ -615,6 +722,34 @@
       if (!abriu) {
         recebimentoVendaId = null;
       }
+    }
+
+    function baixarEstoque(id) {
+      if (!podeAlterarDados('Baixa de estoque bloqueada em modo somente leitura')) return;
+      const vendaId = String(id || '').trim();
+      const item = VendasStore.getById(vendaId);
+      if (!item) {
+        mostrarToast('Venda nao encontrada', 'erro');
+        return;
+      }
+      if (item.estoque_baixado) {
+        mostrarToast('O estoque desta venda ja foi baixado.');
+        return;
+      }
+      if (!confirm(`Baixar ${Number(item.quantidade || 0).toFixed(2)} ${item.unidade || ''} do estoque?`)) return;
+      window.AppRequest.call('baixarEstoqueVenda', [vendaId], {
+        context: 'vendas.stock-out',
+        errorMessage: 'Erro ao baixar estoque da venda'
+      })
+        .then(resultado => {
+          if (!resultado?.ok) throw new Error('A baixa de estoque nao foi confirmada.');
+          mostrarToast('Estoque da venda baixado.');
+          VendasUI.fecharModalDetalhes?.();
+          syncFromBackend();
+          window.EstoqueController?.syncFromBackend?.();
+          window.DashboardController?.atualizar?.(true);
+        })
+        .catch(error => mostrarToast(error?.message || 'Erro ao baixar estoque', 'erro'));
     }
 
     function reabrirModalRecebimentoAposErro(vendaId, dados) {
@@ -718,6 +853,7 @@
 
     function limparEdicao() {
       editandoId = null;
+      contextoNovaVendaRecebimento = null;
     }
 
     function syncFromBackend(onDone) {
@@ -729,6 +865,7 @@
       };
       carregarVendas(true, concluir);
       carregarEstoqueVendavel(concluir);
+      window.VendasRecebimentosController?.carregar?.();
     }
 
     return {
@@ -737,8 +874,10 @@
       editar,
       excluir,
       registrarRecebimento,
+      criarVendaParaComprovanteRecebimento,
       confirmarRecebimento,
       cancelarRecebimento,
+      baixarEstoque,
       retryVendaMutation,
       limparEdicao,
       syncFromBackend

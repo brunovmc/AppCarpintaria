@@ -12,6 +12,8 @@ const VENDAS_SCHEMA = [
   'quantidade',
   'valor_unit_venda',
   'valor_total_venda',
+  'cliente',
+  'referencia_venda',
   'recebido_por',
   'data_venda',
   'forma_pagamento',
@@ -181,6 +183,8 @@ function normalizarPayloadVenda(payload, vendaExistente) {
     quantidade,
     valor_unit_venda: valorUnit,
     valor_total_venda: valorTotal,
+    cliente: String(dados.cliente || '').trim().slice(0, 160),
+    referencia_venda: String(dados.referencia_venda || '').trim().slice(0, 160),
     recebido_por: validarRecebidoPorVenda(dados.recebido_por),
     data_venda: dataVenda,
     forma_pagamento: formaPagamento,
@@ -360,6 +364,10 @@ function deletarVenda(id) {
   if (String(atual.estoque_baixado).toLowerCase() === 'true') {
     throw new Error('Nao e permitido excluir venda com estoque ja baixado.');
   }
+  const totalRecebido = calcularTotalPagoOrigemFinanceiro(ORIGEM_TIPO_VENDA, vendaId, true);
+  if (totalRecebido > 0.009) {
+    throw new Error('Desfaca os recebimentos antes de excluir a venda.');
+  }
 
   const ok = updateById(
     ABA_VENDAS,
@@ -374,7 +382,7 @@ function deletarVenda(id) {
   return ok;
 }
 
-function aplicarBaixaEstoqueVendaNoPrimeiroRecebimento(vendaId) {
+function baixarEstoqueVenda(vendaId) {
   assertCanWrite('Baixa de estoque da venda');
   const id = String(vendaId || '').trim();
   if (!id) throw new Error('Venda invalida.');
@@ -390,11 +398,6 @@ function aplicarBaixaEstoqueVendaNoPrimeiroRecebimento(vendaId) {
     }
     if (String(venda.estoque_baixado).toLowerCase() === 'true') {
       return { ok: true, ja_baixado: true };
-    }
-
-    const totalPago = calcularTotalPagoOrigemFinanceiro(ORIGEM_TIPO_VENDA, id, true);
-    if (totalPago <= 0.009) {
-      return { ok: true, ja_baixado: false };
     }
 
     const estoqueId = String(venda.estoque_id || '').trim();
@@ -461,18 +464,23 @@ function aplicarBaixaEstoqueVendaNoPrimeiroRecebimento(vendaId) {
   }
 }
 
+function aplicarBaixaEstoqueVendaNoPrimeiroRecebimento(vendaId) {
+  // Compatibilidade com chamadas antigas. O recebimento financeiro nao chama
+  // mais esta funcao automaticamente; a baixa agora e uma decisao explicita.
+  return baixarEstoqueVenda(vendaId);
+}
+
 function registrarRecebimentoVenda(vendaId, payload) {
   assertCanWrite('Registro de recebimento de venda');
   const id = String(vendaId || '').trim();
   if (!id) throw new Error('Venda invalida.');
 
   const pagamentoCriado = registrarPagamento(ORIGEM_TIPO_VENDA, id, payload);
-  const baixa = aplicarBaixaEstoqueVendaNoPrimeiroRecebimento(id);
   const vendaAtualizada = listarVendas(true).find(i => i.ID === id) || null;
 
   return {
     pagamentoCriado,
-    baixaEstoque: baixa,
+    baixaEstoque: null,
     vendaAtualizada
   };
 }

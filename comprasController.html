@@ -407,6 +407,7 @@
       window.AppOptimistic?.process?.();
       carregarValidacoes();
       carregarCompras();
+      window.ComprasDocumentoController?.init?.();
 
       iniciado = true;
     }
@@ -518,6 +519,7 @@
 
     function syncFromBackend(onDone) {
       carregarCompras(true, onDone);
+      window.ComprasDocumentoController?.carregar?.(true);
     }
 
     function salvar() {
@@ -919,6 +921,11 @@
       }
       if (!isFinite(valorPago) || valorPago <= 0) {
         mostrarToast('Valor pago invalido', 'erro');
+        return;
+      }
+      const pendenteParcela = Number(String(dados.valor_pendente_parcela || '').replace(',', '.'));
+      if (dados.parcelado && isFinite(pendenteParcela) && pendenteParcela > 0 && valorPago > pendenteParcela + 0.009) {
+        mostrarToast('O pagamento nao pode ultrapassar o saldo da parcela selecionada', 'erro');
         return;
       }
       const compraId = pagamentoCompraId;

@@ -1,0 +1,624 @@
+<script>
+  window.VendasRecebimentosController = (() => {
+    const MAX_DATA_URL = 7 * 1024 * 1024;
+    const MAX_DIMENSION = 1600;
+    const JPEG_QUALITY = 0.82;
+    let iniciado = false;
+    let expandida = false;
+    let estadoInicialDefinido = false;
+    let carregando = false;
+    let processando = false;
+    let importando = false;
+    let filtro = 'PENDENTES';
+    let comprovantes = [];
+    let destinos = [];
+    let resumo = {};
+    let validacoes = { pagosPor: [], formasPagamento: [] };
+    const busyIds = new Set();
+
+    function el() {
+      return {
+        root: document.getElementById('recebimentosInbox'),
+        resumo: document.getElementById('recebimentosInboxResumo'),
+        conteudo: document.getElementById('recebimentosInboxConteudo'),
+        status: document.getElementById('recebimentosInboxStatus'),
+        lista: document.getElementById('listaInboxRecebimentos'),
+        input: document.getElementById('inputComprovanteRecebimento'),
+        btnUpload: document.getElementById('btnUploadComprovanteRecebimento'),
+        btnToggle: document.getElementById('btnToggleInboxRecebimentos'),
+        btnDrive: document.getElementById('btnBuscarRecebimentosDrive'),
+        btnAtualizar: document.getElementById('btnAtualizarInboxRecebimentos'),
+        filtro: document.getElementById('filtroInboxRecebimentos')
+      };
+    }
+
+    function escapeHtml(valor) {
+      const div = document.createElement('div');
+      div.textContent = String(valor ?? '');
+      return div.innerHTML;
+    }
+
+    function parseNumero(valor) {
+      if (window.AppDomainUtils?.parseNumeroZero) return window.AppDomainUtils.parseNumeroZero(valor);
+      const numero = Number(String(valor ?? '').replace(',', '.'));
+      return Number.isFinite(numero) ? numero : 0;
+    }
+
+    function podeAlterar(contexto) {
+      return window.AppDomainUtils?.ensureWritable
+        ? window.AppDomainUtils.ensureWritable(contexto)
+        : (window.AppRuntime?.ensureWritable?.(contexto) ?? true);
+    }
+
+    function ambienteAtivo() {
+      const contexto = window.AppDbEnv?.getContext?.() || {};
+      const env = String(contexto.effective_env || contexto.selected_env || '').trim().toLowerCase();
+      return env === 'dev' ? 'dev' : 'prod';
+    }
+
+    function formatarMoeda(valor) {
+      return Number(valor || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+    }
+
+    function setValidacoes(dados) {
+      validacoes = {
+        pagosPor: Array.isArray(dados?.pagosPor) ? dados.pagosPor : [],
+        formasPagamento: Array.isArray(dados?.formasPagamento) ? dados.formasPagamento : []
+      };
+      if (iniciado) render();
+    }
+
+    function setStatus(mensagem, tipo = '') {
+      const node = el().status;
+      if (!node) return;
+      const texto = String(mensagem || '').trim();
+      node.textContent = texto;
+      node.className = `despesas-inbox-status ${tipo ? `despesas-inbox-status-${tipo}` : ''}`.trim();
+      node.classList.toggle('hidden', !texto);
+    }
+
+    function setExpandida(ativa) {
+      expandida = !!ativa;
+      const f = el();
+      f.conteudo?.classList.toggle('hidden', !expandida);
+      if (f.btnToggle) {
+        f.btnToggle.setAttribute('aria-expanded', expandida ? 'true' : 'false');
+        f.btnToggle.textContent = expandida ? 'Recolher' : 'Ver comprovantes';
+      }
+    }
+
+    function atualizarBotoes() {
+      const f = el();
+      const bloqueado = carregando || processando || importando;
+      [f.input, f.btnUpload, f.btnDrive, f.btnAtualizar].forEach(node => {
+        if (node) node.disabled = bloqueado;
+      });
+      if (f.btnUpload) f.btnUpload.textContent = processando ? 'Processando...' : 'Adicionar comprovante';
+      if (f.btnDrive) f.btnDrive.textContent = importando ? 'Buscando...' : 'Buscar no Drive';
+      if (f.btnAtualizar) f.btnAtualizar.textContent = carregando ? 'Atualizando...' : 'Atualizar';
+    }
+
+    function bind() {
+      const f = el();
+      if (!f.root || f.root.dataset.boundRecebimentos === '1') return;
+      f.root.dataset.boundRecebimentos = '1';
+      f.btnUpload?.addEventListener('click', () => {
+        if (podeAlterar('Upload bloqueado em modo somente leitura')) f.input?.click();
+      });
+      f.input?.addEventListener('change', handleArquivo);
+      f.btnToggle?.addEventListener('click', () => setExpandida(!expandida));
+      f.btnAtualizar?.addEventListener('click', () => carregar());
+      f.btnDrive?.addEventListener('click', importarDrive);
+      if (f.filtro) {
+        f.filtro.value = filtro;
+        f.filtro.addEventListener('change', () => {
+          filtro = String(f.filtro.value || 'PENDENTES').trim().toUpperCase();
+          carregar();
+        });
+      }
+    }
+
+    function lerDataUrl(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result || ''));
+        reader.onerror = () => reject(new Error('Nao foi possivel ler o arquivo.'));
+        reader.readAsDataURL(file);
+      });
+    }
+
+    function nomeJpeg(nome) {
+      const base = String(nome || `recebimento-${Date.now()}`);
+      return /\.[a-z0-9]{2,5}$/i.test(base)
+        ? base.replace(/\.[a-z0-9]{2,5}$/i, '.jpg')
+        : `${base}.jpg`;
+    }
+
+    function compactarImagem(file, dataUrl) {
+      return new Promise(resolve => {
+        const imagem = new Image();
+        imagem.onload = () => {
+          try {
+            const larguraOriginal = Number(imagem.naturalWidth || imagem.width || 0);
+            const alturaOriginal = Number(imagem.naturalHeight || imagem.height || 0);
+            if (!larguraOriginal || !alturaOriginal) {
+              resolve({ nome: file.name, mime_type: file.type || 'image/jpeg', data_url: dataUrl });
+              return;
+            }
+            const escala = Math.min(1, MAX_DIMENSION / Math.max(larguraOriginal, alturaOriginal));
+            const canvas = document.createElement('canvas');
+            canvas.width = Math.max(1, Math.round(larguraOriginal * escala));
+            canvas.height = Math.max(1, Math.round(alturaOriginal * escala));
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = '#fff';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(imagem, 0, 0, canvas.width, canvas.height);
+            const jpeg = canvas.toDataURL('image/jpeg', JPEG_QUALITY);
+            const usarJpeg = dataUrl.length > MAX_DATA_URL || jpeg.length < dataUrl.length;
+            resolve({
+              nome: usarJpeg ? nomeJpeg(file.name) : file.name,
+              mime_type: usarJpeg ? 'image/jpeg' : (file.type || 'image/jpeg'),
+              data_url: usarJpeg ? jpeg : dataUrl
+            });
+          } catch (error) {
+            resolve({ nome: file.name, mime_type: file.type || 'image/jpeg', data_url: dataUrl });
+          }
+        };
+        imagem.onerror = () => resolve({ nome: file.name, mime_type: file.type || 'image/jpeg', data_url: dataUrl });
+        imagem.src = dataUrl;
+      });
+    }
+
+    async function prepararArquivo(file) {
+      if (!file) throw new Error('Selecione uma imagem ou PDF.');
+      const mime = String(file.type || '').toLowerCase();
+      if (mime && !(mime.startsWith('image/') || mime === 'application/pdf')) {
+        throw new Error('Use uma imagem ou PDF.');
+      }
+      const dataUrl = await lerDataUrl(file);
+      if (mime === 'application/pdf') {
+        if (dataUrl.length > MAX_DATA_URL) throw new Error('PDF muito grande. Use um arquivo de ate aproximadamente 5 MB.');
+        return { nome: file.name, mime_type: mime, data_url: dataUrl };
+      }
+      const preparado = await compactarImagem(file, dataUrl);
+      if (String(preparado.data_url || '').length > MAX_DATA_URL) {
+        throw new Error('Imagem muito grande. Tente recortar ou reduzir a foto.');
+      }
+      return preparado;
+    }
+
+    function handleArquivo(evento) {
+      const input = evento?.target;
+      const file = input?.files?.[0];
+      if (!file || !podeAlterar('Upload bloqueado em modo somente leitura')) return;
+      processando = true;
+      atualizarBotoes();
+      setExpandida(true);
+      setStatus('Processando comprovante de recebimento...', 'info');
+      prepararArquivo(file)
+        .then(payload => window.AppRequest.call('processarComprovanteRecebimentoUpload', [{
+          ...payload,
+          _db_env: ambienteAtivo()
+        }], {
+          context: 'vendas.recebimentos.upload',
+          errorMessage: 'Erro ao processar comprovante de recebimento'
+        }))
+        .then(item => {
+          if (item?.reutilizado) mostrarToast('Este comprovante ja estava na Inbox.');
+          else if (String(item?.status || '').toUpperCase() === 'ERRO') {
+            mostrarToast(item?.erro || 'Arquivo recebido, mas a leitura falhou', 'erro');
+          } else mostrarToast('Comprovante de recebimento adicionado.');
+          return carregar();
+        })
+        .catch(error => {
+          mostrarToast(error?.message || 'Erro ao enviar comprovante', 'erro');
+          setStatus(error?.message || 'Erro ao enviar comprovante', 'erro');
+        })
+        .finally(() => {
+          if (input) input.value = '';
+          processando = false;
+          atualizarBotoes();
+        });
+    }
+
+    function carregar() {
+      if (!window.AppRequest?.call) return Promise.resolve([]);
+      carregando = true;
+      atualizarBotoes();
+      return window.AppRequest.call('obterContextoComprovantesRecebimentos', [filtro, ambienteAtivo()], {
+        context: 'vendas.recebimentos.list',
+        errorMessage: 'Erro ao carregar comprovantes de recebimento'
+      })
+        .then(contexto => {
+          comprovantes = Array.isArray(contexto?.comprovantes) ? contexto.comprovantes : [];
+          destinos = Array.isArray(contexto?.destinos) ? contexto.destinos : [];
+          resumo = contexto?.resumo && typeof contexto.resumo === 'object' ? contexto.resumo : {};
+          render();
+          return comprovantes;
+        })
+        .catch(error => {
+          setStatus(error?.message || 'Erro ao carregar recebimentos', 'erro');
+          return [];
+        })
+        .finally(() => {
+          carregando = false;
+          atualizarBotoes();
+        });
+    }
+
+    function importarDrive() {
+      if (!podeAlterar('Importacao bloqueada em modo somente leitura') || importando) return;
+      importando = true;
+      atualizarBotoes();
+      setExpandida(true);
+      setStatus('Buscando comprovantes na pasta do Drive...', 'info');
+      window.AppRequest.call('importarComprovantesRecebimentosDrive', [5, ambienteAtivo()], {
+        context: 'vendas.recebimentos.drive',
+        errorMessage: 'Erro ao buscar recebimentos no Drive'
+      })
+        .then(resultado => {
+          const adicionados = Number(resultado?.adicionados || 0);
+          const erros = Number(resultado?.erros || 0);
+          mostrarToast(`${adicionados} recebimento${adicionados === 1 ? '' : 's'} adicionado${adicionados === 1 ? '' : 's'}${erros ? `; ${erros} erro(s)` : ''}.`);
+          return carregar();
+        })
+        .catch(error => {
+          mostrarToast(error?.message || 'Erro ao buscar recebimentos', 'erro');
+          setStatus(error?.message || 'Erro ao buscar recebimentos', 'erro');
+        })
+        .finally(() => {
+          importando = false;
+          atualizarBotoes();
+        });
+    }
+
+    function montarOptions(lista, atual, placeholder) {
+      const valores = [...new Set((Array.isArray(lista) ? lista : [])
+        .map(item => String(item || '').trim()).filter(Boolean))];
+      const valorAtual = String(atual || '').trim();
+      if (valorAtual && !valores.some(item => item.toUpperCase() === valorAtual.toUpperCase())) valores.unshift(valorAtual);
+      return `<option value="">${escapeHtml(placeholder || 'Selecione')}</option>` + valores.map(item =>
+        `<option value="${escapeHtml(item)}" ${item.toUpperCase() === valorAtual.toUpperCase() ? 'selected' : ''}>${escapeHtml(item)}</option>`
+      ).join('');
+    }
+
+    function chaveDestino(destino) {
+      return `VENDA|${String(destino?.origem_id || '').trim()}|${String(destino?.parcela_id || '').trim()}`;
+    }
+
+    function montarOptionsDestino(item) {
+      const sugeridas = new Set((item?.sugestoes || []).map(chaveDestino));
+      const ordenados = [...destinos].sort((a, b) => {
+        const sa = sugeridas.has(chaveDestino(a)) ? 0 : 1;
+        const sb = sugeridas.has(chaveDestino(b)) ? 0 : 1;
+        return sa - sb || String(a.label || '').localeCompare(String(b.label || ''));
+      });
+      return '<option value="">Selecione uma venda/parcela</option>' + ordenados.map(destino =>
+        `<option value="${escapeHtml(chaveDestino(destino))}">${escapeHtml(destino.label || '')}</option>`
+      ).join('');
+    }
+
+    function montarAlertas(item) {
+      const alertas = [...(Array.isArray(item?.alertas) ? item.alertas : [])];
+      if (item?.erro) alertas.unshift(item.erro);
+      if (!alertas.length) return '';
+      return `<div class="despesas-inbox-alertas">${alertas.map(alerta => `<span>${escapeHtml(alerta)}</span>`).join('')}</div>`;
+    }
+
+    function montarAlocacoes(item, busy) {
+      const lista = Array.isArray(item?.alocacoes) ? item.alocacoes : [];
+      if (!lista.length) return '<span class="despesas-inbox-vazio">Nenhum vinculo registrado.</span>';
+      return lista.map(alocacao => `
+        <div class="despesas-inbox-alocacao">
+          <div>
+            <strong>${escapeHtml(alocacao.origem_rotulo || alocacao.origem_id)}</strong>
+            <span>${escapeHtml(formatarMoeda(alocacao.valor_alocado))} · parcela ${Number(alocacao.parcela_numero || 1)}/${Number(alocacao.parcelas_total || 1)}</span>
+          </div>
+          <button type="button" class="btn-secundario" onclick="VendasRecebimentosController.desfazer('${escapeHtml(item.ID)}','${escapeHtml(alocacao.pagamento_id)}')" ${busy ? 'disabled' : ''}>Desfazer</button>
+        </div>
+      `).join('');
+    }
+
+    function montarSugestoes(item, busy) {
+      const sugestoes = Array.isArray(item?.sugestoes) ? item.sugestoes : [];
+      if (!sugestoes.length) return '<div class="despesas-inbox-sugestoes"><span>Nenhuma correspondencia forte encontrada.</span></div>';
+      return `<div class="despesas-inbox-sugestoes">
+        <span class="despesa-card-resumo-label">Sugestoes</span>
+        ${sugestoes.map(sugestao => `
+          <button type="button" class="despesas-inbox-sugestao" onclick="VendasRecebimentosController.selecionarSugestao('${escapeHtml(item.ID)}','${escapeHtml(chaveDestino(sugestao))}')" ${busy ? 'disabled' : ''}>
+            <strong>${escapeHtml(sugestao.label || '')}</strong>
+            <span>${Number(sugestao.score || 0)}% · ${escapeHtml((sugestao.motivos || []).join(', '))}</span>
+          </button>
+        `).join('')}
+      </div>`;
+    }
+
+    function montarCard(item) {
+      const id = String(item?.ID || '').trim();
+      const status = String(item?.status_conciliacao || item?.status || 'PENDENTE').toUpperCase();
+      const alocado = Number(item?.valor_alocado || 0);
+      const saldo = Number(item?.saldo_nao_alocado || 0);
+      const conciliado = saldo <= 0.009 && Number(item?.valor_total || 0) > 0;
+      const busy = busyIds.has(id);
+      const confianca = Math.round(Number(item?.confianca || 0) * 100);
+      const card = document.createElement('article');
+      const statusClasse = status.toLowerCase().replace(/[^a-z0-9_-]+/g, '-');
+      card.className = `despesa-inbox-item despesa-inbox-item-${statusClasse} recebimento-inbox-item${conciliado ? ' despesa-inbox-item-conciliado' : ''}`;
+      card.dataset.inboxId = id;
+      card.innerHTML = `
+        <div class="despesa-inbox-item-topo">
+          <div><span class="despesa-card-resumo-label">Recebimento</span><strong>${escapeHtml(item?.arquivo_nome || item?.pagador_nome || id)}</strong></div>
+          <span class="despesa-inbox-badge">${escapeHtml(status === 'ERRO' ? 'REVISAR' : status)}</span>
+        </div>
+        <div class="despesa-inbox-meta">
+          <span>Confianca da leitura: ${Number.isFinite(confianca) ? confianca : 0}%</span>
+          ${item?.arquivo_url ? `<a href="${escapeHtml(item.arquivo_url)}" target="_blank" rel="noopener">Abrir arquivo</a>` : ''}
+        </div>
+        <div class="despesas-inbox-valores">
+          <div><span>Total</span><strong>${escapeHtml(formatarMoeda(item?.valor_total))}</strong></div>
+          <div><span>Vinculado</span><strong>${escapeHtml(formatarMoeda(alocado))}</strong></div>
+          <div><span>Saldo livre</span><strong>${escapeHtml(formatarMoeda(saldo))}</strong></div>
+        </div>
+        ${montarAlertas(item)}
+        <details class="despesas-inbox-dados" ${status === 'ERRO' ? 'open' : ''}>
+          <summary>Dados do recebimento</summary>
+          <div class="despesa-inbox-grid">
+            <label class="campo-ajuda-wrap"><span class="campo-ajuda-tag">Pagador</span><input data-campo="pagador_nome" value="${escapeHtml(item?.pagador_nome || '')}"></label>
+            <label class="campo-ajuda-wrap"><span class="campo-ajuda-tag">Banco do pagador</span><input data-campo="banco_pagador" value="${escapeHtml(item?.banco_pagador || '')}"></label>
+            <label class="campo-ajuda-wrap"><span class="campo-ajuda-tag">Recebido por</span><select data-campo="recebido_por">${montarOptions(validacoes.pagosPor, item?.recebido_por, 'Selecione')}</select></label>
+            <label class="campo-ajuda-wrap"><span class="campo-ajuda-tag">Valor total (R$)</span><input data-campo="valor_total" type="number" min="${Math.max(0, alocado)}" step="0.01" value="${escapeHtml(item?.valor_total || '')}"></label>
+            <label class="campo-ajuda-wrap"><span class="campo-ajuda-tag">Data recebida</span><input data-campo="data_recebimento" type="date" value="${escapeHtml(item?.data_recebimento || '')}"></label>
+            <label class="campo-ajuda-wrap"><span class="campo-ajuda-tag">Forma</span><select data-campo="forma_pagamento">${montarOptions(validacoes.formasPagamento, item?.forma_pagamento, 'Selecione')}</select></label>
+            <label class="campo-ajuda-wrap"><span class="campo-ajuda-tag">Referencia da transacao</span><input data-campo="referencia_transacao" value="${escapeHtml(item?.referencia_transacao || '')}"></label>
+            <label class="campo-ajuda-wrap"><span class="campo-ajuda-tag">Descricao</span><input data-campo="descricao" value="${escapeHtml(item?.descricao || '')}"></label>
+          </div>
+          <label class="campo-ajuda-wrap despesas-inbox-observacao"><span class="campo-ajuda-tag">Observacao</span><textarea data-campo="observacao">${escapeHtml(item?.observacao || '')}</textarea></label>
+        </details>
+        <div class="despesas-inbox-vinculos"><span class="despesa-card-resumo-label">Vinculos registrados</span>${montarAlocacoes(item, busy)}</div>
+        ${!conciliado ? `
+          ${montarSugestoes(item, busy)}
+          <div class="despesas-inbox-conciliar">
+            <label class="campo-ajuda-wrap despesas-inbox-destino"><span class="campo-ajuda-tag">Vincular saldo a</span><select data-campo="destino_vinculo" onchange="VendasRecebimentosController.atualizarValorDestino('${escapeHtml(id)}')">${montarOptionsDestino(item)}</select></label>
+            <label class="campo-ajuda-wrap despesas-inbox-valor-vinculo"><span class="campo-ajuda-tag">Valor deste vinculo (R$)</span><input data-campo="valor_alocado" type="number" min="0.01" max="${escapeHtml(saldo)}" step="0.01" value="${saldo > 0 ? escapeHtml(saldo.toFixed(2)) : ''}"></label>
+            <button type="button" onclick="VendasRecebimentosController.vincular('${escapeHtml(id)}')" ${busy ? 'disabled' : ''}>Vincular recebimento</button>
+          </div>
+          <div class="despesas-inbox-card-acoes">
+            <button type="button" class="btn-secundario" onclick="VendasRecebimentosController.salvarRevisao('${escapeHtml(id)}')" ${busy ? 'disabled' : ''}>Salvar revisao</button>
+            <button type="button" class="btn-secundario" onclick="VendasRecebimentosController.criarVenda('${escapeHtml(id)}')" ${busy ? 'disabled' : ''}>Criar venda e vincular</button>
+            <button type="button" class="btn-perigo" onclick="VendasRecebimentosController.descartar('${escapeHtml(id)}')" ${busy || alocado > 0.009 ? 'disabled' : ''}>Descartar</button>
+          </div>
+        ` : '<div class="despesas-inbox-concluido">Recebimento totalmente conciliado.</div>'}
+      `;
+      return card;
+    }
+
+    function render() {
+      const f = el();
+      if (!f.lista) return;
+      const pendentes = Number(resumo?.pendentes || 0);
+      const parciais = Number(resumo?.parciais || 0);
+      const erros = Number(resumo?.erros || 0);
+      if (f.resumo) {
+        const partes = [`${pendentes} pendente${pendentes === 1 ? '' : 's'}`];
+        if (parciais) partes.push(`${parciais} parcial${parciais === 1 ? '' : 'is'}`);
+        if (erros) partes.push(`${erros} para revisar`);
+        f.resumo.textContent = partes.join(' | ');
+      }
+      if (!estadoInicialDefinido) {
+        estadoInicialDefinido = true;
+        setExpandida(comprovantes.length > 0);
+      }
+      f.lista.innerHTML = '';
+      if (!comprovantes.length) {
+        const vazio = filtro === 'CONCILIADOS'
+          ? 'Nenhum recebimento conciliado.'
+          : filtro === 'TODOS' ? 'Nenhum comprovante encontrado.' : 'Nenhum recebimento pendente.';
+        setStatus(carregando ? 'Carregando recebimentos...' : vazio, carregando ? 'info' : '');
+        return;
+      }
+      setStatus('');
+      const fragmento = document.createDocumentFragment();
+      comprovantes.forEach(item => fragmento.appendChild(montarCard(item)));
+      f.lista.appendChild(fragmento);
+    }
+
+    function getCard(id) {
+      return [...(el().lista?.querySelectorAll('.recebimento-inbox-item') || [])]
+        .find(card => String(card.dataset.inboxId || '').trim() === String(id || '').trim()) || null;
+    }
+
+    function getItem(id) {
+      return comprovantes.find(item => String(item.ID || '').trim() === String(id || '').trim()) || null;
+    }
+
+    function lerPayload(id) {
+      const card = getCard(id);
+      if (!card) throw new Error('Comprovante nao encontrado na tela.');
+      const campo = nome => card.querySelector(`[data-campo="${nome}"]`);
+      const payload = {
+        pagador_nome: String(campo('pagador_nome')?.value || '').trim(),
+        banco_pagador: String(campo('banco_pagador')?.value || '').trim(),
+        recebido_por: String(campo('recebido_por')?.value || '').trim(),
+        valor_total: parseNumero(campo('valor_total')?.value),
+        data_recebimento: String(campo('data_recebimento')?.value || '').trim(),
+        forma_pagamento: String(campo('forma_pagamento')?.value || '').trim(),
+        referencia_transacao: String(campo('referencia_transacao')?.value || '').trim(),
+        descricao: String(campo('descricao')?.value || '').trim(),
+        observacao: String(campo('observacao')?.value || '').trim(),
+        _db_env: ambienteAtivo()
+      };
+      if (!Number.isFinite(payload.valor_total) || payload.valor_total <= 0) {
+        throw new Error('Informe um valor total valido.');
+      }
+      return payload;
+    }
+
+    function setBusy(id, ativo) {
+      const alvo = String(id || '').trim();
+      if (ativo) busyIds.add(alvo); else busyIds.delete(alvo);
+      getCard(alvo)?.querySelectorAll('button, input, select, textarea').forEach(node => { node.disabled = !!ativo; });
+    }
+
+    function destinoSelecionado(id) {
+      const chave = String(getCard(id)?.querySelector('[data-campo="destino_vinculo"]')?.value || '').trim();
+      return destinos.find(item => chaveDestino(item) === chave) || null;
+    }
+
+    function atualizarValorDestino(id) {
+      const destino = destinoSelecionado(id);
+      const item = getItem(id);
+      const input = getCard(id)?.querySelector('[data-campo="valor_alocado"]');
+      if (!input || !item) return;
+      const maximo = Math.max(0, Math.min(Number(item.saldo_nao_alocado || 0), Number(destino?.valor_pendente || 0)));
+      input.max = String(maximo);
+      input.value = maximo > 0 ? maximo.toFixed(2) : '';
+    }
+
+    function selecionarSugestao(id, chave) {
+      const select = getCard(id)?.querySelector('[data-campo="destino_vinculo"]');
+      if (!select) return;
+      select.value = String(chave || '');
+      atualizarValorDestino(id);
+      select.focus();
+    }
+
+    function clientRequestId(id) {
+      const uuid = globalThis.crypto?.randomUUID?.() || `${Date.now()}_${Math.random().toString(16).slice(2)}`;
+      return `REC_${String(id || '').slice(-12)}_${uuid}`.replace(/[^a-zA-Z0-9_-]+/g, '').slice(0, 112);
+    }
+
+    function atualizarAposConciliacao() {
+      carregar();
+      window.VendasController?.syncFromBackend?.();
+      window.DashboardController?.atualizar?.(true);
+    }
+
+    function vincular(id) {
+      if (!podeAlterar('Vinculo bloqueado em modo somente leitura') || busyIds.has(id)) return;
+      let payload;
+      try {
+        payload = lerPayload(id);
+        const destino = destinoSelecionado(id);
+        const valor = parseNumero(getCard(id)?.querySelector('[data-campo="valor_alocado"]')?.value);
+        if (!payload.data_recebimento) throw new Error('Informe a data do recebimento.');
+        if (!payload.forma_pagamento) throw new Error('Selecione a forma de recebimento.');
+        if (!destino) throw new Error('Selecione uma venda ou parcela.');
+        if (valor <= 0) throw new Error('Informe um valor valido para o vinculo.');
+        payload = {
+          ...payload,
+          origem_tipo: 'VENDA',
+          origem_id: destino.origem_id,
+          parcela_id: destino.parcela_id,
+          valor_alocado: valor,
+          client_request_id: clientRequestId(id)
+        };
+      } catch (error) {
+        const detalhes = getCard(id)?.querySelector('.despesas-inbox-dados');
+        if (detalhes) detalhes.open = true;
+        mostrarToast(error?.message || 'Revise os dados do recebimento', 'erro');
+        return;
+      }
+      setBusy(id, true);
+      window.AppRequest.call('alocarComprovanteRecebimento', [id, payload], {
+        context: 'vendas.recebimentos.allocate',
+        errorMessage: 'Erro ao vincular recebimento'
+      })
+        .then(resultado => {
+          if (!resultado?.ok) throw new Error('O vinculo nao foi confirmado pelo servidor.');
+          mostrarToast('Recebimento vinculado com sucesso.');
+          atualizarAposConciliacao();
+        })
+        .catch(error => mostrarToast(error?.message || 'Erro ao vincular recebimento', 'erro'))
+        .finally(() => setBusy(id, false));
+    }
+
+    function salvarRevisao(id) {
+      if (!podeAlterar('Revisao bloqueada em modo somente leitura') || busyIds.has(id)) return;
+      let payload;
+      try { payload = lerPayload(id); } catch (error) {
+        mostrarToast(error?.message || 'Revise os dados', 'erro');
+        return;
+      }
+      setBusy(id, true);
+      window.AppRequest.call('salvarRevisaoComprovanteRecebimento', [id, payload], {
+        context: 'vendas.recebimentos.review',
+        errorMessage: 'Erro ao salvar revisao'
+      })
+        .then(resultado => {
+          if (!resultado?.ok) throw new Error('A revisao nao foi confirmada.');
+          mostrarToast('Revisao do recebimento salva.');
+          carregar();
+        })
+        .catch(error => mostrarToast(error?.message || 'Erro ao salvar revisao', 'erro'))
+        .finally(() => setBusy(id, false));
+    }
+
+    function criarVenda(id) {
+      if (!podeAlterar('Criacao de venda bloqueada em modo somente leitura') || busyIds.has(id)) return;
+      try {
+        const item = getItem(id);
+        const payload = lerPayload(id);
+        if (!payload.data_recebimento) throw new Error('Informe a data do recebimento.');
+        if (!payload.forma_pagamento) throw new Error('Selecione a forma de recebimento.');
+        if (!window.VendasController?.criarVendaParaComprovanteRecebimento) {
+          throw new Error('Formulario de venda indisponivel.');
+        }
+        VendasController.criarVendaParaComprovanteRecebimento(item, payload);
+      } catch (error) {
+        const detalhes = getCard(id)?.querySelector('.despesas-inbox-dados');
+        if (detalhes) detalhes.open = true;
+        mostrarToast(error?.message || 'Revise os dados antes de criar a venda', 'erro');
+      }
+    }
+
+    function desfazer(id, pagamentoId) {
+      if (!podeAlterar('Remocao bloqueada em modo somente leitura') || busyIds.has(id)) return;
+      if (!confirm('Desfazer este vinculo de recebimento?')) return;
+      setBusy(id, true);
+      window.AppRequest.call('desfazerAlocacaoComprovanteRecebimento', [id, pagamentoId, ambienteAtivo()], {
+        context: 'vendas.recebimentos.unallocate',
+        errorMessage: 'Erro ao desfazer vinculo'
+      })
+        .then(resultado => {
+          if (!resultado?.ok) throw new Error('O vinculo nao foi removido.');
+          mostrarToast('Vinculo de recebimento desfeito.');
+          atualizarAposConciliacao();
+        })
+        .catch(error => mostrarToast(error?.message || 'Erro ao desfazer vinculo', 'erro'))
+        .finally(() => setBusy(id, false));
+    }
+
+    function descartar(id) {
+      if (!podeAlterar('Descarte bloqueado em modo somente leitura') || busyIds.has(id)) return;
+      if (!confirm('Descartar este comprovante de recebimento?')) return;
+      setBusy(id, true);
+      window.AppRequest.call('descartarInboxRecebimento', [id, ambienteAtivo()], {
+        context: 'vendas.recebimentos.discard',
+        errorMessage: 'Erro ao descartar recebimento'
+      })
+        .then(() => { mostrarToast('Comprovante descartado.'); carregar(); })
+        .catch(error => mostrarToast(error?.message || 'Erro ao descartar recebimento', 'erro'))
+        .finally(() => setBusy(id, false));
+    }
+
+    function init() {
+      if (iniciado) return;
+      bind();
+      iniciado = true;
+      carregar();
+    }
+
+    return {
+      init,
+      setValidacoes,
+      carregar,
+      atualizarValorDestino,
+      selecionarSugestao,
+      vincular,
+      salvarRevisao,
+      criarVenda,
+      desfazer,
+      descartar
+    };
+  })();
+</script>

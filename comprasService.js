@@ -29,7 +29,9 @@ const COMPRAS_SCHEMA = [
   'observacao',
   'adicionado_estoque',
   'estoque_id',
-  'origem_compra_id'
+  'origem_compra_id',
+  'documento_compra_id',
+  'financeiro_somente'
 ];
 
 function categoriaValidaParaTipoCompra(tipo, categoria) {
@@ -236,6 +238,13 @@ function criarItemCompra(payload) {
 
 function atualizarItemCompra(id, payload) {
   assertCanWrite('Atualizacao de compra');
+  const sheet = getSheet(ABA_COMPRAS);
+  const atual = sheet
+    ? rowsToObjects(sheet).find(i => String(i.ID || '').trim() === String(id || '').trim())
+    : null;
+  if (atual && String(atual.financeiro_somente).toLowerCase() === 'true') {
+    throw new Error('Esta compra e a projecao financeira de um documento e deve ser alterada pela Inbox de compras.');
+  }
   const dados = normalizarCamposFinanceirosCompra(normalizarPayloadMadeiraCompra(payload));
   const ok = updateById(
     ABA_COMPRAS,
@@ -254,6 +263,13 @@ function atualizarItemCompra(id, payload) {
 
 function deletarItemCompra(id) {
   assertCanWrite('Exclusao de compra');
+  const sheet = getSheet(ABA_COMPRAS);
+  const atual = sheet
+    ? rowsToObjects(sheet).find(i => String(i.ID || '').trim() === String(id || '').trim())
+    : null;
+  if (atual && String(atual.financeiro_somente).toLowerCase() === 'true') {
+    throw new Error('Esta compra e gerenciada por um documento confirmado e nao pode ser excluida isoladamente.');
+  }
   const ok = updateById(
     ABA_COMPRAS,
     'ID',

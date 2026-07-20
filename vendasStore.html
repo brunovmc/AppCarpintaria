@@ -104,6 +104,8 @@
           : (base, termo) => String(base ?? '').toLowerCase().includes(String(termo ?? '').toLowerCase());
         resultado = resultado.filter(i =>
           incluiTexto(i.item, texto) ||
+          incluiTexto(i.cliente, texto) ||
+          incluiTexto(i.referencia_venda, texto) ||
           incluiTexto(i.recebido_por, texto) ||
           incluiTexto(i.forma_pagamento, texto)
         );

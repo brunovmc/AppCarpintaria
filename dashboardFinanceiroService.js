@@ -116,12 +116,14 @@ function criarMetaOrigemDashboardExecutivo(contexto, origemTipo, origemId) {
     const item = contexto.vendasPorId[id];
     if (!item) return null;
     const nomeItem = normalizarTextoDashboardExecutivo(item.item, id);
+    const cliente = normalizarTextoDashboardExecutivo(item.cliente, 'Cliente nao informado');
+    const referencia = normalizarTextoDashboardExecutivo(item.referencia_venda, '');
     return {
       origem_tipo: tipo,
       origem_id: id,
       origem_aba: 'vendas',
-      titulo: `Venda: ${nomeItem}`,
-      detalhe: `Qtd: ${round2Financeiro(parseNumeroBR(item.quantidade))} ${normalizarTextoDashboardExecutivo(item.unidade, '')}`.trim(),
+      titulo: `Venda: ${cliente}`,
+      detalhe: `${nomeItem} | Qtd: ${round2Financeiro(parseNumeroBR(item.quantidade))} ${normalizarTextoDashboardExecutivo(item.unidade, '')}${referencia ? ` | Ref: ${referencia}` : ''}`.trim(),
       categoria: normalizarTextoDashboardExecutivo(item.categoria, 'Sem categoria'),
       item: nomeItem,
       pago_por: normalizarTextoDashboardExecutivo(item.recebido_por, ''),

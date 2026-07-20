@@ -856,7 +856,10 @@
       if (localState.status) div.classList.add(`card-local-${localState.status}`);
       if (i?._localDeleted) div.classList.add('card-local-delete');
       const isMadeira = String(i.tipo || '').toUpperCase() === 'MADEIRA';
-      const status = jaAdicionada ? 'Ja adicionada ao estoque' : 'Pendente para estoque';
+      const documentoGerenciado = String(i.financeiro_somente).toLowerCase() === 'true';
+      const status = documentoGerenciado
+        ? 'Documento confirmado · estoque gerenciado por item'
+        : (jaAdicionada ? 'Ja adicionada ao estoque' : 'Pendente para estoque');
       const valorTotal = Number(i.total_previsto || (Number(i.quantidade || 0) * Number(i.valor_unit || 0)));
       const itemLabel = escapeHtml(i.item || '-');
       const categoriaLabel = escapeHtml(i.categoria || '-');
@@ -898,11 +901,14 @@
       const bloquearAcoes = !!localState.blockActions;
       const isMadeira = String(i.tipo || '').toUpperCase() === 'MADEIRA';
       const jaAdicionada = compraJaAdicionadaAoEstoque(i);
-      const status = jaAdicionada
+      const documentoGerenciado = String(i.financeiro_somente).toLowerCase() === 'true';
+      const status = documentoGerenciado
+        ? `Documento confirmado${i.documento_compra_id ? ` (ID: ${i.documento_compra_id})` : ''}`
+        : (jaAdicionada
         ? `Ja adicionada ao estoque${i.estoque_id ? ` (ID: ${i.estoque_id})` : ''}`
-        : 'Pendente para estoque';
+        : 'Pendente para estoque');
       const idJs = JSON.stringify(String(i.ID || ''));
-      const botaoAdicionarAoEstoque = jaAdicionada
+      const botaoAdicionarAoEstoque = jaAdicionada || documentoGerenciado
         ? ''
         : `<button onclick='ComprasController.adicionarAoEstoque(${idJs})' ${bloquearAcoes ? 'disabled' : ''}>Adicionar ao estoque</button>`;
       const statusPagamento = String(i.status_pagamento || 'PENDENTE').toUpperCase();
@@ -933,6 +939,7 @@
         <p><b>Fornecedor:</b> ${fornecedor}</p>
         <p><b>Pago por:</b> ${pagoPor}</p>
         <p><b>Status:</b> ${statusLabel}</p>
+        ${documentoGerenciado ? '<p><b>Origem:</b> Inbox de documentos de compra. Edite os dados pelo documento de origem.</p>' : ''}
         <p><b>Financeiro:</b> ${pagamentoResumoLabel}</p>
         ${localState.label ? `
           <div class="optimistic-local-state-row">
@@ -963,9 +970,11 @@
         <div class="acoes">
           ${botaoAdicionarAoEstoque}
           ${botaoPagamento}
-          <button onclick='ComprasController.refazer(${idJs})' ${bloquearAcoes ? 'disabled' : ''}>Refazer compra</button>
-          <button onclick='ComprasController.editar(${idJs})' ${bloquearAcoes ? 'disabled' : ''}>Editar</button>
-          <button onclick='ComprasController.excluir(${idJs})' ${bloquearAcoes ? 'disabled' : ''}>Excluir</button>
+          ${documentoGerenciado ? '' : `
+            <button onclick='ComprasController.refazer(${idJs})' ${bloquearAcoes ? 'disabled' : ''}>Refazer compra</button>
+            <button onclick='ComprasController.editar(${idJs})' ${bloquearAcoes ? 'disabled' : ''}>Editar</button>
+            <button onclick='ComprasController.excluir(${idJs})' ${bloquearAcoes ? 'disabled' : ''}>Excluir</button>
+          `}
         </div>
       `;
     }
@@ -1308,7 +1317,8 @@
       const parcelas = Array.isArray(item?.parcelas_detalhe) ? item.parcelas_detalhe : [];
       const totalParcelas = Math.max(1, Math.floor(parseNumeroInput(item?.parcelas || 1) || 1));
       const parcelado = totalParcelas > 1;
-      const proximaParcela = parcelas.find(p => Number(p?.valor_pendente || 0) > 0.009) || null;
+      const parcelasPendentes = parcelas.filter(p => Number(p?.valor_pendente || 0) > 0.009);
+      const proximaParcela = parcelasPendentes[0] || null;
 
       if (f.pagamentoParcelaWrap && f.pagamentoParcela) {
         if (parcelado) {
@@ -1318,22 +1328,23 @@
             }
             return false;
           }
-          const numero = Number(proximaParcela.parcela_numero || 0);
-          const total = Number(proximaParcela.parcelas_total || 0);
-          const data = String(proximaParcela.data_prevista || '-').trim() || '-';
           const valorPend = Number(proximaParcela.valor_pendente || 0);
 
-          f.pagamentoParcela.innerHTML = '';
-          const op = document.createElement('option');
-          op.value = String(proximaParcela.ID || '').trim();
-          op.textContent = `Parcela ${numero}/${total} - ${data} - ${formatarMoeda(valorPend)}`;
-          f.pagamentoParcela.appendChild(op);
-          f.pagamentoParcela.value = op.value;
+          f.pagamentoParcela.innerHTML = parcelasPendentes.map(parcela => {
+            const parcelaId = String(parcela.ID || '').trim();
+            const parcelaNumero = Number(parcela.parcela_numero || 0);
+            const parcelasTotal = Number(parcela.parcelas_total || 0);
+            const dataPrevista = String(parcela.data_prevista || '-').trim() || '-';
+            const saldoParcela = Number(parcela.valor_pendente || 0);
+            return `<option value="${escapeHtml(parcelaId)}" data-valor-pendente="${escapeHtml(saldoParcela)}">Parcela ${parcelaNumero}/${parcelasTotal} - ${escapeHtml(dataPrevista)} - ${escapeHtml(formatarMoeda(saldoParcela))}</option>`;
+          }).join('');
+          f.pagamentoParcela.value = String(proximaParcela.ID || '').trim();
           f.pagamentoParcelaWrap.classList.remove('hidden');
 
           if (f.pagamentoValor) {
             f.pagamentoValor.value = valorPend > 0 ? valorPend.toFixed(2) : '';
-            f.pagamentoValor.readOnly = true;
+            f.pagamentoValor.max = String(valorPend);
+            f.pagamentoValor.readOnly = false;
           }
         } else {
           f.pagamentoParcela.innerHTML = '<option value="">Parcela unica</option>';
@@ -1356,6 +1367,16 @@
 
       f.pagamentoModal.classList.remove('hidden');
       return true;
+    }
+
+    function handlePagamentoParcelaChange() {
+      const f = el();
+      const pendente = parseNumeroInput(f.pagamentoParcela?.selectedOptions?.[0]?.dataset?.valorPendente || '');
+      if (f.pagamentoValor) {
+        f.pagamentoValor.max = pendente > 0 ? String(pendente) : '';
+        f.pagamentoValor.value = pendente > 0 ? pendente.toFixed(2) : '';
+        f.pagamentoValor.readOnly = false;
+      }
     }
 
     function setModalPagamentoCompraProcessando(processando) {
@@ -1383,7 +1404,10 @@
       const f = el();
       if (!f.pagamentoModal) return;
       f.pagamentoModal.classList.add('hidden');
-      if (f.pagamentoValor) f.pagamentoValor.readOnly = false;
+      if (f.pagamentoValor) {
+        f.pagamentoValor.readOnly = false;
+        f.pagamentoValor.max = '';
+      }
       if (f.pagamentoParcelaWrap) f.pagamentoParcelaWrap.classList.add('hidden');
       if (f.pagamentoParcela) f.pagamentoParcela.innerHTML = '<option value="">Selecione</option>';
       f.pagamentoModal.dataset.parcelado = 'false';
@@ -1397,6 +1421,9 @@
         data_pagamento: String(f.pagamentoData?.value || '').trim(),
         valor_pago: String(f.pagamentoValor?.value || '').trim(),
         parcela_alvo_id: parcelado ? String(f.pagamentoParcela?.value || '').trim() : '',
+        valor_pendente_parcela: parcelado
+          ? String(f.pagamentoParcela?.selectedOptions?.[0]?.dataset?.valorPendente || '').trim()
+          : '',
         parcelado,
         forma_pagamento: String(f.pagamentoForma?.value || '').trim(),
         observacao: String(f.pagamentoObservacao?.value || '').trim()
@@ -1460,6 +1487,7 @@
       definirTituloFormulario,
       fecharModalDetalhes,
       abrirModalPagamentoCompra,
+      handlePagamentoParcelaChange,
       fecharModalPagamentoCompra,
       lerParcelasDetalheCompra,
       lerModalPagamentoCompra,
