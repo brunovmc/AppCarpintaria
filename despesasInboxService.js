@@ -202,8 +202,8 @@ function confirmarInboxDespesaNoAmbienteAtual_(id, payloadOverride) {
 
   const payload = montarPayloadConfirmacaoInboxDespesa_(item, payloadOverride);
   const traceId = Utilities.getUuid();
-  const ambienteAtivo = (typeof getUserDbEnvironment_ === 'function')
-    ? String(getUserDbEnvironment_() || '').trim()
+  const ambienteAtivo = (typeof getDbEnvironmentExecutionEffective_ === 'function')
+    ? String(getDbEnvironmentExecutionEffective_() || '').trim()
     : '';
   registrarDiagnosticoConfirmacaoInbox_('inicio', {
     trace_id: traceId,
@@ -434,16 +434,13 @@ function diagnosticarInboxDespesasIA() {
 }
 
 function executarComAmbienteInboxDespesas_(ambiente, callback) {
-  const env = normalizarAmbienteInboxDespesas_(ambiente);
-  if (!env || typeof setUserDbEnvironment_ !== 'function' || typeof getUserDbEnvironment_ !== 'function') {
-    return callback();
+  if (typeof callback !== 'function') {
+    throw new Error('Callback da Inbox de despesas invalido.');
   }
-
-  const anterior = getUserDbEnvironment_();
-  if (anterior !== env) {
-    setUserDbEnvironment_(env);
+  if (typeof executarComAmbienteBancoDadosAutorizado_ !== 'function') {
+    throw new Error('Controle de ambiente indisponivel.');
   }
-  return callback();
+  return executarComAmbienteBancoDadosAutorizado_(ambiente, () => callback());
 }
 
 function normalizarAmbienteInboxDespesas_(ambiente) {

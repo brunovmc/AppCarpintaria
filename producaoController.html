@@ -166,6 +166,7 @@
 
       registrarListenerMutacoesSeNecessario();
       window.AppOptimistic?.process?.();
+      initOrdenacao();
       carregarProdutos();
       carregarEstoqueOpcoes();
       carregarValidacoes();
@@ -174,6 +175,15 @@
       initFormEventos();
 
       iniciado = true;
+    }
+
+    function initOrdenacao() {
+      window.AppListOrderUI?.mount?.({
+        containerId: 'ordenacaoProducao',
+        domain: 'producao',
+        adapter: ProducaoStore,
+        onChange: renderListaAtual
+      });
     }
 
     function initConsumoUI() {
@@ -1494,11 +1504,24 @@
       editandoId = null;
     }
 
+    function abrirDetalhes(id) {
+      const alvoId = String(id || '').trim();
+      if (!alvoId || typeof ProducaoUI?.abrirDetalhes !== 'function') return false;
+      const aberto = ProducaoUI.abrirDetalhes(alvoId);
+      const aguardar = loader => new Promise(resolve => loader(resolve));
+      return Promise.all([
+        aguardar(done => carregarMateriaisPrevistos(alvoId, true, done)),
+        aguardar(done => carregarVinculosMateriais(alvoId, true, done)),
+        aguardar(done => carregarSaidasLotes(alvoId, true, done))
+      ]).then(() => aberto !== false);
+    }
+
     return {
       init,
       syncFromBackend,
       salvar,
       editar,
+      abrirDetalhes,
       abrirFormularioComModelo,
       excluir,
       abrirAtualizarEstoque,

@@ -183,7 +183,17 @@ function recarregarCacheCompras() {
   };
 }
 
-function listarCompras(forcarRecarregar) {
+function listarCompras(forcarRecarregar, ambiente) {
+  if (typeof executarComAmbienteBancoDadosAutorizado_ !== 'function') {
+    throw new Error('Controle de ambiente indisponivel.');
+  }
+  return executarComAmbienteBancoDadosAutorizado_(
+    ambiente,
+    () => listarComprasNoAmbienteAtual_(forcarRecarregar)
+  );
+}
+
+function listarComprasNoAmbienteAtual_(forcarRecarregar) {
   if (!forcarRecarregar) {
     const cached = lerCacheListaCompras();
     if (Array.isArray(cached)) {

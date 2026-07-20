@@ -10,6 +10,7 @@ function obterContextoComprovantesRecebimentos(statusFiltro, ambiente) {
 
 function obterContextoComprovantesRecebimentosAtual_(statusFiltro) {
   if (typeof assertCanRead === 'function') assertCanRead('Conciliacao de recebimentos');
+  tentarReconciliarEstruturaComprovantesDriveNoAcesso_();
   const catalogo = montarCatalogoRecebimentos_();
   const pagamentos = listarPagamentos(true);
   const todos = listarInboxRecebimentosNoAmbienteAtual_('TODOS')
@@ -303,7 +304,7 @@ function desfazerAlocacaoComprovanteRecebimento(comprovanteId, pagamentoId, ambi
           String(pagamento.origem_tipo || '').trim().toUpperCase() !== 'VENDA') {
         throw new Error('Vinculo de recebimento nao encontrado.');
       }
-      if (!removerPagamento(pagamento.ID, { rollbackEmFalha: true })) {
+      if (!removerPagamento_(pagamento.ID, { rollbackEmFalha: true })) {
         throw new Error('Nao foi possivel remover o vinculo.');
       }
       return { ok: true, comprovante: atualizarEstadoComprovanteRecebimento_(comprovanteId) };
@@ -383,7 +384,7 @@ function criarVendaEAlocarComprovanteRecebimentoAtual_(comprovanteId, vendaPaylo
       String(item.client_request_id || '').trim() === clientRequestId
     );
     if (pagamentoParcial) {
-      try { removerPagamento(pagamentoParcial.ID, { rollbackEmFalha: false }); } catch (rollbackError) { /* sem acao */ }
+      try { removerPagamento_(pagamentoParcial.ID, { rollbackEmFalha: false }); } catch (rollbackError) { /* sem acao */ }
     }
     try {
       updateById(ABA_VENDAS, 'ID', venda.ID, { ativo: false }, VENDAS_SCHEMA);

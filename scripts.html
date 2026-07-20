@@ -3377,6 +3377,550 @@
     open: abrirEntradaOutbox
   };
 
+  function criarNavegadorRegistros() {
+    const ROTULOS_ABA = {
+      estoque: 'Estoque',
+      compras: 'Compras',
+      vendas: 'Vendas',
+      despesas: 'Despesas',
+      produtos: 'Produtos',
+      producao: 'Producao'
+    };
+    let navegacaoSeq = 0;
+    let suspensaoAtiva = null;
+    let navegacaoEmVoo = null;
+    let destinoTrocaInterna = '';
+
+    function esperar(ms) {
+      return new Promise(resolve => setTimeout(resolve, Math.max(0, Number(ms) || 0)));
+    }
+
+    function raizAba(aba) {
+      return document.getElementById(`aba-${aba}`) || null;
+    }
+
+    function encontrarRegistro(aba, id) {
+      const raiz = raizAba(aba);
+      const registroId = String(id || '').trim();
+      if (!raiz || !registroId) return null;
+      return raiz.querySelector(`[data-id="${escaparCssAttr(registroId)}"]`);
+    }
+
+    async function aguardarRegistro(aba, id, timeoutMs = 900) {
+      const inicio = Date.now();
+      let alvo = encontrarRegistro(aba, id);
+      while (!alvo && (Date.now() - inicio) < timeoutMs) {
+        await esperar(70);
+        alvo = encontrarRegistro(aba, id);
+      }
+      return alvo;
+    }
+
+    async function localizarComPaginacao(aba, id) {
+      let alvo = await aguardarRegistro(aba, id, 1100);
+      if (alvo) return alvo;
+
+      const raiz = raizAba(aba);
+      if (!raiz) return null;
+      for (let pagina = 0; pagina < 40; pagina += 1) {
+        const btnMais = raiz.querySelector('.btn-carregar-mais:not(:disabled)');
+        if (!btnMais) break;
+        btnMais.click();
+        alvo = await aguardarRegistro(aba, id, 650);
+        if (alvo) return alvo;
+      }
+      return aguardarRegistro(aba, id, 350);
+    }
+
+    function obterControllerAba(aba) {
+      const mapa = {
+        estoque: window.EstoqueController,
+        compras: window.ComprasController,
+        vendas: window.VendasController,
+        despesas: window.DespesasController,
+        produtos: window.ProdutosController,
+        producao: window.ProducaoController
+      };
+      return mapa[aba] || null;
+    }
+
+    function normalizarRestauracaoHook(resultado) {
+      if (typeof resultado === 'function') return resultado;
+      if (resultado && typeof resultado.restore === 'function') {
+        return () => resultado.restore();
+      }
+      return null;
+    }
+
+    async function tentarHookPublico(aba, id) {
+      const controller = obterControllerAba(aba);
+      if (!controller) return { usado: false, restaurar: null };
+      const hook = controller.revealRecord || controller.revelarRegistro || controller.prepararNavegacaoRegistro;
+      if (typeof hook !== 'function') return { usado: false, restaurar: null };
+      try {
+        const resultado = await Promise.resolve(hook.call(controller, {
+          id: String(id || '').trim(),
+          source: 'record-navigator'
+        }));
+        return {
+          usado: true,
+          restaurar: normalizarRestauracaoHook(resultado)
+        };
+      } catch (error) {
+        window.AppDiag?.mark?.('nav.record.reveal_hook_error', {
+          tab: aba,
+          message: String(error?.message || error || '')
+        });
+        return { usado: true, restaurar: null };
+      }
+    }
+
+    function configBuscaAba(aba) {
+      if (aba === 'estoque') {
+        return {
+          state: buscaState,
+          campos: {
+            texto: 'buscaEstoque',
+            tipo: 'filtroTipo',
+            categoria: 'filtroCategoria',
+            unidade: 'filtroUnidade'
+          },
+          aplicar: aplicarBuscaEstoque,
+          atualizarTipo: valor => window.EstoqueUI?.marcarTipoRapidoAtivo?.(valor)
+        };
+      }
+      if (aba === 'compras') {
+        return {
+          state: buscaStateCompras,
+          campos: {
+            texto: 'buscaCompras',
+            tipo: 'filtroTipoCompras',
+            categoria: 'filtroCategoriaCompras',
+            unidade: 'filtroUnidadeCompras'
+          },
+          aplicar: aplicarBuscaCompras,
+          atualizarTipo: valor => window.ComprasUI?.marcarTipoRapidoAtivo?.(valor)
+        };
+      }
+      if (aba === 'vendas') {
+        return {
+          state: buscaStateVendas,
+          campos: { texto: 'buscaVendas' },
+          aplicar: aplicarBuscaVendas
+        };
+      }
+      if (aba === 'produtos') {
+        return {
+          state: buscaStateProdutos,
+          campos: { texto: 'buscaProdutos' },
+          aplicar: aplicarBuscaProdutos
+        };
+      }
+      if (aba === 'producao') {
+        return {
+          state: buscaStateProducao,
+          campos: { texto: 'buscaProducao' },
+          aplicar: aplicarBuscaProducao
+        };
+      }
+      return null;
+    }
+
+    function suspenderBuscaAba(aba) {
+      const config = configBuscaAba(aba);
+      if (!config?.state || typeof config.aplicar !== 'function') return null;
+      const snapshot = {};
+      let alterou = false;
+
+      Object.keys(config.campos).forEach(chave => {
+        const valor = String(config.state[chave] || '');
+        snapshot[chave] = valor;
+        if (valor.trim()) alterou = true;
+      });
+      if (!alterou) return null;
+
+      Object.keys(config.campos).forEach(chave => {
+        config.state[chave] = '';
+        const campo = document.getElementById(config.campos[chave]);
+        if (campo) campo.value = '';
+      });
+      config.atualizarTipo?.('');
+      config.aplicar();
+
+      return () => {
+        const usuarioAlterouFiltros = Object.keys(config.campos)
+          .some(chave => String(config.state[chave] || '').trim() !== '');
+        if (usuarioAlterouFiltros) return;
+        Object.keys(config.campos).forEach(chave => {
+          config.state[chave] = snapshot[chave];
+          const campo = document.getElementById(config.campos[chave]);
+          if (campo) campo.value = snapshot[chave];
+        });
+        config.atualizarTipo?.(snapshot.tipo || '');
+        config.aplicar();
+      };
+    }
+
+    function aplicarFiltrosEstruturadosDespesas(valores) {
+      const ids = [
+        'filtroDespesaStatus',
+        'filtroDespesaPagoPor',
+        'filtroDespesaCategoria',
+        'filtroDespesaFornecedor'
+      ];
+      const campos = ids.map(id => document.getElementById(id)).filter(Boolean);
+      campos.forEach((campo, index) => {
+        campo.value = String(valores[index] || '');
+      });
+      if (campos[0]) {
+        campos[0].dispatchEvent(new Event('change', { bubbles: true }));
+      }
+    }
+
+    function suspenderFiltrosDespesas() {
+      const inputBusca = document.getElementById('buscaDespesas');
+      const ids = [
+        'filtroDespesaStatus',
+        'filtroDespesaPagoPor',
+        'filtroDespesaCategoria',
+        'filtroDespesaFornecedor'
+      ];
+      const texto = String(buscaStateDespesas.texto || inputBusca?.value || '');
+      const estruturados = ids.map(id => String(document.getElementById(id)?.value || ''));
+      if (!texto.trim() && estruturados.every(valor => !valor.trim())) return null;
+
+      buscaStateDespesas.texto = '';
+      if (inputBusca) inputBusca.value = '';
+      aplicarFiltrosEstruturadosDespesas(['', '', '', '']);
+      window.DespesasController?.setFiltroTexto?.('');
+
+      return () => {
+        const usuarioAlterouFiltros = String(buscaStateDespesas.texto || '').trim() !== '' || ids
+          .some(id => String(document.getElementById(id)?.value || '').trim() !== '');
+        if (usuarioAlterouFiltros) return;
+        buscaStateDespesas.texto = texto;
+        if (inputBusca) inputBusca.value = texto;
+        aplicarFiltrosEstruturadosDespesas(estruturados);
+        window.DespesasController?.setFiltroTexto?.(texto);
+      };
+    }
+
+    function suspenderFiltrosNativos(aba) {
+      return aba === 'despesas'
+        ? suspenderFiltrosDespesas()
+        : suspenderBuscaAba(aba);
+    }
+
+    function exibirComprasAdicionadas() {
+      const raiz = raizAba('compras');
+      const botao = raiz?.querySelector?.('.compras-separador-acao');
+      const texto = String(botao?.textContent || '').trim().toLowerCase();
+      if (!botao || !texto.startsWith('ver adicionadas')) return null;
+      botao.click();
+      return () => {
+        const atual = raizAba('compras')?.querySelector?.('.compras-separador-acao');
+        if (String(atual?.textContent || '').trim().toLowerCase().startsWith('ocultar')) {
+          atual.click();
+        }
+      };
+    }
+
+    function executarRestauracoes(restauracoes) {
+      [...(Array.isArray(restauracoes) ? restauracoes : [])].reverse().forEach(restaurar => {
+        try {
+          restaurar?.();
+        } catch (error) {
+          window.AppDiag?.mark?.('nav.record.restore_error', {
+            message: String(error?.message || error || '')
+          });
+        }
+      });
+    }
+
+    function adicionarRestauracao(contexto, restaurar) {
+      if (typeof restaurar !== 'function' || !contexto) return;
+      if (contexto.cancelado) {
+        executarRestauracoes([restaurar]);
+        return;
+      }
+      contexto.restauracoes.push(restaurar);
+    }
+
+    function cancelarNavegacao(contexto) {
+      if (!contexto || contexto.cancelado) return;
+      contexto.cancelado = true;
+      executarRestauracoes(contexto.restauracoes.splice(0));
+      if (navegacaoEmVoo === contexto) navegacaoEmVoo = null;
+    }
+
+    function navegacaoContinuaValida(contexto) {
+      return !!contexto
+        && !contexto.cancelado
+        && contexto.seq === navegacaoSeq
+        && obterNomeAbaAtiva() === contexto.aba;
+    }
+
+    function restaurarFiltrosSuspensos() {
+      if (!suspensaoAtiva) return false;
+      const atual = suspensaoAtiva;
+      suspensaoAtiva = null;
+      executarRestauracoes(atual.restauracoes);
+      return true;
+    }
+
+    function antesDeTrocarAba(origem, destino) {
+      const de = normalizarNomeAba(origem);
+      const para = normalizarNomeAba(destino);
+      const trocaInterna = !!destinoTrocaInterna
+        && destinoTrocaInterna === para
+        && navegacaoEmVoo?.aba === para;
+      destinoTrocaInterna = '';
+      if (!trocaInterna && navegacaoEmVoo) {
+        navegacaoSeq += 1;
+        const contexto = navegacaoEmVoo;
+        cancelarNavegacao(contexto);
+        window.AppModalUI?.closeAll?.();
+      }
+      if (!suspensaoAtiva || de !== suspensaoAtiva.aba || de === para) return;
+      restaurarFiltrosSuspensos();
+    }
+
+    function sincronizarAbaUmaVez(aba) {
+      return new Promise(resolve => {
+        if (!window.AppTabRefresh?.requestSync) {
+          resolve(false);
+          return;
+        }
+        let finalizado = false;
+        const timer = setTimeout(() => {
+          if (finalizado) return;
+          finalizado = true;
+          resolve(false);
+        }, 9000);
+        const concluir = () => {
+          if (finalizado) return;
+          finalizado = true;
+          clearTimeout(timer);
+          resolve(true);
+        };
+        const solicitado = window.AppTabRefresh.requestSync(aba, {
+          immediate: true,
+          prefetch: true,
+          timeoutMs: 8500,
+          onDone: concluir
+        });
+        if (!solicitado) concluir();
+      });
+    }
+
+    function obterUiAba(aba) {
+      const controller = obterControllerAba(aba);
+      if (controller && [controller.openDetails, controller.abrirDetalhes, controller.abrirModalDetalhes]
+        .some(method => typeof method === 'function')) {
+        return controller;
+      }
+      const mapa = {
+        estoque: window.EstoqueUI,
+        compras: window.ComprasUI,
+        vendas: window.VendasUI,
+        produtos: window.ProdutosUI,
+        producao: window.ProducaoUI
+      };
+      return mapa[aba] || null;
+    }
+
+    async function focarSubrecurso(subresource) {
+      const id = String(
+        (subresource && typeof subresource === 'object' ? subresource.id : subresource) || ''
+      ).trim();
+      if (!id) return false;
+      const escaped = escaparCssAttr(id);
+      for (let tentativa = 0; tentativa < 8; tentativa += 1) {
+        const modais = [...document.querySelectorAll('.modal:not(.hidden)')].reverse();
+        const raizes = modais.concat(document);
+        const alvo = raizes
+          .map(raiz => raiz.querySelector(
+            `[data-subresource-id="${escaped}"], [data-payment-id="${escaped}"], [data-pagamento-id="${escaped}"]`
+          ))
+          .find(Boolean);
+        if (alvo) {
+          destacarElementoEntradaOutbox(alvo);
+          return true;
+        }
+        await esperar(90);
+      }
+      return false;
+    }
+
+    async function abrirDetalhesRegistro(aba, id, card, subresource) {
+      const ui = obterUiAba(aba);
+      const abrirPublico = ui?.openDetails || ui?.abrirDetalhes || ui?.abrirModalDetalhes;
+      if (typeof abrirPublico === 'function') {
+        await Promise.resolve(abrirPublico.call(ui, id));
+      } else {
+        const botao = card.querySelector(
+          '.ver-mais, [data-action="details"], [data-action="detalhes"], .btn-detalhes'
+        );
+        if (botao) botao.click();
+        else card.click();
+      }
+      if (subresource) await focarSubrecurso(subresource);
+    }
+
+    async function abrir(options = {}) {
+      const seq = ++navegacaoSeq;
+      const aba = normalizarNomeAba(options.tab);
+      const id = String(options.id || '').trim();
+      if (!aba || aba === 'dashboard' || !id || !raizAba(aba)) {
+        mostrarToast('Destino deste registro nao esta disponivel.', 'erro');
+        return false;
+      }
+
+      if (navegacaoEmVoo) {
+        cancelarNavegacao(navegacaoEmVoo);
+        window.AppModalUI?.closeAll?.();
+      }
+      restaurarFiltrosSuspensos();
+      const contextoNavegacao = {
+        seq,
+        aba,
+        restauracoes: [],
+        cancelado: false
+      };
+      navegacaoEmVoo = contextoNavegacao;
+      try {
+      if (typeof trocarAba === 'function') {
+        destinoTrocaInterna = aba;
+        try {
+          trocarAba(aba);
+        } finally {
+          destinoTrocaInterna = '';
+        }
+      }
+      const pronta = window.AppBootGate?.waitForTabReady
+        ? await window.AppBootGate.waitForTabReady(aba, { timeoutMs: 4500 })
+        : true;
+      if (!navegacaoContinuaValida(contextoNavegacao)) {
+        cancelarNavegacao(contextoNavegacao);
+        return false;
+      }
+
+      let alvo = pronta ? await localizarComPaginacao(aba, id) : null;
+      if (!navegacaoContinuaValida(contextoNavegacao)) {
+        cancelarNavegacao(contextoNavegacao);
+        return false;
+      }
+      let filtrosSuspensos = false;
+
+      if (!alvo) {
+        const hook = await tentarHookPublico(aba, id);
+        adicionarRestauracao(contextoNavegacao, hook.restaurar);
+        if (!navegacaoContinuaValida(contextoNavegacao)) {
+          cancelarNavegacao(contextoNavegacao);
+          return false;
+        }
+        if (hook.usado) alvo = await localizarComPaginacao(aba, id);
+        if (!navegacaoContinuaValida(contextoNavegacao)) {
+          cancelarNavegacao(contextoNavegacao);
+          return false;
+        }
+      }
+
+      if (!alvo) {
+        const restaurarFiltros = suspenderFiltrosNativos(aba);
+        if (restaurarFiltros) {
+          adicionarRestauracao(contextoNavegacao, restaurarFiltros);
+          filtrosSuspensos = true;
+          alvo = await localizarComPaginacao(aba, id);
+          if (!navegacaoContinuaValida(contextoNavegacao)) {
+            cancelarNavegacao(contextoNavegacao);
+            return false;
+          }
+        }
+      }
+
+      if (!alvo && aba === 'compras') {
+        const restaurarVisibilidade = exibirComprasAdicionadas();
+        if (restaurarVisibilidade) {
+          adicionarRestauracao(contextoNavegacao, restaurarVisibilidade);
+          filtrosSuspensos = true;
+          alvo = await localizarComPaginacao(aba, id);
+          if (!navegacaoContinuaValida(contextoNavegacao)) {
+            cancelarNavegacao(contextoNavegacao);
+            return false;
+          }
+        }
+      }
+
+      if (!alvo) {
+        mostrarToast(`Atualizando ${ROTULOS_ABA[aba] || 'a aba'} para localizar o registro...`);
+        await sincronizarAbaUmaVez(aba);
+        if (!navegacaoContinuaValida(contextoNavegacao)) {
+          cancelarNavegacao(contextoNavegacao);
+          return false;
+        }
+        alvo = await localizarComPaginacao(aba, id);
+        if (!navegacaoContinuaValida(contextoNavegacao)) {
+          cancelarNavegacao(contextoNavegacao);
+          return false;
+        }
+      }
+
+      if (!navegacaoContinuaValida(contextoNavegacao)) {
+        cancelarNavegacao(contextoNavegacao);
+        return false;
+      }
+
+      if (!alvo) {
+        cancelarNavegacao(contextoNavegacao);
+        mostrarToast(
+          `Nao encontrei o registro em ${ROTULOS_ABA[aba] || 'sua aba'}. Ele pode ter sido removido ou estar fora dos dados carregados.`,
+          'erro'
+        );
+        return false;
+      }
+
+      destacarElementoEntradaOutbox(alvo);
+      if (options.openDetails !== false) {
+        await esperar(160);
+        if (!navegacaoContinuaValida(contextoNavegacao)) {
+          cancelarNavegacao(contextoNavegacao);
+          return false;
+        }
+        await abrirDetalhesRegistro(aba, id, alvo, options.subresource);
+        if (!navegacaoContinuaValida(contextoNavegacao)) {
+          cancelarNavegacao(contextoNavegacao);
+          return false;
+        }
+      }
+
+      if (navegacaoEmVoo === contextoNavegacao) navegacaoEmVoo = null;
+      if (contextoNavegacao.restauracoes.length > 0) {
+        suspensaoAtiva = {
+          aba,
+          restauracoes: contextoNavegacao.restauracoes.splice(0)
+        };
+      }
+      if (filtrosSuspensos) {
+        mostrarToast('Filtros temporariamente suspensos. Eles serao restaurados ao sair desta aba.');
+      }
+      return true;
+      } catch (error) {
+        cancelarNavegacao(contextoNavegacao);
+        window.AppModalUI?.closeAll?.();
+        throw error;
+      }
+    }
+
+    return {
+      open: abrir,
+      beforeTabChange: antesDeTrocarAba,
+      restoreSuspendedFilters: restaurarFiltrosSuspensos
+    };
+  }
+
+  window.AppRecordNavigator = window.AppRecordNavigator || criarNavegadorRegistros();
+
   function formatarResumoOutboxHint(summary = {}) {
     const total = Math.max(0, Number(summary?.total || 0));
     if (total <= 0) return '';
@@ -3892,6 +4436,7 @@
       const alvo = normalizarNomeAba(nome) || ABA_INICIAL_PADRAO;
       if (!alvo) return;
       const atual = obterNomeAbaAtiva();
+      window.AppRecordNavigator?.beforeTabChange?.(atual, alvo);
       window.AppDiag?.mark?.('nav.tab.request', {
         from_tab: atual,
         to_tab: alvo
@@ -4246,11 +4791,17 @@
 
   const aplicarBuscaEstoqueDebounced = debounce(aplicarBuscaEstoque, 350);
 
-  function aplicarBuscaCompras() {
-    if (!comprasEstaAtivo()) return;
+  function aplicarBuscaCompras(onDone) {
+    const concluir = typeof onDone === 'function' ? onDone : null;
+    if (!comprasEstaAtivo()) {
+      concluir?.();
+      return;
+    }
 
-    if (!window.ComprasStore || !window.ComprasUI) return;
-    if (!ComprasStore.isLoaded()) return;
+    if (!window.ComprasStore || !window.ComprasUI || !ComprasStore.isLoaded()) {
+      concluir?.();
+      return;
+    }
 
     const perf = window.AppPerf?.start('busca.compras.aplicar');
 
@@ -4269,6 +4820,7 @@
         categoria,
         unidade
       });
+      concluir?.();
       return;
     }
 
@@ -4279,7 +4831,7 @@
       unidade: unidade || undefined
     });
 
-    ComprasUI.renderLista(lista);
+    ComprasUI.renderLista(lista, concluir);
     window.AppPerf?.end(perf, {
       total: Array.isArray(lista) ? lista.length : 0,
       texto_len: texto.length,
@@ -4291,11 +4843,17 @@
 
   const aplicarBuscaComprasDebounced = debounce(aplicarBuscaCompras, 350);
 
-  function aplicarBuscaVendas() {
-    if (!vendasEstaAtivo()) return;
+  function aplicarBuscaVendas(onDone) {
+    const concluir = typeof onDone === 'function' ? onDone : null;
+    if (!vendasEstaAtivo()) {
+      concluir?.();
+      return;
+    }
 
-    if (!window.VendasStore || !window.VendasUI) return;
-    if (!VendasStore.isLoaded()) return;
+    if (!window.VendasStore || !window.VendasUI || !VendasStore.isLoaded()) {
+      concluir?.();
+      return;
+    }
 
     const perf = window.AppPerf?.start('busca.vendas.aplicar');
 
@@ -4308,13 +4866,14 @@
         skipped_render: true,
         texto_len: texto.length
       });
+      concluir?.();
       return;
     }
 
     const lista = VendasStore.filter({
       texto: texto || undefined
     });
-    VendasUI.renderLista(lista);
+    VendasUI.renderLista(lista, concluir);
     window.AppPerf?.end(perf, {
       total: Array.isArray(lista) ? lista.length : 0,
       texto_len: texto.length
@@ -5425,5 +5984,3 @@
     }
   });
 </script>
-
-

@@ -341,6 +341,9 @@
       const conciliado = saldo <= 0.009 && Number(item?.valor_total || 0) > 0;
       const busy = busyIds.has(id);
       const confianca = Math.round(Number(item?.confianca || 0) * 100);
+      const dataRecebimento = window.AppListOrderUI?.formatDate?.(
+        item?.data_recebimento || item?.criado_em
+      ) || { display: '-' };
       const card = document.createElement('article');
       const statusClasse = status.toLowerCase().replace(/[^a-z0-9_-]+/g, '-');
       card.className = `despesa-inbox-item despesa-inbox-item-${statusClasse} recebimento-inbox-item${conciliado ? ' despesa-inbox-item-conciliado' : ''}`;
@@ -351,6 +354,7 @@
           <span class="despesa-inbox-badge">${escapeHtml(status === 'ERRO' ? 'REVISAR' : status)}</span>
         </div>
         <div class="despesa-inbox-meta">
+          <span>Recebimento: <time${dataRecebimento.datetime ? ` datetime="${escapeHtml(dataRecebimento.datetime)}"` : ''}>${escapeHtml(dataRecebimento.display)}</time></span>
           <span>Confianca da leitura: ${Number.isFinite(confianca) ? confianca : 0}%</span>
           ${item?.arquivo_url ? `<a href="${escapeHtml(item.arquivo_url)}" target="_blank" rel="noopener">Abrir arquivo</a>` : ''}
         </div>

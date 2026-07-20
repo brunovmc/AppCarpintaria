@@ -15,20 +15,12 @@ function configurarPastasInboxRecebimentosDrive(pastaRaizId) {
 }
 
 function configurarPastasInboxRecebimentosDrive_(pastaRaizId) {
-  const props = PropertiesService.getScriptProperties();
   const ambiente = obterAmbienteInboxRecebimentosDrive_();
-  const pastasAnteriores = lerPastasComprovantesDriveSalvas_(
-    INBOX_RECEBIMENTOS_DRIVE_FOLDER_PROPS,
-    obterChavePastaInboxRecebimentosDrive_,
-    ambiente
-  );
-  const raizComum = obterOuCriarRaizComprovantesDrive_(ambiente, pastaRaizId);
-  const pastas = criarEstruturaDominioComprovantesDrive_(raizComum, 'recebimentos', pastasAnteriores);
-  const migracao = migrarArquivosPastasComprovantesDrive_(pastasAnteriores, pastas, 'recebimentos');
-  Object.keys(pastas).forEach(chave => {
-    props.setProperty(obterChavePastaInboxRecebimentosDrive_(chave, ambiente), pastas[chave].getId());
-  });
-  return { ...montarStatusPastasInboxRecebimentos_(pastas, ambiente), migracao };
+  const resultado = reconciliarEstruturaPastasComprovantesDrive_(ambiente, pastaRaizId);
+  return {
+    ...montarStatusPastasInboxRecebimentos_(resultado.pastas.recebimentos, ambiente),
+    migracao: resultado.migracao
+  };
 }
 
 function obterStatusInboxRecebimentosDrive() {
@@ -57,12 +49,12 @@ function importarComprovantesRecebimentosDriveAtual_(limite) {
   assertCanWrite('Importacao de recebimentos do Drive');
   const quantidade = Math.max(1, Math.min(20,
     Math.floor(Number(limite) || INBOX_RECEBIMENTOS_DRIVE_BATCH_DEFAULT)));
+  const pastas = obterPastasInboxRecebimentosDrive_(true);
   const lock = LockService.getScriptLock();
   if (!lock.tryLock(1000)) {
     throw new Error('Ja existe uma busca de recebimentos em andamento. Tente novamente em instantes.');
   }
   try {
-    const pastas = obterPastasInboxRecebimentosDrive_(true);
     const arquivos = pastas.entrada.getFiles();
     const resultado = { processados: 0, adicionados: 0, ignorados: 0, erros: 0, limite: quantidade };
     while (arquivos.hasNext() && resultado.processados < quantidade) {
@@ -264,37 +256,35 @@ function tentarMoverArquivoInboxRecebimentos_(arquivo, pasta) {
 function obterPastasInboxRecebimentosDrive_(criarSeAusente) {
   const props = PropertiesService.getScriptProperties();
   const ambiente = obterAmbienteInboxRecebimentosDrive_();
+  if (criarSeAusente) {
+    const versao = String(props.getProperty(
+      obterChaveVersaoEstruturaComprovantesDrive_(ambiente)
+    ) || '').trim();
+    const existentes = versao === COMPROVANTES_DRIVE_STRUCTURE_VERSION
+      ? obterPastasInboxRecebimentosDrive_(false)
+      : null;
+    if (existentes) return existentes;
+    return reconciliarEstruturaPastasComprovantesDrive_(ambiente).pastas.recebimentos;
+  }
   const ids = {};
   for (const chave of Object.keys(INBOX_RECEBIMENTOS_DRIVE_FOLDER_PROPS)) {
     ids[chave] = String(props.getProperty(
       obterChavePastaInboxRecebimentosDrive_(chave, ambiente)
     ) || '').trim();
-    if (!ids[chave]) {
-      return criarSeAusente
-        ? pastasStatusParaObjetosRecebimentos_(configurarPastasInboxRecebimentosDrive_())
-        : null;
-    }
+    if (!ids[chave]) return null;
   }
   try {
     const pastas = {};
     Object.keys(ids).forEach(chave => { pastas[chave] = DriveApp.getFolderById(ids[chave]); });
-    if (estruturaDominioComprovantesDriveValida_(pastas, 'recebimentos')) return pastas;
-    return criarSeAusente
-      ? pastasStatusParaObjetosRecebimentos_(configurarPastasInboxRecebimentosDrive_())
-      : null;
+    const raizId = String(props.getProperty(obterChaveRaizComprovantesDrive_(ambiente)) || '').trim();
+    const raizComum = raizId ? DriveApp.getFolderById(raizId) : null;
+    if (raizComum && estruturaDominioComprovantesDriveValida_(pastas, 'recebimentos', raizComum)) {
+      return pastas;
+    }
+    return null;
   } catch (error) {
-    return criarSeAusente
-      ? pastasStatusParaObjetosRecebimentos_(configurarPastasInboxRecebimentosDrive_())
-      : null;
+    return null;
   }
-}
-
-function pastasStatusParaObjetosRecebimentos_(status) {
-  const pastas = {};
-  Object.keys(status.pastas || {}).forEach(chave => {
-    pastas[chave] = DriveApp.getFolderById(status.pastas[chave].id);
-  });
-  return pastas;
 }
 
 function montarStatusPastasInboxRecebimentos_(pastas, ambiente) {
@@ -321,6 +311,9 @@ function temTriggerInboxRecebimentosDrive_() {
 }
 
 function obterAmbienteInboxRecebimentosDrive_() {
+  if (typeof getDbEnvironmentExecutionEffective_ === 'function') {
+    return getDbEnvironmentExecutionEffective_();
+  }
   if (typeof getUserDbEnvironment_ === 'function') {
     return String(getUserDbEnvironment_() || '').trim().toLowerCase() === 'dev' ? 'dev' : 'prod';
   }

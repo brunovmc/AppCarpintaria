@@ -175,7 +175,11 @@
     }
 
     function setEstoqueOpcoes(lista) {
-      estoqueOpcoes = Array.isArray(lista) ? lista : [];
+      estoqueOpcoes = [...(Array.isArray(lista) ? lista : [])]
+        .sort((a, b) => String(a?.item || '').localeCompare(String(b?.item || ''), 'pt-BR', {
+          sensitivity: 'base',
+          numeric: true
+        }));
     }
 
     function setTiposValidacao(lista) {
@@ -485,7 +489,11 @@
       if (!produto) return;
 
       const clean = (Array.isArray(lista) ? lista : [])
-        .filter(v => v && v.produto_id);
+        .filter(v => v && v.produto_id)
+        .sort((a, b) => String(a?.nome_produto || '').localeCompare(String(b?.nome_produto || ''), 'pt-BR', {
+          sensitivity: 'base',
+          numeric: true
+        }));
 
       produto.innerHTML = '<option value="">Selecione o produto</option>';
       clean.forEach(p => {
@@ -1055,6 +1063,7 @@
             ${etapasConcluidasLabel}<br>
             ${etapaAtualLabel}<br>
             ${resumoSaidasLabel}
+            ${window.AppListOrderUI?.cardDateHtml('producao', i, window.ProducaoStore?.getSort?.()) || ''}
           </div>
           ${localState.label ? `
             <div class="optimistic-local-state-row">
@@ -1921,6 +1930,8 @@
       preencherFormulario,
       resetFormulario,
       renderLista,
+      abrirModalDetalhes,
+      abrirDetalhes: abrirModalDetalhes,
       fecharModalDetalhes,
       renderProdutos,
       renderReceitas,

@@ -9,7 +9,6 @@
     let detailRequestSeq = 0;
     let cacheMemoria = {};
     let cacheDetalhes = {};
-    let detalheAberto = null;
     let itensDetalhe = [];
     let runtimeListenerRegistrado = false;
     let focoAntesDoModal = null;
@@ -427,11 +426,19 @@
         return;
       }
       f.detailList.innerHTML = itensDetalhe.map((item, index) => {
-        const acoes = [
-          item.pode_editar_origem ? `<button type="button" onclick="DashboardController.editarOrigemObservabilidade(${index})">Editar origem</button>` : '',
-          item.pode_excluir_origem ? `<button type="button" onclick="DashboardController.excluirOrigemObservabilidade(${index})">Excluir origem</button>` : '',
-          item.pode_remover_pagamento ? `<button type="button" class="danger" onclick="DashboardController.removerPagamentoObservabilidade(${index})">Remover pagamento</button>` : ''
-        ].filter(Boolean).join('');
+        const abaOrigem = String(item.origem_aba || '').trim().toLowerCase();
+        const rotulosAba = {
+          compras: 'Compras',
+          despesas: 'Despesas',
+          vendas: 'Vendas',
+          estoque: 'Estoque',
+          produtos: 'Produtos',
+          producao: 'Producao'
+        };
+        const podeAbrirOrigem = !!abaOrigem && !!String(item.origem_id || '').trim();
+        const acoes = podeAbrirOrigem
+          ? `<button type="button" onclick="DashboardController.abrirOrigemObservabilidade(${index})">Abrir em ${escapar(rotulosAba[abaOrigem] || 'origem')}</button>`
+          : '';
         return `
           <article class="dashx-detail-item">
             <div class="dashx-detail-copy">
@@ -455,7 +462,6 @@
       const referencia = referenciaAtiva();
       const cacheKey = `${referencia}|${chave}|${JSON.stringify(filtro || {})}`;
       const cache = cacheDetalhes[cacheKey];
-      detalheAberto = { contexto: chave, filtro: filtro || {} };
       focoAntesDoModal = document.activeElement;
       f.modal?.classList.remove('hidden');
       document.body.classList.add('modal-open');
@@ -495,7 +501,6 @@
 
     function fecharObservabilidadeCard() {
       detailRequestSeq += 1;
-      detalheAberto = null;
       itensDetalhe = [];
       const f = refs();
       f.modal?.classList.add('hidden');
@@ -509,117 +514,31 @@
       return Number.isInteger(indice) && indice >= 0 ? itensDetalhe[indice] || null : null;
     }
 
-    function podeAlterar(contexto) {
-      if (window.AppDomainUtils?.ensureWritable) return window.AppDomainUtils.ensureWritable(contexto);
-      return window.AppRuntime?.ensureWritable?.(contexto) ?? true;
-    }
-
-    function abrirAbaEExecutar(aba, callback) {
-      if (!aba || typeof callback !== 'function') return;
-      let tentativas = 0;
-      const tentar = () => {
-        if (callback()) return;
-        tentativas += 1;
-        if (tentativas >= 12) {
-          mostrarToast('Nao foi possivel abrir a origem agora. Tente novamente.', 'erro');
-          return;
-        }
-        setTimeout(tentar, 140);
+    function abrirOrigemObservabilidade(index) {
+      const item = itemDetalhe(index);
+      if (!item?.origem_aba || !item?.origem_id) {
+        mostrarToast('Origem desta linha nao esta disponivel', 'erro');
+        return;
+      }
+      const destino = {
+        tab: String(item.origem_aba),
+        id: String(item.origem_id),
+        openDetails: true
       };
-      if (typeof trocarAba === 'function') trocarAba(aba);
-      setTimeout(tentar, 120);
-    }
-
-    function editarOrigemObservabilidade(index) {
-      if (!podeAlterar('Edicao bloqueada em modo somente leitura')) return;
-      const item = itemDetalhe(index);
-      if (!item?.origem_aba || !item?.origem_id) {
-        mostrarToast('Origem desta linha nao esta disponivel', 'erro');
-        return;
+      const pagamentoId = String(item.pagamento_id || '').trim();
+      if (pagamentoId) {
+        destino.subresource = {
+          type: 'pagamento',
+          id: pagamentoId
+        };
       }
-      const aba = String(item.origem_aba);
-      const id = String(item.origem_id);
       fecharObservabilidadeCard();
-      abrirAbaEExecutar(aba, () => {
-        if (aba === 'compras' && window.ComprasController?.editar && window.ComprasStore?.getById?.(id)) {
-          window.ComprasController.editar(id); return true;
-        }
-        if (aba === 'despesas' && window.DespesasController?.editar) {
-          const existe = window.DespesasController?.getById?.(id);
-          if (!existe) {
-            window.AppTabRefresh?.requestSync?.('despesas', { immediate: true, prefetch: true });
-            return false;
-          }
-          window.DespesasController.editar(id); return true;
-        }
-        if (aba === 'vendas' && window.VendasController?.editar && window.VendasStore?.getById?.(id)) {
-          window.VendasController.editar(id); return true;
-        }
-        if (aba === 'estoque' && window.EstoqueController?.editar && window.EstoqueStore?.getById?.(id)) {
-          window.EstoqueController.editar(id); return true;
-        }
-        return false;
-      });
-    }
-
-    function excluirOrigemObservabilidade(index) {
-      if (!podeAlterar('Exclusao bloqueada em modo somente leitura')) return;
-      const item = itemDetalhe(index);
-      if (!item?.origem_aba || !item?.origem_id) {
-        mostrarToast('Origem desta linha nao esta disponivel', 'erro');
+      if (!window.AppRecordNavigator?.open) {
+        mostrarToast('Navegacao para a origem indisponivel. Recarregue a pagina.', 'erro');
         return;
       }
-      const aba = String(item.origem_aba);
-      const id = String(item.origem_id);
-      fecharObservabilidadeCard();
-      abrirAbaEExecutar(aba, () => {
-        if (aba === 'compras' && window.ComprasController?.excluir && window.ComprasStore?.getById?.(id)) {
-          window.ComprasController.excluir(id); return true;
-        }
-        if (aba === 'despesas' && window.DespesasController?.excluir) {
-          const existe = window.DespesasController?.getById?.(id);
-          if (!existe) {
-            window.AppTabRefresh?.requestSync?.('despesas', { immediate: true, prefetch: true });
-            return false;
-          }
-          window.DespesasController.excluir(id); return true;
-        }
-        if (aba === 'vendas' && window.VendasController?.excluir && window.VendasStore?.getById?.(id)) {
-          window.VendasController.excluir(id); return true;
-        }
-        if (aba === 'estoque' && window.EstoqueController?.excluir && window.EstoqueStore?.getById?.(id)) {
-          window.EstoqueController.excluir(id); return true;
-        }
-        return false;
-      });
-    }
-
-    function removerPagamentoObservabilidade(index) {
-      if (!podeAlterar('Remocao bloqueada em modo somente leitura')) return;
-      const item = itemDetalhe(index);
-      const pagamentoId = String(item?.pagamento_id || '').trim();
-      if (!pagamentoId) {
-        mostrarToast('Pagamento nao encontrado para esta linha', 'erro');
-        return;
-      }
-      if (!confirm('Deseja remover este pagamento?')) return;
-      const reabrir = detalheAberto ? { ...detalheAberto } : null;
-      window.AppRequest.call('removerPagamento', [pagamentoId], {
-        context: 'dashboard.remover_pagamento',
-        errorMessage: 'Erro ao remover pagamento'
-      }).then(ok => {
-        if (!ok) throw new Error('Nao foi possivel remover o pagamento');
-        invalidarCacheMeses();
-        fecharObservabilidadeCard();
-        return atualizar(true).then(resultado => {
-          if (!resultado) {
-            mostrarToast('Pagamento removido, mas o painel nao pode ser atualizado agora', 'erro');
-            return;
-          }
-          mostrarToast('Pagamento removido e painel atualizado');
-          if (reabrir) abrirDetalhes(reabrir.contexto, reabrir.filtro, { force: true });
-        });
-      }).catch(error => mostrarToast(error?.message || 'Erro ao remover pagamento', 'erro'));
+      Promise.resolve(window.AppRecordNavigator.open(destino))
+        .catch(error => mostrarToast(error?.message || 'Nao foi possivel abrir a origem.', 'erro'));
     }
 
     function extrairMes(valor) {
@@ -670,9 +589,7 @@
       abrirDetalhes,
       abrirObservabilidadeCard,
       fecharObservabilidadeCard,
-      editarOrigemObservabilidade,
-      excluirOrigemObservabilidade,
-      removerPagamentoObservabilidade,
+      abrirOrigemObservabilidade,
       handleCardClick,
       handleCardKeydown
     };

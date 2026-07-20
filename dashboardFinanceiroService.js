@@ -690,9 +690,6 @@ function criarLinhaEventoDashboardExecutivo(evento, valorOverride, detalheExtra)
     origem_id: evento.meta.origem_id,
     origem_aba: evento.meta.origem_aba,
     pagamento_id: String(evento.ID || '').trim(),
-    pode_editar_origem: true,
-    pode_excluir_origem: true,
-    pode_remover_pagamento: true,
     eh_contagem: false
   };
 }
@@ -712,9 +709,6 @@ function criarLinhaObrigacaoDashboardExecutivo(item) {
     origem_id: item.meta.origem_id,
     origem_aba: item.meta.origem_aba,
     pagamento_id: '',
-    pode_editar_origem: true,
-    pode_excluir_origem: true,
-    pode_remover_pagamento: false,
     eh_contagem: false
   };
 }
@@ -763,9 +757,6 @@ function obterDetalhesDashboardExecutivoFinanceiro(referenciaYm, contextoDetalhe
       origem_id: meta.origem_id,
       origem_aba: meta.origem_aba,
       pagamento_id: '',
-      pode_editar_origem: true,
-      pode_excluir_origem: true,
-      pode_remover_pagamento: false,
       eh_contagem: false
     };
   };
@@ -805,9 +796,6 @@ function obterDetalhesDashboardExecutivoFinanceiro(referenciaYm, contextoDetalhe
         origem_id: meta.origem_id,
         origem_aba: meta.origem_aba,
         pagamento_id: '',
-        pode_editar_origem: false,
-        pode_excluir_origem: false,
-        pode_remover_pagamento: false,
         eh_contagem: false
       };
     }).filter(item => item && item.valor > 0);
@@ -840,9 +828,6 @@ function obterDetalhesDashboardExecutivoFinanceiro(referenciaYm, contextoDetalhe
         origem_id: meta.origem_id,
         origem_aba: meta.origem_aba,
         pagamento_id: '',
-        pode_editar_origem: false,
-        pode_excluir_origem: false,
-        pode_remover_pagamento: false,
         eh_contagem: false
       };
     }).filter(item => item && item.valor > 0);
@@ -864,9 +849,6 @@ function obterDetalhesDashboardExecutivoFinanceiro(referenciaYm, contextoDetalhe
         origem_id: meta.origem_id,
         origem_aba: meta.origem_aba,
         pagamento_id: '',
-        pode_editar_origem: true,
-        pode_excluir_origem: true,
-        pode_remover_pagamento: false,
         eh_contagem: false
       } : null;
     }).filter(Boolean);
@@ -982,9 +964,6 @@ function obterDetalhesDashboardExecutivoFinanceiro(referenciaYm, contextoDetalhe
           origem_id: meta.origem_id,
           origem_aba: meta.origem_aba,
           pagamento_id: '',
-          pode_editar_origem: true,
-          pode_excluir_origem: true,
-          pode_remover_pagamento: false,
           eh_contagem: false
         };
       }).filter(Boolean);
@@ -1041,9 +1020,6 @@ function obterDetalhesDashboardExecutivoFinanceiro(referenciaYm, contextoDetalhe
           origem_id: meta.origem_id,
           origem_aba: meta.origem_aba,
           pagamento_id: '',
-          pode_editar_origem: false,
-          pode_excluir_origem: false,
-          pode_remover_pagamento: false,
           eh_contagem: false
         };
       }).filter(Boolean);

@@ -1,0 +1,237 @@
+<script>
+  window.AppListOrderUI = (() => {
+    const mounts = new Map();
+
+    const dateFields = {
+      estoque: {
+        operation: { fields: ['comprado_em', 'data_pagamento'], label: 'Compra' },
+        created: { fields: ['criado_em'], label: 'Cadastro' }
+      },
+      compras: {
+        operation: { fields: ['comprado_em'], label: 'Compra' },
+        created: { fields: ['criado_em'], label: 'Cadastro' },
+        due: { fields: ['data_vencimento'], label: 'Vencimento' }
+      },
+      vendas: {
+        operation: { fields: ['data_venda'], label: 'Venda' },
+        created: { fields: ['criado_em'], label: 'Cadastro' }
+      },
+      produtos: {
+        created: { fields: ['criado_em'], label: 'Cadastro' }
+      },
+      producao: {
+        operation: { fields: ['data_inicio'], label: 'Inicio' },
+        created: { fields: ['criado_em'], label: 'Cadastro' },
+        forecast: { fields: ['data_prevista_termino'], label: 'Previsao' }
+      },
+      despesas: {
+        operation: { fields: ['data_competencia'], label: 'Competencia' },
+        created: { fields: ['criado_em'], label: 'Cadastro' },
+        due: { fields: ['data_vencimento'], label: 'Vencimento' }
+      }
+    };
+
+    function normalizeDomain(value) {
+      return String(value || '').trim().toLowerCase();
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+    }
+
+    function normalizeSort(sort, options) {
+      const list = Array.isArray(options) ? options : [];
+      const selected = list.find(option => option.key === sort?.key) || list[0] || {
+        key: 'operation',
+        defaultDirection: 'desc',
+        type: 'date'
+      };
+      return {
+        key: selected.key,
+        direction: sort?.direction === 'asc' || sort?.direction === 'desc'
+          ? sort.direction
+          : (selected.defaultDirection === 'asc' ? 'asc' : 'desc')
+      };
+    }
+
+    function directionCopy(option, direction) {
+      const key = String(option?.key || '');
+      const type = String(option?.type || '');
+      if (type === 'text' || key === 'alpha') {
+        return direction === 'asc'
+          ? { short: 'A \u2192 Z', aria: 'Ordem alfabetica de A a Z' }
+          : { short: 'Z \u2192 A', aria: 'Ordem alfabetica de Z a A' };
+      }
+      if (key === 'due' || key === 'forecast') {
+        return direction === 'asc'
+          ? { short: 'Mais proximo', aria: 'Data mais proxima primeiro' }
+          : { short: 'Mais distante', aria: 'Data mais distante primeiro' };
+      }
+      if (type === 'date' || key === 'created' || key === 'operation') {
+        return direction === 'asc'
+          ? { short: 'Mais antigo', aria: 'Mais antigo primeiro' }
+          : { short: 'Mais recente', aria: 'Mais recente primeiro' };
+      }
+      return direction === 'asc'
+        ? { short: 'Menor primeiro', aria: 'Menor valor primeiro' }
+        : { short: 'Maior primeiro', aria: 'Maior valor primeiro' };
+    }
+
+    function render(config) {
+      const container = document.getElementById(config.containerId);
+      if (!container) return;
+      const options = Array.isArray(config.adapter?.getSortOptions?.())
+        ? config.adapter.getSortOptions()
+        : [];
+      if (options.length === 0) {
+        container.innerHTML = '';
+        return;
+      }
+      const sort = normalizeSort(config.adapter?.getSort?.(), options);
+      const active = options.find(option => option.key === sort.key) || options[0];
+      const direction = directionCopy(active, sort.direction);
+      const labelId = `${config.containerId}Label`;
+      const statusId = `${config.containerId}Status`;
+      container.innerHTML = `
+        <div class="lista-ordenacao" data-sort-domain="${escapeHtml(config.domain)}">
+          <label class="lista-ordenacao-campo" for="${escapeHtml(config.containerId)}Select">
+            <span id="${escapeHtml(labelId)}">Ordenar por</span>
+            <select id="${escapeHtml(config.containerId)}Select" aria-describedby="${escapeHtml(statusId)}">
+              ${options.map(option => `<option value="${escapeHtml(option.key)}"${option.key === sort.key ? ' selected' : ''}>${escapeHtml(option.label)}</option>`).join('')}
+            </select>
+          </label>
+          <button type="button" class="lista-ordenacao-direcao" aria-label="${escapeHtml(direction.aria)}" aria-describedby="${escapeHtml(statusId)}" title="${escapeHtml(direction.aria)}">
+            <span aria-hidden="true">\u21c5</span> ${escapeHtml(direction.short)}
+          </button>
+          <span id="${escapeHtml(statusId)}" class="lista-ordenacao-persistencia" role="status" aria-live="polite" title="Esta escolha fica salva somente neste navegador.">Ordenado: ${escapeHtml(direction.short)} · salvo neste dispositivo</span>
+        </div>
+      `;
+
+      const select = container.querySelector('select');
+      const button = container.querySelector('.lista-ordenacao-direcao');
+      select?.addEventListener('change', () => {
+        const nextOption = options.find(option => option.key === select.value) || options[0];
+        const nextDirection = nextOption?.defaultDirection === 'asc' ? 'asc' : 'desc';
+        config.adapter?.setSort?.(nextOption.key, nextDirection);
+        render(config);
+        document.getElementById(`${config.containerId}Select`)?.focus?.();
+        config.onChange?.(config.adapter?.getSort?.());
+      });
+      button?.addEventListener('click', () => {
+        const nextDirection = sort.direction === 'asc' ? 'desc' : 'asc';
+        config.adapter?.setSort?.(sort.key, nextDirection);
+        render(config);
+        document.getElementById(config.containerId)
+          ?.querySelector?.('.lista-ordenacao-direcao')
+          ?.focus?.();
+        config.onChange?.(config.adapter?.getSort?.());
+      });
+    }
+
+    function mount(config = {}) {
+      const containerId = String(config.containerId || '').trim();
+      const domain = normalizeDomain(config.domain);
+      if (!containerId || !domain || !config.adapter) return;
+      const normalized = { ...config, containerId, domain };
+      mounts.set(containerId, normalized);
+      render(normalized);
+    }
+
+    function refresh(containerId) {
+      const key = String(containerId || '').trim();
+      const config = mounts.get(key);
+      if (config) render(config);
+    }
+
+    function getRawDate(item, fields) {
+      const source = item && typeof item === 'object' ? item : {};
+      for (const field of (Array.isArray(fields) ? fields : [])) {
+        const value = String(source[field] ?? '').trim();
+        if (value) return value;
+      }
+      return '';
+    }
+
+    function formatDate(value) {
+      if (value instanceof Date || (typeof value === 'number' && Number.isFinite(value))) {
+        const date = value instanceof Date ? value : new Date(value);
+        if (Number.isFinite(date.getTime())) {
+          const yyyy = String(date.getFullYear()).padStart(4, '0');
+          const mm = String(date.getMonth() + 1).padStart(2, '0');
+          const dd = String(date.getDate()).padStart(2, '0');
+          const hh = String(date.getHours()).padStart(2, '0');
+          const min = String(date.getMinutes()).padStart(2, '0');
+          return {
+            display: `${dd}/${mm}/${yyyy} ${hh}:${min}`,
+            datetime: `${yyyy}-${mm}-${dd}T${hh}:${min}`
+          };
+        }
+      }
+      const raw = String(value ?? '').trim();
+      if (!raw) return { display: '-', datetime: '' };
+      let match = raw.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T\s](\d{2}):(\d{2}))?/);
+      if (match) {
+        const time = match[4] && match[5] ? ` ${match[4]}:${match[5]}` : '';
+        return {
+          display: `${match[3]}/${match[2]}/${match[1]}${time}`,
+          datetime: `${match[1]}-${match[2]}-${match[3]}${time ? `T${match[4]}:${match[5]}` : ''}`
+        };
+      }
+      match = raw.match(/^(\d{2})\/(\d{2})\/(\d{4})(?:[T\s](\d{2}):(\d{2}))?/);
+      if (match) {
+        const time = match[4] && match[5] ? ` ${match[4]}:${match[5]}` : '';
+        return {
+          display: `${match[1]}/${match[2]}/${match[3]}${time}`,
+          datetime: `${match[3]}-${match[2]}-${match[1]}${time ? `T${match[4]}:${match[5]}` : ''}`
+        };
+      }
+      return { display: raw, datetime: '' };
+    }
+
+    function getCardDate(domain, item, sort = {}) {
+      const config = dateFields[normalizeDomain(domain)] || {};
+      const requestedKey = ['created', 'due', 'forecast'].includes(String(sort?.key || ''))
+        ? String(sort.key)
+        : 'operation';
+      let selected = config[requestedKey] || config.operation || config.created;
+      let raw = selected ? getRawDate(item, selected.fields) : '';
+      if (!raw && requestedKey !== 'operation' && config.operation) {
+        selected = config.operation;
+        raw = getRawDate(item, selected.fields);
+      }
+      if (!raw && config.created) {
+        selected = config.created;
+        raw = getRawDate(item, selected.fields);
+      }
+      if (!raw && selected === config.created && window.AppListOrder?.getDateInfo) {
+        raw = window.AppListOrder.getDateInfo(domain, item, 'created')?.value || '';
+      }
+      const formatted = formatDate(raw);
+      return {
+        label: selected?.label || 'Data',
+        value: raw,
+        display: formatted.display,
+        datetime: formatted.datetime
+      };
+    }
+
+    function cardDateHtml(domain, item, sort) {
+      const date = getCardDate(domain, item, sort);
+      const datetime = date.datetime ? ` datetime="${escapeHtml(date.datetime)}"` : '';
+      return `<div class="card-data-operacao"><span>${escapeHtml(date.label)}</span><time${datetime}>${escapeHtml(date.display)}</time></div>`;
+    }
+
+    return {
+      mount,
+      refresh,
+      formatDate,
+      getCardDate,
+      cardDateHtml
+    };
+  })();
+</script>

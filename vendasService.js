@@ -224,7 +224,17 @@ function recarregarCacheVendas() {
   };
 }
 
-function listarVendas(forcarRecarregar) {
+function listarVendas(forcarRecarregar, ambiente) {
+  if (typeof executarComAmbienteBancoDadosAutorizado_ !== 'function') {
+    throw new Error('Controle de ambiente indisponivel.');
+  }
+  return executarComAmbienteBancoDadosAutorizado_(
+    ambiente,
+    () => listarVendasNoAmbienteAtual_(forcarRecarregar)
+  );
+}
+
+function listarVendasNoAmbienteAtual_(forcarRecarregar) {
   if (!forcarRecarregar) {
     const cached = lerCacheListaVendas();
     if (Array.isArray(cached)) {
@@ -270,7 +280,17 @@ function listarVendas(forcarRecarregar) {
   return lista;
 }
 
-function listarItensEstoqueVendaveis() {
+function listarItensEstoqueVendaveis(ambiente) {
+  if (typeof executarComAmbienteBancoDadosAutorizado_ !== 'function') {
+    throw new Error('Controle de ambiente indisponivel.');
+  }
+  return executarComAmbienteBancoDadosAutorizado_(
+    ambiente,
+    () => listarItensEstoqueVendaveisNoAmbienteAtual_()
+  );
+}
+
+function listarItensEstoqueVendaveisNoAmbienteAtual_() {
   const sheet = getSheet(ABA_ESTOQUE);
   if (!sheet) return [];
   const regras = obterConfigVendabilidadeVendas();
