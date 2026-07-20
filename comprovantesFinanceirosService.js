@@ -365,7 +365,7 @@ function registrarSaldoComprovanteComoDespesa(comprovanteId, payload) {
 }
 
 function registrarSaldoComprovanteComoDespesaAtual_(comprovanteId, payload) {
-  assertCanWrite('Registro de comprovante como despesa simples');
+  assertCanWrite('Registro de comprovante como nova despesa');
   let comprovante = obterInboxDespesaPorId_(comprovanteId);
   if (!comprovante) throw new Error('Comprovante nao encontrado.');
   comprovante = persistirEdicaoComprovanteFinanceiro_(comprovante, payload);
@@ -443,7 +443,7 @@ function registrarSaldoComprovanteComoDespesaAtual_(comprovanteId, payload) {
     client_request_id: `${baseKey}_DES`.slice(0, 120)
   }, { lockJaAdquirido: true });
   const despesaId = String(despesa?.ID || '').trim();
-  if (!despesaId) throw new Error('Nao foi possivel criar a despesa simples.');
+  if (!despesaId) throw new Error('Nao foi possivel criar a nova despesa.');
   const parcela = listarParcelasFinanceirasOrigem('DESPESA_GERAL', despesaId)[0] || null;
   const pagamento = registrarPagamento('DESPESA_GERAL', despesaId, {
     parcela_alvo_id: String(parcela?.ID || '').trim(),
@@ -498,7 +498,7 @@ function desfazerAlocacaoComprovanteFinanceiro(comprovanteId, pagamentoId, ambie
           if (!despesaRemovida) {
             updateById(ABA_PAGAMENTOS, 'ID', pagamento.ID, { ativo: true }, PAGAMENTOS_SCHEMA);
             regerarParcelasFinanceirasOrigemComPagamentos(origemTipo, origemId);
-            throw new Error('Nao foi possivel remover a despesa simples vinculada. O pagamento foi restaurado.');
+            throw new Error('Nao foi possivel remover a nova despesa vinculada. O pagamento foi restaurado.');
           }
         }
       }

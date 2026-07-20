@@ -1226,6 +1226,92 @@
     font-size: 11.5px;
   }
 
+  .despesas-inbox-modo {
+    min-width: 0;
+    margin: 12px 0 0;
+    padding: 0;
+    border: 0;
+  }
+
+  .despesas-inbox-modo legend {
+    margin-bottom: 7px;
+    padding: 0;
+    color: #334155;
+    font-size: 12.5px;
+    font-weight: 800;
+  }
+
+  .despesas-inbox-modo-opcoes {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .despesas-inbox-modo-opcao {
+    display: flex;
+    align-items: flex-start;
+    gap: 9px;
+    min-width: 0;
+    padding: 10px;
+    border: 1px solid #dbe3ef;
+    border-radius: 8px;
+    background: #fff;
+    color: #334155;
+    cursor: pointer;
+    transition: border-color 120ms ease, background-color 120ms ease, box-shadow 120ms ease;
+  }
+
+  .despesas-inbox-modo-opcao:hover {
+    border-color: #93c5fd;
+    background: #f8fbff;
+  }
+
+  .despesas-inbox-modo-opcao.is-active {
+    border-color: #60a5fa;
+    background: #eff6ff;
+    box-shadow: 0 0 0 1px rgba(37, 99, 235, 0.08);
+  }
+
+  .despesas-inbox-modo-opcao input {
+    flex: 0 0 auto;
+    width: auto;
+    margin: 2px 0 0;
+  }
+
+  .despesas-inbox-modo-opcao span {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+  }
+
+  .despesas-inbox-modo-opcao strong {
+    color: #172033;
+    font-size: 12.5px;
+    line-height: 1.25;
+  }
+
+  .despesas-inbox-modo-opcao small {
+    color: #64748b;
+    font-size: 11.5px;
+    line-height: 1.35;
+  }
+
+  .despesas-inbox-painel {
+    margin-top: 8px;
+  }
+
+  .despesas-inbox-painel[hidden] {
+    display: none;
+  }
+
+  .despesas-inbox-painel-ajuda {
+    margin: 0;
+    color: #64748b;
+    font-size: 12px;
+    line-height: 1.35;
+  }
+
   .despesas-inbox-conciliar {
     display: grid;
     grid-template-columns: minmax(220px, 1fr) minmax(150px, 0.35fr) auto;
@@ -1236,6 +1322,11 @@
     border: 1px solid #dbe3ef;
     border-radius: 8px;
     background: #f8fafc;
+  }
+
+  .despesas-inbox-conciliar-nova {
+    grid-template-columns: minmax(180px, 240px) auto;
+    justify-content: start;
   }
 
   .despesas-inbox-conciliar .campo-ajuda-wrap,
@@ -1842,6 +1933,10 @@
     }
 
     .despesa-inbox-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .despesas-inbox-modo-opcoes {
       grid-template-columns: 1fr;
     }
 
