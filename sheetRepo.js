@@ -106,6 +106,9 @@ function invalidarCachesRelacionadosAba(sheetName) {
     aba === 'DESPESAS_GERAIS' ||
     aba === 'PAGAMENTOS' ||
     aba === 'PARCELAS_FINANCEIRAS' ||
+    aba === 'DOCUMENTOS_COMPRA' ||
+    aba === 'DOCUMENTOS_COMPRA_ITENS' ||
+    aba === 'MOVIMENTOS_ESTOQUE' ||
     aba.startsWith('PRODUCAO') ||
     aba.startsWith('PRODUTOS');
 

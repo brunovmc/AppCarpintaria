@@ -2548,7 +2548,11 @@
       if (!window.AppRequest?.call) {
         return Promise.reject(new Error('google.script.run indisponivel'));
       }
-      return window.AppRequest.call('registrarRecebimentoVenda', [entry.meta?.target_id, entry.payload], {
+      const payload = {
+        ...(entry.payload || {}),
+        client_request_id: String(entry.payload?.client_request_id || `VNDREC_${entry.id || ''}`).slice(0, 120)
+      };
+      return window.AppRequest.call('registrarRecebimentoVenda', [entry.meta?.target_id, payload], {
         context: 'optimistic.venda.receive',
         errorMessage: 'Erro ao sincronizar recebimento da venda'
       });
@@ -5421,6 +5425,5 @@
     }
   });
 </script>
-
 
 

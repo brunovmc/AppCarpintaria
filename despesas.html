@@ -35,21 +35,29 @@
 <div id="despesasInbox" class="despesas-inbox">
   <div class="despesas-inbox-topo">
     <div class="despesas-inbox-titulo">
-      <strong>Comprovantes</strong>
+      <strong>Comprovantes de pagamento</strong>
       <span id="despesasInboxResumo">0 pendentes</span>
     </div>
 
     <div class="despesas-inbox-acoes">
-      <input id="inputComprovanteDespesa" class="hidden" type="file" accept="image/*">
-      <button id="btnUploadComprovanteDespesa" type="button">Adicionar imagem</button>
+      <input id="inputComprovanteDespesa" class="hidden" type="file" accept="image/*,application/pdf">
+      <button id="btnUploadComprovanteDespesa" type="button">Adicionar comprovante</button>
       <button id="btnToggleInboxDespesas" class="despesas-inbox-toggle" type="button" aria-expanded="false" aria-controls="despesasInboxConteudo">Ver comprovantes</button>
     </div>
   </div>
 
   <div id="despesasInboxConteudo" class="despesas-inbox-conteudo hidden">
     <div class="despesas-inbox-conteudo-topo">
-      <span>Revise os dados extraidos antes de confirmar.</span>
+      <span>Revise e vincule cada pagamento a compras ou despesas. O saldo tambem pode virar uma despesa simples.</span>
       <div class="despesas-inbox-conteudo-acoes">
+        <label class="campo-ajuda-wrap despesas-inbox-filtro">
+          <span class="campo-ajuda-tag">Exibir</span>
+          <select id="filtroInboxComprovantes">
+            <option value="PENDENTES">Pendentes</option>
+            <option value="TODOS">Todos</option>
+            <option value="CONCILIADOS">Conciliados</option>
+          </select>
+        </label>
         <button id="btnBuscarComprovantesDrive" type="button">Buscar no Drive</button>
         <button id="btnAtualizarInboxDespesas" type="button">Atualizar</button>
       </div>
@@ -166,7 +174,7 @@
 
     <div id="pagDespesaParcelaWrap" class="campo-ajuda-wrap hidden">
       <span class="campo-ajuda-tag">Parcela</span>
-      <select id="pagDespesaParcela"></select>
+      <select id="pagDespesaParcela" onchange="DespesasController.handlePagamentoDespesaParcelaChange()"></select>
     </div>
 
     <div class="campo-ajuda-wrap">

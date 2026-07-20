@@ -6,6 +6,33 @@
   <span class="tipo-filtro-placeholder p5" aria-hidden="true"></span>
 </div>
 
+<section id="comprasDocumentosInbox" class="despesas-inbox compras-documentos-inbox" aria-labelledby="comprasDocumentosInboxTitulo">
+  <div class="despesas-inbox-topo">
+    <div class="despesas-inbox-titulo">
+      <strong id="comprasDocumentosInboxTitulo">Documentos de compra</strong>
+      <span>Leia recibos, notas, PDFs ou ate 5 capturas do mesmo pedido.</span>
+    </div>
+    <div class="despesas-inbox-acoes">
+      <input id="inputDocumentoCompra" class="hidden" type="file" accept="image/*,application/pdf" multiple>
+      <button id="btnUploadDocumentoCompra" type="button">Enviar documento</button>
+      <button id="btnToggleDocumentosCompra" class="despesas-inbox-toggle" type="button" aria-expanded="false" aria-controls="comprasDocumentosInboxConteudo">Ver pendencias</button>
+    </div>
+  </div>
+
+  <div id="comprasDocumentosInboxConteudo" class="despesas-inbox-conteudo hidden">
+    <div class="despesas-inbox-conteudo-topo">
+      <span id="comprasDocumentosResumo">Nenhum documento aguardando revisao.</span>
+      <div class="despesas-inbox-conteudo-acoes">
+        <button id="btnBuscarDocumentosCompraDrive" type="button">Buscar no Drive</button>
+        <button id="btnAtualizarDocumentosCompra" type="button">Atualizar</button>
+      </div>
+    </div>
+    <div id="comprasDocumentosDriveStatus" class="despesas-inbox-status hidden"></div>
+    <div id="comprasDocumentosStatus" class="despesas-inbox-status hidden"></div>
+    <div id="listaDocumentosCompra" class="despesas-inbox-list"></div>
+  </div>
+</section>
+
 <div id="listaCompras" class="lista-estavel-topo lista-loading" aria-busy="true"></div>
 <div id="listaControlesCompras" class="lista-controles"></div>
 
@@ -154,7 +181,7 @@
 
     <div id="pagamentoCompraParcelaWrap" class="campo-ajuda-wrap hidden">
       <span class="campo-ajuda-tag">Parcela</span>
-      <select id="pagamentoCompraParcela"></select>
+      <select id="pagamentoCompraParcela" onchange="ComprasUI.handlePagamentoParcelaChange()"></select>
     </div>
 
     <div class="campo-ajuda-wrap">

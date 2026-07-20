@@ -55,6 +55,8 @@ const PAGAMENTOS_SCHEMA = [
   'valor_pago',
   'forma_pagamento',
   'observacao',
+  'client_request_id',
+  'comprovante_id',
   'ativo',
   'criado_em'
 ];
@@ -743,6 +745,8 @@ function listarPagamentos(forcarRecarregar) {
     .filter(i => String(i.ativo).toLowerCase() === 'true')
     .map(i => ({
       ...i,
+      client_request_id: String(i.client_request_id || '').trim(),
+      comprovante_id: String(i.comprovante_id || '').trim(),
       parcela_alvo_id: String(i.parcela_alvo_id || '').trim(),
       natureza: (() => {
         const bruto = String(i.natureza || '').trim();
@@ -996,18 +1000,13 @@ function aplicarPagamentoParcelaAlvoFinanceiro(origemTipo, origemId, parcelaAlvo
     throw new Error('Parcela alvo nao encontrada para esta origem.');
   }
 
-  const primeiraPendente = getPrimeiraParcelaPendenteFinanceiro(parcelas);
-  if (!primeiraPendente || String(primeiraPendente.ID || '').trim() !== parcelaId) {
-    throw new Error('Pagamento deve seguir a ordem das parcelas pendentes.');
-  }
-
   const pendente = round2Financeiro(parseNumeroBR(parcela.valor_pendente));
   const valor = round2Financeiro(parseNumeroBR(valorPago));
   if (pendente <= 0.009) {
     throw new Error('Parcela selecionada ja esta quitada.');
   }
-  if (Math.abs(valor - pendente) > 0.009) {
-    throw new Error('Valor pago deve ser igual ao valor pendente da parcela selecionada.');
+  if (valor <= 0 || valor > pendente + 0.009) {
+    throw new Error('Valor pago deve ser maior que zero e nao pode ultrapassar o saldo da parcela selecionada.');
   }
 
   const novoPago = round2Financeiro(parseNumeroBR(parcela.valor_pago) + valor);
@@ -1019,7 +1018,7 @@ function aplicarPagamentoParcelaAlvoFinanceiro(origemTipo, origemId, parcelaAlvo
     {
       valor_pago: novoPago,
       status: quitada ? 'PAGO' : 'PARCIAL',
-      data_quitacao: String(dataPagamento || ''),
+      data_quitacao: quitada ? String(dataPagamento || '') : '',
       pagamento_id: String(pagamentoId || '').trim()
     },
     PARCELAS_FINANCEIRAS_SCHEMA
@@ -1077,12 +1076,46 @@ function aplicarPagamentoEmParcelasFinanceiro(origemTipo, origemId, pagamentoId,
   };
 }
 
+function mapearParcelasAlvoRegeradasFinanceiro(pagamentos, parcelasHistoricas, parcelasRecriadas, origemTipo, origemId) {
+  const tipo = normalizarOrigemTipoFinanceiro(origemTipo);
+  const id = String(origemId || '').trim();
+  const numeroPorParcelaId = {};
+  (Array.isArray(parcelasHistoricas) ? parcelasHistoricas : []).forEach(parcela => {
+    const parcelaId = String(parcela.ID || '').trim();
+    if (!parcelaId) return;
+    if (String(parcela.origem_tipo || '').trim().toUpperCase() !== tipo) return;
+    if (String(parcela.origem_id || '').trim() !== id) return;
+    numeroPorParcelaId[parcelaId] = Math.max(1, Math.floor(parseNumeroBR(parcela.parcela_numero) || 1));
+  });
+  const parcelaNovaPorNumero = {};
+  (Array.isArray(parcelasRecriadas) ? parcelasRecriadas : []).forEach(parcela => {
+    const numero = Math.max(1, Math.floor(parseNumeroBR(parcela.parcela_numero) || 1));
+    parcelaNovaPorNumero[numero] = String(parcela.ID || '').trim();
+  });
+  return (Array.isArray(pagamentos) ? pagamentos : []).map(pagamento => {
+    const parcelaAlvoAnteriorId = String(pagamento.parcela_alvo_id || '').trim();
+    if (!parcelaAlvoAnteriorId) {
+      return { pagamento, parcela_alvo_anterior_id: '', parcela_alvo_atual_id: '' };
+    }
+    const numeroParcela = numeroPorParcelaId[parcelaAlvoAnteriorId];
+    const parcelaAlvoAtualId = parcelaNovaPorNumero[numeroParcela];
+    if (!parcelaAlvoAtualId) {
+      throw new Error(`Nao foi possivel restaurar a parcela alvo do pagamento ${pagamento.ID}.`);
+    }
+    return {
+      pagamento,
+      parcela_numero: numeroParcela,
+      parcela_alvo_anterior_id: parcelaAlvoAnteriorId,
+      parcela_alvo_atual_id: parcelaAlvoAtualId
+    };
+  });
+}
+
 function regerarParcelasFinanceirasOrigemComPagamentos(origemTipo, origemId) {
   const tipo = normalizarOrigemTipoFinanceiro(origemTipo);
   const id = String(origemId || '').trim();
   if (!id) throw new Error('Origem nao informada.');
 
-  gerarParcelasFinanceirasOrigem(tipo, id);
   const pagamentos = listarPagamentos(true)
     .filter(p => {
       try {
@@ -1099,7 +1132,38 @@ function regerarParcelasFinanceirasOrigemComPagamentos(origemTipo, origemId) {
       return String(a.ID || '').localeCompare(String(b.ID || ''));
     });
 
-  pagamentos.forEach(p => {
+  // As parcelas sao recriadas com novos IDs. Preserve o numero da parcela
+  // escolhida antes da recriacao e atualize o pagamento para o novo ID.
+  // Isso permite refazer os saldos sem deslocar pagamentos parciais ou
+  // pagamentos feitos fora da ordem cronologica para outra parcela.
+  const sheetParcelas = getSheet(ABA_PARCELAS_FINANCEIRAS);
+  const parcelasHistoricas = sheetParcelas ? rowsToObjects(sheetParcelas) : [];
+  const parcelasRecriadas = gerarParcelasFinanceirasOrigem(tipo, id);
+  const pagamentosMapeados = mapearParcelasAlvoRegeradasFinanceiro(
+    pagamentos,
+    parcelasHistoricas,
+    parcelasRecriadas,
+    tipo,
+    id
+  );
+
+  pagamentosMapeados.forEach(mapeamento => {
+    const p = mapeamento.pagamento;
+    const parcelaAlvoAnteriorId = mapeamento.parcela_alvo_anterior_id;
+    if (parcelaAlvoAnteriorId) {
+      const parcelaAlvoAtualId = mapeamento.parcela_alvo_atual_id;
+      if (parcelaAlvoAtualId !== parcelaAlvoAnteriorId) {
+        updateById(
+          ABA_PAGAMENTOS,
+          'ID',
+          p.ID,
+          { parcela_alvo_id: parcelaAlvoAtualId },
+          PAGAMENTOS_SCHEMA
+        );
+      }
+      aplicarPagamentoParcelaAlvoFinanceiro(tipo, id, parcelaAlvoAtualId, p.ID, p.valor_pago, p.data_pagamento);
+      return;
+    }
     aplicarPagamentoEmParcelasFinanceiro(tipo, id, p.ID, p.valor_pago, p.data_pagamento);
   });
 
@@ -1616,11 +1680,12 @@ function recarregarCacheDespesasGerais() {
   };
 }
 
-function criarDespesaGeral(payload) {
+function criarDespesaGeral(payload, opcoesInternas) {
   assertCanWrite('Criacao de despesa geral');
   const dados = normalizarPayloadDespesaGeral(payload);
   const clientRequestId = normalizarClientRequestIdDespesaFinanceiro(payload?.client_request_id);
-  const lock = (typeof LockService !== 'undefined' && LockService.getScriptLock)
+  const lockJaAdquirido = opcoesInternas?.lockJaAdquirido === true;
+  const lock = !lockJaAdquirido && typeof LockService !== 'undefined' && LockService.getScriptLock
     ? LockService.getScriptLock()
     : null;
 
@@ -1904,7 +1969,7 @@ function registrarPagamento(origemTipo, origemId, payload) {
   assertCanWrite('Registro de pagamento');
   const origem = obterOrigemPagamentoFinanceiro(origemTipo, origemId);
   const dados = { ...(payload || {}) };
-
+  const clientRequestId = String(dados.client_request_id || '').trim().slice(0, 120);
   const valorPago = round2Financeiro(parseNumeroBR(dados.valor_pago));
   if (valorPago <= 0) {
     throw new Error('Valor pago deve ser maior que zero.');
@@ -1913,6 +1978,31 @@ function registrarPagamento(origemTipo, origemId, payload) {
   const dataPagamento = normalizarDataFinanceiro(dados.data_pagamento, true, 'Data de pagamento');
   const formaPagamento = validarFormaPagamentoFinanceiro(dados.forma_pagamento, true);
   const observacao = String(dados.observacao || '').trim();
+
+  if (clientRequestId) {
+    const existente = listarPagamentos(true).find(p =>
+      String(p.client_request_id || '').trim() === clientRequestId &&
+      String(p.ativo).toLowerCase() === 'true'
+    );
+    if (existente) {
+      const origemExistenteTipo = normalizarOrigemTipoFinanceiro(existente.origem_tipo);
+      const origemExistenteId = String(existente.origem_id || '').trim();
+      if (origemExistenteTipo !== origem.tipo || origemExistenteId !== origem.id) {
+        throw new Error('Identificador de pagamento ja utilizado por outra origem financeira.');
+      }
+      const mesmosDados = Math.abs(round2Financeiro(parseNumeroBR(existente.valor_pago)) - valorPago) <= 0.009 &&
+        formatarDataYmdFinanceiroSafe(existente.data_pagamento) === formatarDataYmdFinanceiroSafe(dataPagamento) &&
+        normalizarTextoSemAcentoFinanceiro(existente.forma_pagamento) === normalizarTextoSemAcentoFinanceiro(formaPagamento) &&
+        String(existente.comprovante_id || '').trim() === String(dados.comprovante_id || '').trim();
+      if (!mesmosDados) {
+        throw new Error('A repeticao do pagamento possui valor, data ou forma diferente da tentativa original.');
+      }
+      // Recupera com seguranca uma execucao interrompida depois de inserir o
+      // pagamento, mas antes de concluir a atualizacao das parcelas.
+      regerarParcelasFinanceirasOrigemComPagamentos(origem.tipo, origem.id);
+      return existente;
+    }
+  }
 
   const totalPagoAtual = calcularTotalPagoOrigemFinanceiro(origem.tipo, origem.id, true);
   const totalPrevisto = round2Financeiro(origem.total_previsto);
@@ -1929,26 +2019,20 @@ function registrarPagamento(origemTipo, origemId, payload) {
       parcelasOrigem = [];
     }
   }
-  const parcelasOrigemTotal = Math.max(1, Math.floor(parseNumeroBR(origem.item?.parcelas) || 1));
-  const parcelado = parcelasOrigemTotal > 1;
   let parcelaAlvoId = String(dados.parcela_alvo_id || '').trim();
-  if (parcelado) {
-    const primeiraPendente = getPrimeiraParcelaPendenteFinanceiro(parcelasOrigem);
-    if (!primeiraPendente) {
-      throw new Error('Nao ha parcelas pendentes para registrar pagamento.');
+  const parcelasOrigemTotal = Math.max(1, Math.floor(parseNumeroBR(origem.item?.parcelas) || parcelasOrigem.length || 1));
+  const distribuirAutomaticamente = dados.distribuir_automaticamente === true;
+  if (!parcelaAlvoId && parcelasOrigemTotal > 1 && !distribuirAutomaticamente) {
+    throw new Error('Selecione uma parcela pendente para registrar o pagamento.');
+  }
+  if (parcelaAlvoId) {
+    const parcelaAlvo = parcelasOrigem.find(parcela => String(parcela.ID || '').trim() === parcelaAlvoId);
+    if (!parcelaAlvo) throw new Error('Parcela selecionada nao pertence a esta origem.');
+    const valorPendenteParcela = round2Financeiro(parseNumeroBR(parcelaAlvo.valor_pendente));
+    if (valorPendenteParcela <= 0.009) throw new Error('Parcela selecionada ja esta quitada.');
+    if (valorPago > valorPendenteParcela + 0.009) {
+      throw new Error('Pagamento maior que o saldo pendente da parcela selecionada.');
     }
-    if (!parcelaAlvoId) {
-      throw new Error('Selecione a parcela pendente para registrar o pagamento.');
-    }
-    if (String(primeiraPendente.ID || '').trim() !== parcelaAlvoId) {
-      throw new Error('Pagamento deve seguir a ordem das parcelas pendentes.');
-    }
-    const valorEsperado = round2Financeiro(parseNumeroBR(primeiraPendente.valor_pendente));
-    if (Math.abs(valorPago - valorEsperado) > 0.009) {
-      throw new Error('Valor pago deve ser igual ao valor pendente da parcela selecionada.');
-    }
-  } else {
-    parcelaAlvoId = '';
   }
 
   const novo = {
@@ -1961,6 +2045,8 @@ function registrarPagamento(origemTipo, origemId, payload) {
     valor_pago: valorPago,
     forma_pagamento: formaPagamento,
     observacao,
+    client_request_id: clientRequestId,
+    comprovante_id: String(dados.comprovante_id || '').trim().slice(0, 120),
     ativo: true,
     criado_em: new Date()
   };
@@ -2014,7 +2100,7 @@ function registrarPagamentoDespesaGeral(despesaId, payload) {
   };
 }
 
-function removerPagamento(id) {
+function removerPagamento(id, opcoesInternas) {
   assertCanWrite('Exclusao de pagamento');
   const pagamento = listarPagamentos(true).find(p => String(p.ID || '').trim() === String(id || '').trim());
   const ok = updateById(
@@ -2028,7 +2114,16 @@ function removerPagamento(id) {
     try {
       regerarParcelasFinanceirasOrigemComPagamentos(pagamento.origem_tipo, pagamento.origem_id);
     } catch (error) {
-      // sem acao
+      if (opcoesInternas?.rollbackEmFalha === true) {
+        updateById(ABA_PAGAMENTOS, 'ID', id, { ativo: true }, PAGAMENTOS_SCHEMA);
+        try {
+          regerarParcelasFinanceirasOrigemComPagamentos(pagamento.origem_tipo, pagamento.origem_id);
+        } catch (rollbackError) {
+          // O erro original descreve a operacao que falhou; o reparo pode ser
+          // tentado novamente pela rotina de regeneracao financeira.
+        }
+        throw error;
+      }
     }
   }
   return ok;

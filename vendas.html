@@ -1,4 +1,43 @@
-<div id="listaVendas"></div>
+<div id="recebimentosInbox" class="despesas-inbox">
+  <div class="despesas-inbox-topo">
+    <div class="despesas-inbox-titulo">
+      <strong>Comprovantes de recebimento</strong>
+      <span id="recebimentosInboxResumo">0 pendentes</span>
+    </div>
+    <div class="despesas-inbox-acoes">
+      <input id="inputComprovanteRecebimento" class="hidden" type="file" accept="image/*,application/pdf">
+      <button id="btnUploadComprovanteRecebimento" type="button">Adicionar comprovante</button>
+      <button id="btnToggleInboxRecebimentos" class="despesas-inbox-toggle" type="button" aria-expanded="false" aria-controls="recebimentosInboxConteudo">Ver comprovantes</button>
+    </div>
+  </div>
+  <div id="recebimentosInboxConteudo" class="despesas-inbox-conteudo hidden">
+    <div class="despesas-inbox-conteudo-topo">
+      <span>Revise cada entrada e vincule o valor a uma ou mais vendas ou parcelas.</span>
+      <div class="despesas-inbox-conteudo-acoes">
+        <label class="campo-ajuda-wrap despesas-inbox-filtro">
+          <span class="campo-ajuda-tag">Exibir</span>
+          <select id="filtroInboxRecebimentos">
+            <option value="PENDENTES">Pendentes</option>
+            <option value="TODOS">Todos</option>
+            <option value="CONCILIADOS">Conciliados</option>
+          </select>
+        </label>
+        <button id="btnBuscarRecebimentosDrive" type="button">Buscar no Drive</button>
+        <button id="btnAtualizarInboxRecebimentos" type="button">Atualizar</button>
+      </div>
+    </div>
+    <div id="recebimentosInboxStatus" class="despesas-inbox-status hidden"></div>
+    <div id="listaInboxRecebimentos" class="despesas-inbox-list"></div>
+  </div>
+</div>
+
+<section class="despesas-cadastradas">
+  <div class="despesas-cadastradas-titulo">
+    <strong>Vendas cadastradas</strong>
+    <span>Pedidos, parcelas e recebimentos</span>
+  </div>
+  <div id="listaVendas"></div>
+</section>
 <div id="listaControlesVendas" class="lista-controles"></div>
 
 <div id="modalDetalhesVendas" class="modal hidden">
@@ -32,6 +71,16 @@
   <div class="campo-ajuda-wrap">
     <span class="campo-ajuda-tag">Valor unitario (R$)</span>
     <input id="vendaValorUnit" type="number" readonly>
+  </div>
+
+  <div class="campo-ajuda-wrap">
+    <span class="campo-ajuda-tag">Cliente</span>
+    <input id="vendaCliente" maxlength="160">
+  </div>
+
+  <div class="campo-ajuda-wrap">
+    <span class="campo-ajuda-tag">Referencia da venda ou pedido</span>
+    <input id="vendaReferencia" maxlength="160">
   </div>
 
   <div class="campo-ajuda-wrap">
@@ -86,7 +135,7 @@
 
     <div id="recebimentoVendaParcelaWrap" class="campo-ajuda-wrap hidden">
       <span class="campo-ajuda-tag">Parcela</span>
-      <select id="recebimentoVendaParcela"></select>
+      <select id="recebimentoVendaParcela" onchange="VendasUI.handleRecebimentoParcelaChange()"></select>
     </div>
 
     <div class="campo-ajuda-wrap">

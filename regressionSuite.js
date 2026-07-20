@@ -11,7 +11,10 @@ function listarCasosRegressaoSprint3_() {
     ['producao:madeira-reserva-exclusiva', regressionProducaoMadeiraReservaExclusiva],
     ['producao:consumo-soft-delete', regressionProducaoConsumoSoftDelete],
     ['producao:editar-op-libera-reservas', regressionProducaoAtualizacaoRegeraNecessidades],
-    ['vendas:saldo-disponivel-com-reserva', regressionVendaSaldoReservado]
+    ['vendas:saldo-disponivel-com-reserva', regressionVendaSaldoReservado],
+    ['documentos-compra:rateio+quantidade', regressionDocumentoCompraCalculos],
+    ['comprovantes:matching+schema', regressionComprovantesFinanceiros],
+    ['recebimentos:matching+schema', regressionComprovantesRecebimentos]
   ];
 }
 
@@ -33,6 +36,13 @@ function listarGruposRegressaoSprint3_() {
     ],
     parte4: [
       'vendas:saldo-disponivel-com-reserva'
+    ],
+    parte5: [
+      'documentos-compra:rateio+quantidade'
+    ],
+    parte6: [
+      'comprovantes:matching+schema',
+      'recebimentos:matching+schema'
     ]
   };
 }
@@ -1418,4 +1428,160 @@ function regressionVendaSaldoReservado() {
   } finally {
     executarCleanupRegressao(contexto);
   }
+}
+
+function regressionDocumentoCompraCalculos() {
+  const itens = ratearCustosDocumentoCompra_([
+    { ID: 'A', item_nome: 'Item A', valor_total: 100 },
+    { ID: 'B', item_nome: 'Item B', valor_total: 300 }
+  ], 40, 20);
+
+  assertRegressao(itens.length === 2, 'Rateio deveria preservar os dois itens.');
+  assertAproxRegressao(itens[0].frete_rateado, 10, 0.001, 'Frete proporcional do item A incorreto.');
+  assertAproxRegressao(itens[0].desconto_rateado, 5, 0.001, 'Desconto proporcional do item A incorreto.');
+  assertAproxRegressao(itens[0].custo_total, 105, 0.001, 'Custo final do item A incorreto.');
+  assertAproxRegressao(itens[1].custo_total, 315, 0.001, 'Custo final do item B incorreto.');
+  assertAproxRegressao(
+    itens.reduce((acc, item) => acc + item.custo_total, 0),
+    420,
+    0.001,
+    'A soma dos custos deveria reconciliar com subtotal + frete - desconto.'
+  );
+
+  const quantidadeMadeira = calcularQuantidadeEstoqueDocumentoCompra_({
+    tipo: 'MADEIRA',
+    quantidade: 2,
+    comprimento_cm: 200,
+    largura_cm: 10,
+    espessura_cm: 2
+  });
+  assertAproxRegressao(quantidadeMadeira, 0.008, 0.000001, 'Volume de duas pecas de madeira incorreto.');
+  assertRegressao(
+    normalizarDestinoItemDocumentoCompra_('valor desconhecido') === 'ESTOQUE',
+    'Destino desconhecido deveria exigir revisao partindo de ESTOQUE.'
+  );
+
+  return {
+    ok: true,
+    custo_total: itens.reduce((acc, item) => acc + item.custo_total, 0),
+    quantidade_madeira_m3: quantidadeMadeira
+  };
+}
+
+function regressionComprovantesFinanceiros() {
+  assertRegressao(
+    new Set(INBOX_DESPESAS_SCHEMA).size === INBOX_DESPESAS_SCHEMA.length,
+    'Schema de INBOX_DESPESAS nao deve conter cabecalhos duplicados.'
+  );
+  ['classificacao', 'referencia_transacao', 'conciliado_em'].forEach(cabecalho => {
+    assertRegressao(INBOX_DESPESAS_SCHEMA.includes(cabecalho), `Cabecalho ausente na Inbox: ${cabecalho}.`);
+  });
+  assertRegressao(
+    new Set(PAGAMENTOS_SCHEMA).size === PAGAMENTOS_SCHEMA.length,
+    'Schema de PAGAMENTOS nao deve conter cabecalhos duplicados.'
+  );
+  assertRegressao(PAGAMENTOS_SCHEMA.includes('comprovante_id'), 'Cabecalho comprovante_id ausente em PAGAMENTOS.');
+
+  const comprovante = {
+    descricao: 'Pagamento Mercado Livre Ferragens Silva',
+    fornecedor: 'Ferragens Silva',
+    pago_por: 'Bruno',
+    data_pagamento: '2026-07-18'
+  };
+  const destinoExato = pontuarDestinoComprovante_(comprovante, 250, {
+    origem_tipo: 'COMPRA', origem_id: 'COM_1', parcela_id: 'PAR_1',
+    fornecedor: 'Ferragens Silva', origem_rotulo: 'Ferragens do Mercado Livre',
+    observacao: '', pago_por: 'Bruno', data_prevista: '2026-07-18',
+    valor_pendente: 250, label: 'Compra exata'
+  });
+  const destinoParcial = pontuarDestinoComprovante_(comprovante, 100, {
+    origem_tipo: 'COMPRA', origem_id: 'COM_2', parcela_id: 'PAR_2',
+    fornecedor: '', origem_rotulo: 'Outro fornecedor', observacao: '',
+    pago_por: 'Socio', data_prevista: '2026-10-18',
+    valor_pendente: 250, label: 'Compra parcial'
+  });
+  assertRegressao(destinoExato.score >= 85, 'Coincidencia exata deveria receber score alto.');
+  assertRegressao(destinoExato.score > destinoParcial.score, 'Coincidencia exata deveria superar sugestao parcial fraca.');
+  assertRegressao(
+    destinoParcial.motivos.includes('possivel pagamento parcial'),
+    'Sugestao deve reconhecer pagamentos parciais.'
+  );
+  assertRegressao(
+    similaridadeTextoComprovante_('Depósito São José', 'Sao Jose materiais') > 0,
+    'Matching textual deve ignorar acentos.'
+  );
+  const remapeadas = mapearParcelasAlvoRegeradasFinanceiro(
+    [
+      { ID: 'PGT_A', parcela_alvo_id: 'PAR_ANTIGA_2' },
+      { ID: 'PGT_B', parcela_alvo_id: 'PAR_ANTIGA_2' }
+    ],
+    [
+      { ID: 'PAR_ANTIGA_1', origem_tipo: 'COMPRA', origem_id: 'COM_1', parcela_numero: 1 },
+      { ID: 'PAR_ANTIGA_2', origem_tipo: 'COMPRA', origem_id: 'COM_1', parcela_numero: 2 }
+    ],
+    [
+      { ID: 'PAR_NOVA_1', parcela_numero: 1 },
+      { ID: 'PAR_NOVA_2', parcela_numero: 2 }
+    ],
+    'COMPRA',
+    'COM_1'
+  );
+  assertRegressao(
+    remapeadas.every(item => item.parcela_alvo_atual_id === 'PAR_NOVA_2'),
+    'Multiplos pagamentos parciais devem permanecer na mesma parcela apos recalculo.'
+  );
+
+  return {
+    ok: true,
+    score_exato: destinoExato.score,
+    score_parcial: destinoParcial.score
+  };
+}
+
+function regressionComprovantesRecebimentos() {
+  assertRegressao(
+    new Set(INBOX_RECEBIMENTOS_SCHEMA).size === INBOX_RECEBIMENTOS_SCHEMA.length,
+    'Schema de INBOX_RECEBIMENTOS nao deve conter cabecalhos duplicados.'
+  );
+  ['arquivo_hash', 'referencia_transacao', 'pagador_nome', 'data_recebimento', 'conciliado_em']
+    .forEach(cabecalho => {
+      assertRegressao(
+        INBOX_RECEBIMENTOS_SCHEMA.includes(cabecalho),
+        `Cabecalho ausente em INBOX_RECEBIMENTOS: ${cabecalho}.`
+      );
+    });
+  assertRegressao(VENDAS_SCHEMA.includes('cliente'), 'Cabecalho cliente ausente em VENDAS_SCHEMA.');
+  assertRegressao(
+    VENDAS_SCHEMA.includes('referencia_venda'),
+    'Cabecalho referencia_venda ausente em VENDAS_SCHEMA.'
+  );
+
+  const comprovante = {
+    pagador_nome: 'Moveis Sao Jose',
+    descricao: 'Pix recebido do cliente',
+    referencia_transacao: 'PEDIDO 482',
+    recebido_por: 'Bruno',
+    forma_pagamento: 'PIX',
+    data_recebimento: '2026-07-18'
+  };
+  const destinoExato = pontuarDestinoRecebimento_(comprovante, 900, {
+    origem_tipo: 'VENDA', origem_id: 'VND_1', parcela_id: 'PAR_1',
+    cliente: 'Moveis Sao Jose', referencia_venda: 'Pedido 482',
+    origem_rotulo: 'Mesa de jantar', observacao: '', recebido_por: 'Bruno',
+    forma_pagamento: 'PIX', data_prevista: '2026-07-18', valor_pendente: 900,
+    label: 'Venda exata'
+  });
+  const destinoParcial = pontuarDestinoRecebimento_(comprovante, 300, {
+    origem_tipo: 'VENDA', origem_id: 'VND_2', parcela_id: 'PAR_2',
+    cliente: 'Outro cliente', referencia_venda: '', origem_rotulo: 'Armario',
+    observacao: '', recebido_por: 'Socio', forma_pagamento: 'DINHEIRO',
+    data_prevista: '2026-10-18', valor_pendente: 900, label: 'Venda parcial'
+  });
+  assertRegressao(destinoExato.score >= 90, 'Venda com valor, cliente e referencia exatos deveria ter score alto.');
+  assertRegressao(destinoExato.score > destinoParcial.score, 'Sugestao exata deveria superar recebimento parcial fraco.');
+  assertRegressao(
+    destinoParcial.motivos.includes('possivel recebimento parcial'),
+    'Matching deve reconhecer recebimentos parciais.'
+  );
+  return { ok: true, score_exato: destinoExato.score, score_parcial: destinoParcial.score };
 }

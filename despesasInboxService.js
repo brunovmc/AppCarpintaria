@@ -7,12 +7,14 @@ const INBOX_DESPESAS_RETRY_LEITURA_MS = 300;
 const INBOX_DESPESAS_SCHEMA = [
   'ID',
   'status',
+  'classificacao',
   'origem_tipo',
   'arquivo_nome',
   'arquivo_mime',
   'arquivo_drive_id',
   'arquivo_url',
   'imagem_hash',
+  'referencia_transacao',
   'descricao',
   'categoria',
   'fornecedor',
@@ -32,6 +34,7 @@ const INBOX_DESPESAS_SCHEMA = [
   'criado_em',
   'atualizado_em',
   'confirmado_em',
+  'conciliado_em',
   'descartado_em'
 ];
 
@@ -72,20 +75,27 @@ function processarComprovanteDespesaUploadNoAmbienteAtual_(payload) {
   assertCanWrite('Inbox de despesas');
 
   const upload = normalizarUploadInboxDespesa_(payload);
+  const existenteHash = buscarInboxDespesaPorHash_(upload.hash);
+  if (existenteHash) {
+    return { ...existenteHash, reutilizado: true };
+  }
   const agoraAtual = new Date();
   const arquivo = salvarArquivoInboxDespesa_(upload);
   const base = {
     ID: gerarId('IBXDESP'),
+    classificacao: 'NAO_CLASSIFICADO',
     origem_tipo: 'UPLOAD_APP',
     arquivo_nome: upload.nome,
     arquivo_mime: upload.mime,
     arquivo_drive_id: arquivo.id || '',
     arquivo_url: arquivo.url || '',
     imagem_hash: upload.hash,
+    referencia_transacao: '',
     despesa_id_confirmada: '',
     criado_em: agoraAtual,
     atualizado_em: agoraAtual,
     confirmado_em: '',
+    conciliado_em: '',
     descartado_em: ''
   };
 
@@ -106,6 +116,7 @@ function processarComprovanteDespesaUploadNoAmbienteAtual_(payload) {
       descricao: rascunho.descricao,
       categoria: rascunho.categoria,
       fornecedor: rascunho.fornecedor,
+      referencia_transacao: rascunho.referencia_transacao,
       pago_por: rascunho.pago_por,
       valor_total: rascunho.valor_total,
       data_competencia: rascunho.data_competencia,
@@ -119,8 +130,13 @@ function processarComprovanteDespesaUploadNoAmbienteAtual_(payload) {
       alertas_json: serializarListaInboxDespesa_(alertas),
       erro: ''
     };
-    insert(ABA_INBOX_DESPESAS, linha, INBOX_DESPESAS_SCHEMA);
-    return obterInboxDespesaPorId_(linha.ID);
+    const inseriu = insert(ABA_INBOX_DESPESAS, linha, INBOX_DESPESAS_SCHEMA);
+    if (!inseriu) throw new Error('Nao foi possivel salvar o comprovante na Inbox.');
+    const inserido = obterInboxDespesaPorId_(linha.ID) || normalizarLinhaInboxDespesa_(linha);
+    if (typeof moverArquivoInboxDriveAposLeitura_ === 'function') {
+      moverArquivoInboxDriveAposLeitura_(inserido);
+    }
+    return inserido;
   } catch (error) {
     const linhaErro = {
       ...base,
@@ -141,12 +157,27 @@ function processarComprovanteDespesaUploadNoAmbienteAtual_(payload) {
       alertas_json: serializarListaInboxDespesa_([arquivo.erro].filter(Boolean)),
       erro: error?.message || String(error || 'Falha ao processar comprovante.')
     };
-    insert(ABA_INBOX_DESPESAS, linhaErro, INBOX_DESPESAS_SCHEMA);
-    return obterInboxDespesaPorId_(linhaErro.ID);
+    const inseriuErro = insert(ABA_INBOX_DESPESAS, linhaErro, INBOX_DESPESAS_SCHEMA);
+    const inseridoErro = obterInboxDespesaPorId_(linhaErro.ID) || normalizarLinhaInboxDespesa_(linhaErro);
+    if (typeof moverArquivoInboxDriveAposErro_ === 'function') {
+      moverArquivoInboxDriveAposErro_(inseridoErro);
+    }
+    if (!inseriuErro) throw new Error('Falha ao processar e ao registrar o comprovante na Inbox.');
+    return inseridoErro;
   }
 }
 
 function confirmarInboxDespesa(id, payloadOverride) {
+  // Compatibilidade com clientes em cache: a antiga acao "confirmar" agora
+  // representa explicitamente registrar o saldo como despesa simples e ja
+  // cria o pagamento vinculado ao comprovante.
+  if (typeof registrarSaldoComprovanteComoDespesa === 'function') {
+    const dadosCompatibilidade = { ...(payloadOverride || {}) };
+    if (!String(dadosCompatibilidade.client_request_id || '').trim()) {
+      dadosCompatibilidade.client_request_id = `CMP_${String(id || '').slice(-12)}_LEGACY`;
+    }
+    return registrarSaldoComprovanteComoDespesa(id, dadosCompatibilidade);
+  }
   const ambiente = payloadOverride?.ambiente || payloadOverride?._db_env || payloadOverride?.db_env || '';
   return executarComAmbienteInboxDespesas_(ambiente, () => confirmarInboxDespesaNoAmbienteAtual_(id, payloadOverride));
 }
@@ -356,8 +387,14 @@ function descartarInboxDespesaNoAmbienteAtual_(id) {
   if (!item) {
     throw new Error('Item da Inbox nao encontrado.');
   }
-  if (String(item.status || '').trim().toUpperCase() === 'CONFIRMADO') {
-    throw new Error('Nao e possivel descartar um item ja confirmado.');
+  if (String(item.status || '').trim().toUpperCase() === 'CONFIRMADO' && item.despesa_id_confirmada) {
+    throw new Error('Este comprovante foi confirmado no fluxo anterior e nao pode ser descartado.');
+  }
+  const possuiVinculos = typeof listarPagamentos === 'function' && listarPagamentos(true).some(pagamento =>
+    String(pagamento.comprovante_id || '').trim() === inboxId
+  );
+  if (possuiVinculos) {
+    throw new Error('Desfaca os vinculos financeiros antes de descartar o comprovante.');
   }
 
   const agoraAtual = new Date();
@@ -382,7 +419,7 @@ function diagnosticarInboxDespesasIA() {
   const apiKey = String(props.getProperty('OPENAI_API_KEY') || '').trim();
   const modelo = getOpenAIComprovantesModel_();
   const reasoningEffort = getOpenAIComprovantesReasoningEffort_();
-  const salvarArquivo = getSalvarArquivoInboxDespesas_();
+  const salvarArquivo = typeof salvarArquivoUploadInboxDespesasDrive_ === 'function' || getSalvarArquivoInboxDespesas_();
   const itens = listarInboxDespesas('TODOS');
   return {
     ok: !!apiKey,
@@ -632,12 +669,14 @@ function normalizarLinhaInboxDespesa_(row) {
     ...item,
     ID: String(item.ID || '').trim(),
     status: String(item.status || '').trim().toUpperCase() || 'PENDENTE',
+    classificacao: String(item.classificacao || 'NAO_CLASSIFICADO').trim().toUpperCase(),
     origem_tipo: String(item.origem_tipo || '').trim(),
     arquivo_nome: String(item.arquivo_nome || '').trim(),
     arquivo_mime: String(item.arquivo_mime || '').trim(),
     arquivo_drive_id: String(item.arquivo_drive_id || '').trim(),
     arquivo_url: String(item.arquivo_url || '').trim(),
     imagem_hash: String(item.imagem_hash || '').trim(),
+    referencia_transacao: String(item.referencia_transacao || '').trim(),
     descricao: String(item.descricao || '').trim(),
     categoria: String(item.categoria || '').trim(),
     fornecedor: String(item.fornecedor || '').trim(),
@@ -657,8 +696,21 @@ function normalizarLinhaInboxDespesa_(row) {
     criado_em: item.criado_em ? formatarDataYmdHmFinanceiroSafe(item.criado_em) : '',
     atualizado_em: item.atualizado_em ? formatarDataYmdHmFinanceiroSafe(item.atualizado_em) : '',
     confirmado_em: item.confirmado_em ? formatarDataYmdHmFinanceiroSafe(item.confirmado_em) : '',
+    conciliado_em: item.conciliado_em ? formatarDataYmdHmFinanceiroSafe(item.conciliado_em) : '',
     descartado_em: item.descartado_em ? formatarDataYmdHmFinanceiroSafe(item.descartado_em) : ''
   };
+}
+
+function buscarInboxDespesaPorHash_(hash) {
+  const alvo = String(hash || '').trim().toLowerCase();
+  const sheet = getSheet(ABA_INBOX_DESPESAS);
+  if (!alvo || !sheet) return null;
+  ensureSchema(sheet, INBOX_DESPESAS_SCHEMA);
+  const item = rowsToObjects(sheet).find(row =>
+    String(row.imagem_hash || '').trim().toLowerCase() === alvo &&
+    String(row.status || '').trim().toUpperCase() !== 'DESCARTADO'
+  );
+  return item ? normalizarLinhaInboxDespesa_(item) : null;
 }
 
 function normalizarUploadInboxDespesa_(payload) {
@@ -666,27 +718,27 @@ function normalizarUploadInboxDespesa_(payload) {
   const dataUrl = String(dados.data_url || dados.dataUrl || '').trim();
   const match = /^data:([^;]+);base64,(.+)$/i.exec(dataUrl);
   if (!match) {
-    throw new Error('Imagem invalida. Envie um arquivo de imagem.');
+    throw new Error('Arquivo invalido. Envie uma imagem ou PDF.');
   }
 
   const mime = String(dados.mime_type || dados.mime || match[1] || '').trim().toLowerCase();
-  if (!mime || !mime.startsWith('image/')) {
-    throw new Error('Apenas imagens sao aceitas nesta fase.');
+  if (!(mime.startsWith('image/') || mime === 'application/pdf')) {
+    throw new Error('Formato nao suportado. Use imagem ou PDF.');
   }
 
   const base64 = String(match[2] || '').trim();
   if (!base64) {
-    throw new Error('Imagem sem conteudo.');
+    throw new Error('Arquivo sem conteudo.');
   }
   if (base64.length > 9 * 1024 * 1024) {
-    throw new Error('Imagem muito grande. Tente uma foto menor ou recortada.');
+    throw new Error('Arquivo muito grande. Use uma imagem menor ou um PDF mais leve.');
   }
 
   let bytes;
   try {
     bytes = Utilities.base64Decode(base64);
   } catch (error) {
-    throw new Error('Imagem em Base64 invalida.');
+    throw new Error('Arquivo em Base64 invalido.');
   }
 
   const nome = normalizarNomeArquivoInboxDespesa_(dados.nome || dados.name || `comprovante-${Date.now()}`);
@@ -696,7 +748,7 @@ function normalizarUploadInboxDespesa_(payload) {
     base64,
     bytes,
     dataUrl,
-    hash: hashTextoInboxDespesa_(base64)
+    hash: hashBytesInboxDespesa_(bytes)
   };
 }
 
@@ -708,11 +760,14 @@ function normalizarNomeArquivoInboxDespesa_(valor) {
 }
 
 function salvarArquivoInboxDespesa_(upload) {
-  if (!getSalvarArquivoInboxDespesas_()) {
-    return { id: '', url: '', erro: '' };
-  }
-
   try {
+    if (typeof salvarArquivoUploadInboxDespesasDrive_ === 'function') {
+      const salvo = salvarArquivoUploadInboxDespesasDrive_(upload);
+      return { id: salvo.id || '', url: salvo.url || '', erro: '' };
+    }
+    if (!getSalvarArquivoInboxDespesas_()) {
+      return { id: '', url: '', erro: '' };
+    }
     const blob = Utilities.newBlob(upload.bytes, upload.mime, upload.nome);
     const file = DriveApp.createFile(blob).setName(upload.nome);
     return {
@@ -890,12 +945,13 @@ function montarPromptOpenAIInboxDespesa_() {
   const hoje = formatarDataYmdFinanceiro(new Date());
 
   return [
-    'Extraia dados de uma imagem de comprovante, nota, recibo ou tela de pagamento para cadastrar uma despesa geral.',
+    'Extraia dados de uma imagem de comprovante, nota, recibo ou tela de pagamento para conciliacao financeira.',
     'Use somente informacoes visiveis na imagem. Nao invente dados ausentes.',
     'Datas devem estar no formato yyyy-mm-dd. Valores devem ser numero decimal em reais.',
     'Se for comprovante de pagamento, use a data da transacao como data_pagamento e, se nao houver competencia melhor, tambem como data_competencia.',
     'Se uma data nao estiver visivel, deixe o campo vazio.',
     'A descricao deve ser curta e reconhecivel para uma lista financeira.',
+    'Em referencia_transacao, extraia somente o identificador da transacao, autenticacao, NSU, EndToEndId ou codigo equivalente visivel; caso contrario deixe vazio.',
     'Categoria, pago_por e forma_pagamento devem usar exatamente uma opcao valida quando houver correspondencia clara; caso contrario, deixe vazio.',
     `Data de hoje para contexto: ${hoje}.`,
     `Categorias validas: ${JSON.stringify(categorias)}.`,
@@ -912,6 +968,7 @@ function getSchemaOpenAIInboxDespesa_() {
       descricao: { type: 'string' },
       categoria: { type: 'string' },
       fornecedor: { type: 'string' },
+      referencia_transacao: { type: 'string' },
       pago_por: { type: 'string' },
       valor_total: { type: 'number' },
       data_competencia: { type: 'string' },
@@ -930,6 +987,7 @@ function getSchemaOpenAIInboxDespesa_() {
       'descricao',
       'categoria',
       'fornecedor',
+      'referencia_transacao',
       'pago_por',
       'valor_total',
       'data_competencia',
@@ -1055,6 +1113,7 @@ function normalizarDespesaExtraidaInbox_(extraido) {
     descricao: String(dados.descricao || '').trim().slice(0, 160),
     categoria,
     fornecedor: String(dados.fornecedor || '').trim().slice(0, 120),
+    referencia_transacao: String(dados.referencia_transacao || '').trim().slice(0, 160),
     pago_por: normalizarValorListaInboxDespesa_(dados.pago_por, pagosPor),
     valor_total: valorTotal,
     data_competencia: dataCompetencia,
@@ -1074,6 +1133,7 @@ function montarPayloadConfirmacaoInboxDespesa_(item, payloadOverride) {
     descricao: String(override.descricao ?? item.descricao ?? '').trim(),
     categoria: String(override.categoria ?? item.categoria ?? '').trim(),
     fornecedor: String(override.fornecedor ?? item.fornecedor ?? '').trim(),
+    referencia_transacao: String(override.referencia_transacao ?? item.referencia_transacao ?? '').trim(),
     pago_por: String(override.pago_por ?? item.pago_por ?? '').trim(),
     valor_total: round2Financeiro(parseNumeroBR(override.valor_total ?? item.valor_total)),
     data_competencia: String(override.data_competencia ?? item.data_competencia ?? '').trim(),
@@ -1158,4 +1218,9 @@ function hashTextoInboxDespesa_(texto) {
       return n.toString(16).padStart(2, '0');
     })
     .join('');
+}
+
+function hashBytesInboxDespesa_(bytes) {
+  const digest = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, bytes || []);
+  return digest.map(b => (`0${((b < 0 ? b + 256 : b) & 255).toString(16)}`).slice(-2)).join('');
 }

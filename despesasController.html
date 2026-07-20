@@ -5,6 +5,9 @@
     let validacoes = {};
     let despesas = [];
     let inboxDespesas = [];
+    let destinosComprovantes = [];
+    let resumoComprovantes = {};
+    let filtroInboxComprovantes = 'PENDENTES';
     let carregandoInboxDespesas = false;
     let processandoComprovanteDespesa = false;
     let importandoComprovantesDrive = false;
@@ -67,6 +70,7 @@
         btnToggleInboxDespesas: document.getElementById('btnToggleInboxDespesas'),
         btnBuscarComprovantesDrive: document.getElementById('btnBuscarComprovantesDrive'),
         btnAtualizarInboxDespesas: document.getElementById('btnAtualizarInboxDespesas'),
+        filtroInboxComprovantes: document.getElementById('filtroInboxComprovantes'),
         formDespesa: document.getElementById('formularioDespesaGeral'),
         despesaFormTitulo: document.getElementById('despesaFormTitulo'),
         btnSalvarDespesa: document.getElementById('btnSalvarDespesaGeral'),
@@ -1012,13 +1016,13 @@
           window.AppLoading.setButtonLoading(
             f.btnUploadComprovanteDespesa,
             processandoComprovanteDespesa,
-            'Enviar comprovante',
+            'Adicionar comprovante',
             'Processando'
           );
         } else {
           f.btnUploadComprovanteDespesa.textContent = processandoComprovanteDespesa
             ? 'Processando...'
-            : 'Enviar comprovante';
+            : 'Adicionar comprovante';
         }
       }
       if (!processandoComprovanteDespesa) {
@@ -1039,6 +1043,13 @@
       }
       if (f.btnAtualizarInboxDespesas) {
         f.btnAtualizarInboxDespesas.addEventListener('click', () => carregarInboxDespesas());
+      }
+      if (f.filtroInboxComprovantes) {
+        f.filtroInboxComprovantes.value = filtroInboxComprovantes;
+        f.filtroInboxComprovantes.addEventListener('change', () => {
+          filtroInboxComprovantes = String(f.filtroInboxComprovantes?.value || 'PENDENTES').trim().toUpperCase();
+          carregarInboxDespesas();
+        });
       }
       if (f.btnBuscarComprovantesDrive) {
         f.btnBuscarComprovantesDrive.addEventListener('click', importarComprovantesDoDrive);
@@ -1139,14 +1150,24 @@
 
     async function prepararComprovanteDespesa(file) {
       if (!file) {
-        throw new Error('Selecione uma imagem.');
+        throw new Error('Selecione uma imagem ou PDF.');
       }
       const mime = String(file.type || '').toLowerCase();
-      if (mime && !mime.startsWith('image/')) {
-        throw new Error('Apenas imagens sao aceitas nesta fase.');
+      if (mime && !(mime.startsWith('image/') || mime === 'application/pdf')) {
+        throw new Error('Use uma imagem ou PDF.');
       }
 
       const dataUrlOriginal = await lerArquivoComoDataUrl(file);
+      if (mime === 'application/pdf') {
+        if (dataUrlOriginal.length > COMPROVANTE_MAX_DATA_URL_LENGTH) {
+          throw new Error('PDF muito grande. Use um arquivo de ate aproximadamente 5 MB.');
+        }
+        return {
+          nome: file.name,
+          mime_type: mime,
+          data_url: dataUrlOriginal
+        };
+      }
       const preparado = await compactarImagemComprovante(file, dataUrlOriginal);
       if (String(preparado.data_url || '').length > COMPROVANTE_MAX_DATA_URL_LENGTH) {
         throw new Error('Imagem muito grande. Tente recortar ou reduzir a foto.');
@@ -1181,7 +1202,9 @@
           });
         })
         .then(item => {
-          if (String(item?.status || '').toUpperCase() === 'ERRO') {
+          if (item?.reutilizado) {
+            mostrarToast('Este comprovante ja estava na Inbox.');
+          } else if (String(item?.status || '').toUpperCase() === 'ERRO') {
             mostrarToast(item?.erro || 'Comprovante recebido, mas a IA falhou', 'erro');
           } else {
             mostrarToast('Comprovante adicionado a Inbox.');
@@ -1201,18 +1224,22 @@
     function carregarInboxDespesas(onDone) {
       if (!window.AppRequest?.call) {
         inboxDespesas = [];
+        destinosComprovantes = [];
+        resumoComprovantes = {};
         renderInboxDespesas();
         if (typeof onDone === 'function') onDone();
         return Promise.resolve([]);
       }
 
       setCarregandoInboxDespesas(true);
-      return window.AppRequest.call('listarInboxDespesas', ['', getAmbienteBancoAtivoInbox()], {
+      return window.AppRequest.call('obterContextoComprovantesFinanceiros', [filtroInboxComprovantes, getAmbienteBancoAtivoInbox()], {
         context: 'despesas.inbox.list',
-        errorMessage: 'Erro ao carregar Inbox de despesas'
+        errorMessage: 'Erro ao carregar comprovantes'
       })
-        .then(lista => {
-          inboxDespesas = Array.isArray(lista) ? lista : [];
+        .then(contexto => {
+          inboxDespesas = Array.isArray(contexto?.comprovantes) ? contexto.comprovantes : [];
+          destinosComprovantes = Array.isArray(contexto?.destinos) ? contexto.destinos : [];
+          resumoComprovantes = contexto?.resumo && typeof contexto.resumo === 'object' ? contexto.resumo : {};
           setCarregandoInboxDespesas(false);
           renderInboxDespesas();
           if (typeof onDone === 'function') onDone();
@@ -1220,8 +1247,8 @@
         })
         .catch(error => {
           setCarregandoInboxDespesas(false);
-          mostrarToast(error?.message || 'Erro ao carregar Inbox de despesas', 'erro');
-          setInboxStatus(error?.message || 'Erro ao carregar Inbox de despesas', 'erro');
+          mostrarToast(error?.message || 'Erro ao carregar comprovantes', 'erro');
+          setInboxStatus(error?.message || 'Erro ao carregar comprovantes', 'erro');
           if (typeof onDone === 'function') onDone();
           return [];
         });
@@ -1286,13 +1313,75 @@
       `;
     }
 
+    function chaveDestinoComprovante(destino) {
+      return [destino?.origem_tipo, destino?.origem_id, destino?.parcela_id]
+        .map(valor => String(valor || '').trim()).join('|');
+    }
+
+    function montarOptionsDestinoComprovante(item) {
+      const sugerida = String(item?.sugestoes?.[0]?.chave || '').trim();
+      const opcoes = ['<option value="">Selecione uma compra ou despesa</option>'];
+      destinosComprovantes.forEach(destino => {
+        const chave = chaveDestinoComprovante(destino);
+        const selected = sugerida && chave === sugerida ? ' selected' : '';
+        opcoes.push(`<option value="${escapeHtml(chave)}"${selected}>${escapeHtml(destino.label || chave)}</option>`);
+      });
+      return opcoes.join('');
+    }
+
+    function montarAlocacoesComprovante(item, busy) {
+      const alocacoes = Array.isArray(item?.alocacoes) ? item.alocacoes : [];
+      if (alocacoes.length === 0) return '<span class="despesas-inbox-vazio">Nenhum vinculo registrado.</span>';
+      return alocacoes.map(alocacao => {
+        const tipo = alocacao.origem_tipo === 'COMPRA' ? 'Compra' : 'Despesa';
+        const parcela = Number(alocacao.parcelas_total || 1) > 1
+          ? ` · parcela ${Number(alocacao.parcela_numero || 1)}/${Number(alocacao.parcelas_total || 1)}`
+          : '';
+        return `
+          <div class="despesas-inbox-alocacao">
+            <div>
+              <strong>${escapeHtml(tipo)} · ${escapeHtml(alocacao.origem_rotulo || alocacao.origem_id || '-')}</strong>
+              <span>${escapeHtml(formatarMoeda(alocacao.valor_alocado))}${escapeHtml(parcela)}</span>
+            </div>
+            ${alocacao.pagamento_id
+              ? `<button type="button" class="btn-secundario" onclick="DespesasController.desfazerAlocacaoComprovante('${escapeHtml(item.ID)}', '${escapeHtml(alocacao.pagamento_id)}')" ${busy ? 'disabled' : ''}>Desfazer</button>`
+              : '<span class="despesas-inbox-legado">Confirmado no fluxo anterior</span>'}
+          </div>
+        `;
+      }).join('');
+    }
+
+    function montarSugestoesComprovante(item, busy) {
+      const sugestoes = Array.isArray(item?.sugestoes) ? item.sugestoes : [];
+      if (sugestoes.length === 0) return '';
+      return `
+        <div class="despesas-inbox-sugestoes">
+          <span class="despesa-card-resumo-label">Sugestoes de vinculo</span>
+          ${sugestoes.map(sugestao => `
+            <button type="button" class="despesas-inbox-sugestao" onclick="DespesasController.selecionarSugestaoComprovante('${escapeHtml(item.ID)}', '${escapeHtml(sugestao.chave)}')" ${busy ? 'disabled' : ''}>
+              <strong>${escapeHtml(sugestao.label || sugestao.chave)}</strong>
+              <span>Compatibilidade ${Math.round(Number(sugestao.score || 0))}/100 · ${escapeHtml((sugestao.motivos || []).join(', '))}</span>
+            </button>
+          `).join('')}
+        </div>
+      `;
+    }
+
     function montarCardInboxDespesa(item) {
       const id = String(item?.ID || '').trim();
-      const status = String(item?.status || '').trim().toUpperCase() || 'PENDENTE';
+      const status = String(item?.status_conciliacao || item?.status || '').trim().toUpperCase() || 'PENDENTE';
+      const statusClasse = status.toLowerCase().replace(/[^a-z0-9_-]+/g, '-');
       const busy = inboxDespesasBusyIds.has(id);
       const confianca = Math.round(Number(item?.confianca || 0) * 100);
+      const saldo = Number(item?.saldo_nao_alocado || 0);
+      const alocado = Number(item?.valor_alocado || 0);
+      const conciliado = saldo <= 0.009 && Number(item?.valor_total || 0) > 0;
+      const sugestaoInicial = item?.sugestoes?.[0];
+      const valorInicial = sugestaoInicial
+        ? Math.min(saldo, Number(sugestaoInicial.valor_pendente || saldo))
+        : saldo;
       const card = document.createElement('div');
-      card.className = `despesa-inbox-item despesa-inbox-item-${status.toLowerCase()}`;
+      card.className = `despesa-inbox-item despesa-inbox-item-${statusClasse}`;
       card.dataset.inboxId = id;
       card.innerHTML = `
         <div class="despesa-inbox-item-topo">
@@ -1300,77 +1389,97 @@
             <span class="despesa-card-resumo-label">Comprovante</span>
             <strong>${escapeHtml(item?.arquivo_nome || item?.descricao || id || '-')}</strong>
           </div>
-          <span class="despesa-inbox-badge">${escapeHtml(status === 'ERRO' ? 'Revisar' : 'Pendente')}</span>
+          <span class="despesa-inbox-badge">${escapeHtml(status === 'ERRO' ? 'Revisar' : status)}</span>
         </div>
 
         <div class="despesa-inbox-meta">
-          <span>Confianca: ${Number.isFinite(confianca) ? confianca : 0}%</span>
-          ${item?.arquivo_url ? `<a href="${escapeHtml(item.arquivo_url)}" target="_blank" rel="noopener">Arquivo</a>` : ''}
+          <span>Confianca da leitura: ${Number.isFinite(confianca) ? confianca : 0}%</span>
+          <span>Classificacao: ${escapeHtml(item?.classificacao || 'NAO_CLASSIFICADO')}</span>
+          ${item?.arquivo_url ? `<a href="${escapeHtml(item.arquivo_url)}" target="_blank" rel="noopener">Abrir arquivo</a>` : ''}
+        </div>
+
+        <div class="despesas-inbox-valores">
+          <div><span>Total</span><strong>${escapeHtml(formatarMoeda(item?.valor_total))}</strong></div>
+          <div><span>Vinculado</span><strong>${escapeHtml(formatarMoeda(alocado))}</strong></div>
+          <div><span>Saldo livre</span><strong>${escapeHtml(formatarMoeda(saldo))}</strong></div>
         </div>
 
         ${montarAlertasInboxDespesa(item)}
 
-        <div class="despesa-inbox-grid">
-          <label class="campo-ajuda-wrap">
-            <span class="campo-ajuda-tag">Descricao</span>
-            <input data-campo="descricao" value="${escapeHtml(item?.descricao || '')}">
+        <details class="despesas-inbox-dados" ${status === 'ERRO' ? 'open' : ''}>
+          <summary>Dados do comprovante</summary>
+          <div class="despesa-inbox-grid">
+            <label class="campo-ajuda-wrap">
+              <span class="campo-ajuda-tag">Descricao</span>
+              <input data-campo="descricao" value="${escapeHtml(item?.descricao || '')}">
+            </label>
+            <label class="campo-ajuda-wrap">
+              <span class="campo-ajuda-tag">Categoria</span>
+              <select data-campo="categoria">${montarOptionsInboxDespesa(validacoes?.categoriasDespesas, item?.categoria, 'Selecione')}</select>
+            </label>
+            <label class="campo-ajuda-wrap">
+              <span class="campo-ajuda-tag">Fornecedor</span>
+              <input data-campo="fornecedor" value="${escapeHtml(item?.fornecedor || '')}">
+            </label>
+            <label class="campo-ajuda-wrap">
+              <span class="campo-ajuda-tag">Pago por</span>
+              <select data-campo="pago_por">${montarOptionsInboxDespesa(validacoes?.pagosPor, item?.pago_por, 'Selecione')}</select>
+            </label>
+            <label class="campo-ajuda-wrap">
+              <span class="campo-ajuda-tag">Valor total (R$)</span>
+              <input data-campo="valor_total" type="number" min="${Math.max(0, alocado)}" step="0.01" value="${escapeHtml(item?.valor_total || '')}">
+            </label>
+            <label class="campo-ajuda-wrap">
+              <span class="campo-ajuda-tag">Referencia da transacao</span>
+              <input data-campo="referencia_transacao" value="${escapeHtml(item?.referencia_transacao || '')}">
+            </label>
+            <label class="campo-ajuda-wrap">
+              <span class="campo-ajuda-tag">Competencia</span>
+              <input data-campo="data_competencia" type="date" value="${escapeHtml(item?.data_competencia || '')}">
+            </label>
+            <label class="campo-ajuda-wrap">
+              <span class="campo-ajuda-tag">Vencimento</span>
+              <input data-campo="data_vencimento" type="date" value="${escapeHtml(item?.data_vencimento || '')}">
+            </label>
+            <label class="campo-ajuda-wrap">
+              <span class="campo-ajuda-tag">Pagamento</span>
+              <input data-campo="data_pagamento" type="date" value="${escapeHtml(item?.data_pagamento || '')}">
+            </label>
+            <label class="campo-ajuda-wrap">
+              <span class="campo-ajuda-tag">Forma de pagamento</span>
+              <select data-campo="forma_pagamento">${montarOptionsInboxDespesa(validacoes?.formasPagamento, item?.forma_pagamento, 'Selecione')}</select>
+            </label>
+          </div>
+          <label class="campo-ajuda-wrap despesas-inbox-observacao">
+            <span class="campo-ajuda-tag">Observacao</span>
+            <textarea data-campo="observacao">${escapeHtml(item?.observacao || '')}</textarea>
           </label>
+        </details>
 
-          <label class="campo-ajuda-wrap">
-            <span class="campo-ajuda-tag">Categoria</span>
-            <select data-campo="categoria">${montarOptionsInboxDespesa(validacoes?.categoriasDespesas, item?.categoria, 'Selecione')}</select>
-          </label>
-
-          <label class="campo-ajuda-wrap">
-            <span class="campo-ajuda-tag">Fornecedor</span>
-            <input data-campo="fornecedor" value="${escapeHtml(item?.fornecedor || '')}">
-          </label>
-
-          <label class="campo-ajuda-wrap">
-            <span class="campo-ajuda-tag">Pago por</span>
-            <select data-campo="pago_por">${montarOptionsInboxDespesa(validacoes?.pagosPor, item?.pago_por, 'Selecione')}</select>
-          </label>
-
-          <label class="campo-ajuda-wrap">
-            <span class="campo-ajuda-tag">Valor total (R$)</span>
-            <input data-campo="valor_total" type="number" min="0" step="0.01" value="${escapeHtml(item?.valor_total || '')}">
-          </label>
-
-          <label class="campo-ajuda-wrap">
-            <span class="campo-ajuda-tag">Competencia</span>
-            <input data-campo="data_competencia" type="date" value="${escapeHtml(item?.data_competencia || '')}">
-          </label>
-
-          <label class="campo-ajuda-wrap">
-            <span class="campo-ajuda-tag">Vencimento</span>
-            <input data-campo="data_vencimento" type="date" value="${escapeHtml(item?.data_vencimento || '')}">
-          </label>
-
-          <label class="campo-ajuda-wrap">
-            <span class="campo-ajuda-tag">Pagamento</span>
-            <input data-campo="data_pagamento" type="date" value="${escapeHtml(item?.data_pagamento || '')}">
-          </label>
-
-          <label class="campo-ajuda-wrap">
-            <span class="campo-ajuda-tag">Forma de pagamento</span>
-            <select data-campo="forma_pagamento">${montarOptionsInboxDespesa(validacoes?.formasPagamento, item?.forma_pagamento, 'Selecione')}</select>
-          </label>
-
-          <label class="campo-ajuda-wrap">
-            <span class="campo-ajuda-tag">Parcelas</span>
-            <input data-campo="parcelas" type="number" min="1" step="1" value="${escapeHtml(item?.parcelas || 1)}">
-          </label>
+        <div class="despesas-inbox-vinculos">
+          <span class="despesa-card-resumo-label">Vinculos registrados</span>
+          ${montarAlocacoesComprovante(item, busy)}
         </div>
 
-        <label class="campo-ajuda-wrap despesas-inbox-observacao">
-          <span class="campo-ajuda-tag">Observacao</span>
-          <textarea data-campo="observacao">${escapeHtml(item?.observacao || '')}</textarea>
-        </label>
-
-        <div class="despesas-inbox-card-acoes">
-          <button type="button" onclick="DespesasController.confirmarInboxDespesa('${escapeHtml(id)}')" ${busy ? 'disabled' : ''}>${busy ? 'Confirmando...' : 'Confirmar despesa'}</button>
-          <button type="button" onclick="DespesasController.descartarInboxDespesa('${escapeHtml(id)}')" ${busy ? 'disabled' : ''}>Descartar</button>
-        </div>
+        ${!conciliado ? `
+          ${montarSugestoesComprovante(item, busy)}
+          <div class="despesas-inbox-conciliar">
+            <label class="campo-ajuda-wrap despesas-inbox-destino">
+              <span class="campo-ajuda-tag">Vincular saldo a</span>
+              <select data-campo="destino_vinculo" onchange="DespesasController.atualizarValorDestinoComprovante('${escapeHtml(id)}')">${montarOptionsDestinoComprovante(item)}</select>
+            </label>
+            <label class="campo-ajuda-wrap despesas-inbox-valor-vinculo">
+              <span class="campo-ajuda-tag">Valor deste vinculo (R$)</span>
+              <input data-campo="valor_alocado" type="number" min="0.01" max="${escapeHtml(saldo)}" step="0.01" value="${escapeHtml(valorInicial.toFixed(2))}">
+            </label>
+            <button type="button" onclick="DespesasController.vincularComprovante('${escapeHtml(id)}')" ${busy ? 'disabled' : ''}>Vincular pagamento</button>
+          </div>
+          <div class="despesas-inbox-card-acoes">
+            <button type="button" class="btn-secundario" onclick="DespesasController.salvarRevisaoComprovante('${escapeHtml(id)}')" ${busy ? 'disabled' : ''}>Salvar revisao</button>
+            <button type="button" class="btn-secundario" onclick="DespesasController.registrarComprovanteComoDespesa('${escapeHtml(id)}')" ${busy ? 'disabled' : ''}>Registrar saldo como despesa simples</button>
+            <button type="button" class="btn-perigo" onclick="DespesasController.descartarInboxDespesa('${escapeHtml(id)}')" ${busy || alocado > 0.009 ? 'disabled' : ''}>Descartar</button>
+          </div>
+        ` : '<div class="despesas-inbox-concluido">Comprovante totalmente conciliado.</div>'}
       `;
       return card;
     }
@@ -1380,8 +1489,9 @@
       if (!f.listaInboxDespesas) return;
 
       const itens = Array.isArray(inboxDespesas) ? inboxDespesas : [];
-      const pendentes = itens.filter(item => String(item?.status || '').toUpperCase() === 'PENDENTE').length;
-      const erros = itens.filter(item => String(item?.status || '').toUpperCase() === 'ERRO').length;
+      const pendentes = Number(resumoComprovantes?.pendentes || 0);
+      const parciais = Number(resumoComprovantes?.parciais || 0);
+      const erros = Number(resumoComprovantes?.erros || 0);
       if (!inboxDespesasEstadoInicialDefinido) {
         inboxDespesasEstadoInicialDefinido = true;
         setInboxDespesasExpandida(itens.length > 0);
@@ -1389,13 +1499,19 @@
       if (f.despesasInboxResumo) {
         const partes = [];
         partes.push(`${pendentes} pendente${pendentes === 1 ? '' : 's'}`);
+        if (parciais > 0) partes.push(`${parciais} parcial${parciais === 1 ? '' : 'is'}`);
         if (erros > 0) partes.push(`${erros} para revisar`);
         f.despesasInboxResumo.textContent = partes.join(' | ');
       }
 
       f.listaInboxDespesas.innerHTML = '';
       if (itens.length === 0) {
-        setInboxStatus(carregandoInboxDespesas ? 'Carregando Inbox...' : 'Nenhum comprovante pendente.', carregandoInboxDespesas ? 'info' : '');
+        const vazio = filtroInboxComprovantes === 'CONCILIADOS'
+          ? 'Nenhum comprovante conciliado.'
+          : filtroInboxComprovantes === 'TODOS'
+            ? 'Nenhum comprovante encontrado.'
+            : 'Nenhum comprovante pendente.';
+        setInboxStatus(carregandoInboxDespesas ? 'Carregando comprovantes...' : vazio, carregandoInboxDespesas ? 'info' : '');
         return;
       }
 
@@ -1430,22 +1546,13 @@
         data_vencimento: String(campo('data_vencimento')?.value || '').trim(),
         data_pagamento: String(campo('data_pagamento')?.value || '').trim(),
         forma_pagamento: String(campo('forma_pagamento')?.value || '').trim(),
-        parcelas: Math.max(1, Math.floor(parseNumeroInput(campo('parcelas')?.value || '1') || 1)),
+        referencia_transacao: String(campo('referencia_transacao')?.value || '').trim(),
         observacao: String(campo('observacao')?.value || '').trim(),
         _db_env: getAmbienteBancoAtivoInbox()
       };
 
-      if (!payload.descricao) {
-        throw new Error('Descricao da despesa e obrigatoria.');
-      }
-      if (!payload.categoria) {
-        throw new Error('Categoria da despesa e obrigatoria.');
-      }
       if (!isFinite(payload.valor_total) || payload.valor_total <= 0) {
-        throw new Error('Valor total invalido.');
-      }
-      if (!payload.data_competencia) {
-        throw new Error('Data de competencia e obrigatoria.');
+        throw new Error('Valor total do comprovante invalido.');
       }
       return payload;
     }
@@ -1455,87 +1562,188 @@
       if (!alvo) return;
       if (ativo) inboxDespesasBusyIds.add(alvo);
       else inboxDespesasBusyIds.delete(alvo);
-      renderInboxDespesas();
+      const card = getInboxCard(alvo);
+      if (card) {
+        card.classList.toggle('is-busy', !!ativo);
+        card.querySelectorAll('button, input, select, textarea').forEach(controle => {
+          controle.disabled = !!ativo;
+        });
+      }
     }
 
-    function confirmarInboxDespesa(id) {
-      if (!podeAlterarDados('Confirmacao bloqueada em modo somente leitura')) return;
+    function obterDestinoSelecionadoComprovante(id) {
+      const card = getInboxCard(id);
+      const select = card?.querySelector('[data-campo="destino_vinculo"]');
+      const chave = String(select?.value || '').trim();
+      if (!chave) return null;
+      return destinosComprovantes.find(destino => chaveDestinoComprovante(destino) === chave) || null;
+    }
+
+    function atualizarValorDestinoComprovante(id) {
+      const card = getInboxCard(id);
+      const destino = obterDestinoSelecionadoComprovante(id);
+      const item = inboxDespesas.find(comprovante => String(comprovante?.ID || '').trim() === String(id || '').trim());
+      const input = card?.querySelector('[data-campo="valor_alocado"]');
+      if (!input || !item) return;
+      const saldo = Number(item.saldo_nao_alocado || 0);
+      const maximo = Math.max(0, Math.min(saldo, Number(destino?.valor_pendente || saldo)));
+      input.max = String(maximo);
+      input.value = maximo > 0 ? maximo.toFixed(2) : '';
+    }
+
+    function selecionarSugestaoComprovante(id, chave) {
+      const card = getInboxCard(id);
+      const select = card?.querySelector('[data-campo="destino_vinculo"]');
+      if (!select) return;
+      select.value = String(chave || '').trim();
+      atualizarValorDestinoComprovante(id);
+      select.focus();
+    }
+
+    function atualizarAposConciliacaoComprovante() {
+      carregarInboxDespesas();
+      carregarDespesas(true);
+      window.ComprasController?.syncFromBackend?.();
+      window.DashboardController?.atualizar?.(true);
+    }
+
+    function gerarClientRequestIdComprovante(id) {
+      const comprovante = String(id || '').trim().slice(-12);
+      const aleatorio = globalThis.crypto?.randomUUID?.() || `${Date.now()}_${Math.random().toString(16).slice(2)}`;
+      return `CMP_${comprovante}_${aleatorio}`.replace(/[^a-zA-Z0-9_-]+/g, '').slice(0, 112);
+    }
+
+    function vincularComprovante(id) {
+      if (!podeAlterarDados('Vinculo bloqueado em modo somente leitura')) return;
       const inboxId = String(id || '').trim();
       if (!inboxId || inboxDespesasBusyIds.has(inboxId)) return;
 
       let payload;
       try {
         payload = lerPayloadInboxDespesa(inboxId);
+        const destino = obterDestinoSelecionadoComprovante(inboxId);
+        const card = getInboxCard(inboxId);
+        const valor = parseNumeroInput(card?.querySelector('[data-campo="valor_alocado"]')?.value || '');
+        if (!destino) throw new Error('Selecione uma compra ou despesa para vincular.');
+        if (!isFinite(valor) || valor <= 0) throw new Error('Informe um valor valido para o vinculo.');
+        payload = {
+          ...payload,
+          origem_tipo: destino.origem_tipo,
+          origem_id: destino.origem_id,
+          parcela_id: destino.parcela_id,
+          valor_alocado: valor,
+          client_request_id: gerarClientRequestIdComprovante(inboxId)
+        };
       } catch (error) {
-        mostrarToast(error?.message || 'Revise os dados da Inbox', 'erro');
+        const detalhes = getInboxCard(inboxId)?.querySelector('.despesas-inbox-dados');
+        if (detalhes) detalhes.open = true;
+        mostrarToast(error?.message || 'Revise os dados do vinculo', 'erro');
         return;
       }
 
       setInboxItemBusy(inboxId, true);
-      window.AppRequest.call('confirmarInboxDespesa', [inboxId, payload], {
-        context: 'despesas.inbox.confirm',
-        errorMessage: 'Erro ao confirmar despesa da Inbox'
+      window.AppRequest.call('alocarComprovanteFinanceiro', [inboxId, payload], {
+        context: 'despesas.inbox.allocate',
+        errorMessage: 'Erro ao vincular comprovante'
       })
         .then(resultado => {
-          const despesaId = String(
-            resultado?.despesa_id ||
-            resultado?.despesa?.ID ||
-            resultado?.inbox?.despesa_id_confirmada ||
-            ''
-          ).trim();
-          const diagnosticoResposta = {
-            inbox_id: inboxId,
-            resultado_tipo: resultado === null ? 'null' : typeof resultado,
-            resultado_chaves: resultado && typeof resultado === 'object'
-              ? Object.keys(resultado).sort()
-              : [],
-            ok: resultado?.ok === true,
-            despesa_presente: !!resultado?.despesa,
-            despesa_chaves: resultado?.despesa && typeof resultado.despesa === 'object'
-              ? Object.keys(resultado.despesa).sort()
-              : [],
-            despesa_id: despesaId,
-            servidor: resultado?.diagnostico_confirmacao || null
-          };
-          if (typeof console !== 'undefined' && console.info) {
-            console.info('[inbox-despesas] resposta da confirmacao', diagnosticoResposta);
-          }
-          if (!resultado?.ok) {
-            if (typeof console !== 'undefined' && console.error) {
-              console.error('[inbox-despesas] resposta invalida da confirmacao', diagnosticoResposta);
-            }
-            const traceId = String(resultado?.diagnostico_confirmacao?.trace_id || '').trim();
-            const referencia = traceId ? ` Referencia: ${traceId}.` : '';
-            throw new Error(`Nao foi possivel confirmar a despesa.${referencia}`);
-          }
-          if (!despesaId && typeof console !== 'undefined' && console.warn) {
-            console.warn('[inbox-despesas] confirmacao concluida sem ID na resposta', diagnosticoResposta);
-          }
-          inboxDespesas = inboxDespesas.filter(item => String(item?.ID || '').trim() !== inboxId);
-          if (inboxDespesas.length === 0) {
-            setInboxDespesasExpandida(false);
-          }
-          renderInboxDespesas();
-          mostrarToast(despesaId
-            ? `Despesa ${despesaId} criada a partir da Inbox.`
-            : 'Despesa criada com sucesso.');
-          carregarInboxDespesas();
-          carregarDespesas(true);
-          window.DashboardController?.atualizar?.(true);
+          if (!resultado?.ok) throw new Error('O vinculo nao foi confirmado pelo servidor.');
+          mostrarToast('Pagamento vinculado com sucesso.');
+          atualizarAposConciliacaoComprovante();
         })
         .catch(error => {
-          if (typeof console !== 'undefined' && console.error) {
-            console.error('[inbox-despesas] falha na confirmacao', {
-              inbox_id: inboxId,
-              mensagem: String(error?.message || error || '').trim()
-            });
-          }
-          mostrarToast(error?.message || 'Erro ao confirmar despesa da Inbox', 'erro');
-          carregarInboxDespesas();
+          mostrarToast(error?.message || 'Erro ao vincular comprovante', 'erro');
         })
         .finally(() => {
           setInboxItemBusy(inboxId, false);
         });
+    }
+
+    function registrarComprovanteComoDespesa(id) {
+      if (!podeAlterarDados('Registro bloqueado em modo somente leitura')) return;
+      const inboxId = String(id || '').trim();
+      if (!inboxId || inboxDespesasBusyIds.has(inboxId)) return;
+      let payload;
+      try {
+        payload = lerPayloadInboxDespesa(inboxId);
+        const card = getInboxCard(inboxId);
+        payload.valor_alocado = parseNumeroInput(card?.querySelector('[data-campo="valor_alocado"]')?.value || '');
+        payload.client_request_id = gerarClientRequestIdComprovante(inboxId);
+        if (!payload.descricao) throw new Error('Preencha a descricao para criar a despesa simples.');
+        if (!payload.categoria) throw new Error('Selecione a categoria da despesa simples.');
+        if (!payload.data_competencia) throw new Error('Informe a data de competencia.');
+        if (!payload.data_pagamento) throw new Error('Informe a data de pagamento.');
+        if (!payload.forma_pagamento) throw new Error('Selecione a forma de pagamento.');
+        if (!isFinite(payload.valor_alocado) || payload.valor_alocado <= 0) throw new Error('Informe o valor da despesa simples.');
+      } catch (error) {
+        const detalhes = getInboxCard(inboxId)?.querySelector('.despesas-inbox-dados');
+        if (detalhes) detalhes.open = true;
+        mostrarToast(error?.message || 'Revise os dados da despesa', 'erro');
+        return;
+      }
+      if (!confirm(`Registrar ${formatarMoeda(payload.valor_alocado)} do saldo como despesa simples?`)) return;
+      setInboxItemBusy(inboxId, true);
+      window.AppRequest.call('registrarSaldoComprovanteComoDespesa', [inboxId, payload], {
+        context: 'despesas.inbox.simple-expense',
+        errorMessage: 'Erro ao registrar despesa simples'
+      })
+        .then(resultado => {
+          if (!resultado?.ok) throw new Error('A despesa nao foi confirmada pelo servidor.');
+          mostrarToast('Saldo registrado como despesa simples.');
+          atualizarAposConciliacaoComprovante();
+        })
+        .catch(error => mostrarToast(error?.message || 'Erro ao registrar despesa simples', 'erro'))
+        .finally(() => setInboxItemBusy(inboxId, false));
+    }
+
+    function salvarRevisaoComprovante(id) {
+      if (!podeAlterarDados('Revisao bloqueada em modo somente leitura')) return;
+      const inboxId = String(id || '').trim();
+      if (!inboxId || inboxDespesasBusyIds.has(inboxId)) return;
+      let payload;
+      try {
+        payload = lerPayloadInboxDespesa(inboxId);
+      } catch (error) {
+        const detalhes = getInboxCard(inboxId)?.querySelector('.despesas-inbox-dados');
+        if (detalhes) detalhes.open = true;
+        mostrarToast(error?.message || 'Revise os dados do comprovante', 'erro');
+        return;
+      }
+      setInboxItemBusy(inboxId, true);
+      window.AppRequest.call('salvarRevisaoComprovanteFinanceiro', [inboxId, payload], {
+        context: 'despesas.inbox.review',
+        errorMessage: 'Erro ao salvar revisao'
+      })
+        .then(resultado => {
+          if (!resultado?.ok) throw new Error('A revisao nao foi confirmada pelo servidor.');
+          mostrarToast('Revisao do comprovante salva.');
+          carregarInboxDespesas();
+        })
+        .catch(error => mostrarToast(error?.message || 'Erro ao salvar revisao', 'erro'))
+        .finally(() => setInboxItemBusy(inboxId, false));
+    }
+
+    function confirmarInboxDespesa(id) {
+      registrarComprovanteComoDespesa(id);
+    }
+
+    function desfazerAlocacaoComprovante(id, pagamentoId) {
+      if (!podeAlterarDados('Remocao bloqueada em modo somente leitura')) return;
+      const inboxId = String(id || '').trim();
+      if (!inboxId || inboxDespesasBusyIds.has(inboxId)) return;
+      if (!confirm('Desfazer este vinculo? Se ele criou uma despesa simples exclusiva, essa despesa tambem sera removida.')) return;
+      setInboxItemBusy(inboxId, true);
+      window.AppRequest.call('desfazerAlocacaoComprovanteFinanceiro', [inboxId, pagamentoId, getAmbienteBancoAtivoInbox()], {
+        context: 'despesas.inbox.unallocate',
+        errorMessage: 'Erro ao desfazer vinculo'
+      })
+        .then(resultado => {
+          if (!resultado?.ok) throw new Error('O vinculo nao foi removido pelo servidor.');
+          mostrarToast('Vinculo desfeito.');
+          atualizarAposConciliacaoComprovante();
+        })
+        .catch(error => mostrarToast(error?.message || 'Erro ao desfazer vinculo', 'erro'))
+        .finally(() => setInboxItemBusy(inboxId, false));
     }
 
     function descartarInboxDespesa(id) {
@@ -2059,7 +2267,8 @@
       const parcelas = Array.isArray(item?.parcelas_detalhe) ? item.parcelas_detalhe : [];
       const totalParcelas = Math.max(1, Math.floor(parseNumeroInput(item?.parcelas || 1) || 1));
       despesaPagamentoParcelado = totalParcelas > 1;
-      const proximaParcela = parcelas.find(p => Number(p?.valor_pendente || 0) > 0.009) || null;
+      const parcelasPendentes = parcelas.filter(p => Number(p?.valor_pendente || 0) > 0.009);
+      const proximaParcela = parcelasPendentes[0] || null;
 
       if (f.pagDespesaParcelaWrap && f.pagDespesaParcela) {
         if (despesaPagamentoParcelado) {
@@ -2068,22 +2277,23 @@
             mostrarToast('Nao ha parcela pendente para esta despesa', 'erro');
             return false;
           }
-          const numero = Number(proximaParcela.parcela_numero || 0);
-          const total = Number(proximaParcela.parcelas_total || 0);
-          const data = String(proximaParcela.data_prevista || '-').trim() || '-';
           const valorPend = Number(proximaParcela.valor_pendente || 0);
 
-          f.pagDespesaParcela.innerHTML = '';
-          const op = document.createElement('option');
-          op.value = String(proximaParcela.ID || '').trim();
-          op.textContent = `Parcela ${numero}/${total} - ${data} - ${formatarMoeda(valorPend)}`;
-          f.pagDespesaParcela.appendChild(op);
-          f.pagDespesaParcela.value = op.value;
+          f.pagDespesaParcela.innerHTML = parcelasPendentes.map(parcela => {
+            const parcelaId = String(parcela.ID || '').trim();
+            const parcelaNumero = Number(parcela.parcela_numero || 0);
+            const parcelasTotal = Number(parcela.parcelas_total || 0);
+            const dataPrevista = String(parcela.data_prevista || '-').trim() || '-';
+            const saldoParcela = Number(parcela.valor_pendente || 0);
+            return `<option value="${escapeHtml(parcelaId)}" data-valor-pendente="${escapeHtml(saldoParcela)}">Parcela ${parcelaNumero}/${parcelasTotal} - ${escapeHtml(dataPrevista)} - ${escapeHtml(formatarMoeda(saldoParcela))}</option>`;
+          }).join('');
+          f.pagDespesaParcela.value = String(proximaParcela.ID || '').trim();
           f.pagDespesaParcelaWrap.classList.remove('hidden');
 
           if (f.pagDespesaValor) {
             f.pagDespesaValor.value = valorPend > 0 ? valorPend.toFixed(2) : '';
-            f.pagDespesaValor.readOnly = true;
+            f.pagDespesaValor.max = String(valorPend);
+            f.pagDespesaValor.readOnly = false;
           }
         } else {
           f.pagDespesaParcela.innerHTML = '<option value="">Parcela unica</option>';
@@ -2103,6 +2313,18 @@
       if (f.modalPagamentoDespesa) f.modalPagamentoDespesa.classList.remove('hidden');
       setSalvandoPagamentoDespesa(false);
       return true;
+    }
+
+    function handlePagamentoDespesaParcelaChange() {
+      if (!despesaPagamentoParcelado) return;
+      const f = el();
+      const opcao = f.pagDespesaParcela?.selectedOptions?.[0];
+      const pendente = parseNumeroInput(opcao?.dataset?.valorPendente || '');
+      if (f.pagDespesaValor) {
+        f.pagDespesaValor.max = pendente > 0 ? String(pendente) : '';
+        f.pagDespesaValor.value = pendente > 0 ? pendente.toFixed(2) : '';
+        f.pagDespesaValor.readOnly = false;
+      }
     }
 
     function registrarPagamento(id) {
@@ -2164,6 +2386,13 @@
       if (!isFinite(valorPago) || valorPago <= 0) {
         mostrarToast('Valor pago invalido', 'erro');
         return;
+      }
+      if (despesaPagamentoParcelado) {
+        const pendenteParcela = parseNumeroInput(f.pagDespesaParcela?.selectedOptions?.[0]?.dataset?.valorPendente || '');
+        if (pendenteParcela > 0 && valorPago > pendenteParcela + 0.009) {
+          mostrarToast('O pagamento nao pode ultrapassar o saldo da parcela selecionada', 'erro');
+          return;
+        }
       }
       const despesaIdAtual = despesaPagamentoId;
       const eraParcelado = despesaPagamentoParcelado;
@@ -2231,7 +2460,10 @@
       despesaPagamentoParcelado = false;
       setSalvandoPagamentoDespesa(false);
       const f = el();
-      if (f.pagDespesaValor) f.pagDespesaValor.readOnly = false;
+      if (f.pagDespesaValor) {
+        f.pagDespesaValor.readOnly = false;
+        f.pagDespesaValor.max = '';
+      }
       if (f.pagDespesaParcelaWrap) f.pagDespesaParcelaWrap.classList.add('hidden');
       if (f.pagDespesaParcela) f.pagDespesaParcela.innerHTML = '<option value="">Selecione</option>';
       if (f.modalPagamentoDespesa) {
@@ -2260,11 +2492,18 @@
       descartarFalhaDespesa,
       carregarInboxDespesas,
       confirmarInboxDespesa,
+      vincularComprovante,
+      registrarComprovanteComoDespesa,
+      salvarRevisaoComprovante,
+      desfazerAlocacaoComprovante,
+      selecionarSugestaoComprovante,
+      atualizarValorDestinoComprovante,
       descartarInboxDespesa,
       registrarPagamento,
       registrarPagamentoDespesa,
       confirmarPagamentoDespesa,
       cancelarPagamentoDespesa,
+      handlePagamentoDespesaParcelaChange,
       handleDespesaFormaPagamentoChange,
       handleDespesaParcelasDetalheChange
     };
