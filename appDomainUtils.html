@@ -116,7 +116,8 @@
       estoque: 'estoque',
       produto: 'produtos',
       producao: 'producao',
-      venda: 'vendas'
+      venda: 'vendas',
+      investimento: 'investimentos'
     };
 
     function parseNumber(value) {
@@ -242,6 +243,16 @@
             : multiply(item, ['quantidade'], ['valor_unit_venda', 'valor_unit']);
         },
         pending: item => getPendingValue(item, ['valor_total_venda', 'total_previsto']),
+        defaultSort: { key: 'operation', direction: 'desc' },
+        options: [ALPHA, CREATED, OPERATION, VALUE, PENDING]
+      },
+      investimentos: {
+        idFields: ['ID', 'id'],
+        alphaFields: ['descricao', 'investidor', 'referencia_investimento'],
+        createdFields: ['criado_em'],
+        operationFields: ['data_investimento'],
+        value: item => firstNumber(item, ['valor_total_investimento', 'total_previsto']),
+        pending: item => getPendingValue(item, ['valor_total_investimento', 'total_previsto']),
         defaultSort: { key: 'operation', direction: 'desc' },
         options: [ALPHA, CREATED, OPERATION, VALUE, PENDING]
       },

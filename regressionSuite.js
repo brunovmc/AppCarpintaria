@@ -1091,6 +1091,20 @@ function regressionCacheCore() {
 }
 
 function regressionFinanceiroParcelas() {
+  assertRegressao(
+    normalizarOrigemTipoFinanceiro('investimento') === ORIGEM_TIPO_INVESTIMENTO,
+    'Investimento deve ser aceito como origem financeira.'
+  );
+  assertRegressao(
+    getNaturezaOrigemFinanceiro(ORIGEM_TIPO_INVESTIMENTO) === NATUREZA_RECEBIMENTO,
+    'Investimento deve gerar recebimentos, nao pagamentos.'
+  );
+  assertAproxRegressao(
+    getTotalPrevistoInvestimentoFinanceiro({ valor_total_investimento: '1250,50' }),
+    1250.5,
+    0.001,
+    'Total previsto do investimento incorreto.'
+  );
   const parcelasCredito = normalizarParcelasFinanceiro('3', 'Credito');
   assertRegressao(parcelasCredito === 3, 'Credito deveria aceitar 3 parcelas');
 
@@ -1775,6 +1789,15 @@ function regressionComprovantesRecebimentos() {
       );
     });
   assertRegressao(VENDAS_SCHEMA.includes('cliente'), 'Cabecalho cliente ausente em VENDAS_SCHEMA.');
+  assertRegressao(
+    new Set(INVESTIMENTOS_SCHEMA).size === INVESTIMENTOS_SCHEMA.length,
+    'Schema de INVESTIMENTOS nao deve conter cabecalhos duplicados.'
+  );
+  ['investidor', 'tipo_investimento', 'valor_total_investimento', 'client_request_id']
+    .forEach(cabecalho => assertRegressao(
+      INVESTIMENTOS_SCHEMA.includes(cabecalho),
+      `Cabecalho ausente em INVESTIMENTOS: ${cabecalho}.`
+    ));
   assertRegressao(
     VENDAS_SCHEMA.includes('referencia_venda'),
     'Cabecalho referencia_venda ausente em VENDAS_SCHEMA.'

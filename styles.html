@@ -4289,7 +4289,7 @@
   .dashx-kpi-grid {
     display: grid;
     gap: 12px;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
   }
 
   .dashx-shell .dashx-kpi-card,
@@ -4485,7 +4485,7 @@
   .dashx-position-grid {
     display: grid;
     gap: 12px;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
   .dashx-shell .dashx-position-card {
@@ -5192,5 +5192,60 @@
     .finance-history-installment {
       align-items: flex-start;
     }
+  }
+
+  .investimento-card .card-resumo {
+    align-items: flex-start;
+    display: flex;
+    gap: 16px;
+    justify-content: space-between;
+  }
+
+  .investimento-card .card-resumo > div {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+  }
+
+  .investimento-card .despesa-card-resumo-valores {
+    align-items: flex-end;
+    flex: 0 0 auto;
+    text-align: right;
+  }
+
+  .detalhes-grid {
+    display: grid;
+    gap: 10px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    margin-bottom: 16px;
+  }
+
+  .detalhes-grid > div,
+  .dashx-partner-balance {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+
+  .detalhes-grid span,
+  .dashx-partner-balance span { color: #6b7f89; font-size: 12px; }
+
+  .app-local-state {
+    background: #fff8df;
+    border-radius: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-top: 10px;
+    padding: 9px 11px;
+  }
+
+  .app-local-state button { align-self: flex-start; margin: 3px 0 0; width: auto; }
+
+  @media (max-width: 620px) {
+    .investimento-card .card-resumo { flex-direction: column; }
+    .investimento-card .despesa-card-resumo-valores { align-items: flex-start; text-align: left; }
+    .detalhes-grid { grid-template-columns: 1fr; }
   }
 </style>

@@ -1,0 +1,118 @@
+<section class="despesas-cadastradas">
+  <div class="despesas-cadastradas-titulo">
+    <strong>Investimentos cadastrados</strong>
+    <span>Aportes dos socios, parcelas e recebimentos</span>
+  </div>
+  <div id="ordenacaoInvestimentos" class="lista-ordenacao-slot"></div>
+  <div id="listaInvestimentos"></div>
+</section>
+
+<div id="modalDetalhesInvestimento" class="modal hidden">
+  <div class="modal-content">
+    <button class="modal-close-square" type="button" onclick="InvestimentosUI.fecharDetalhes()" aria-label="Fechar">X</button>
+    <h3 id="modalDetalhesInvestimentoTitulo">Detalhes do investimento</h3>
+    <div id="modalDetalhesInvestimentoConteudo"></div>
+  </div>
+</div>
+
+<div id="formularioInvestimento" class="modal hidden">
+  <div class="modal-content form-modal-content">
+    <button class="modal-close-square" type="button" onclick="InvestimentosUI.fecharFormulario()" aria-label="Fechar">X</button>
+    <h2 id="investimentoFormTitulo">Novo investimento</h2>
+
+    <div class="campo-ajuda-wrap">
+      <label class="campo-ajuda-tag" for="investimentoDescricao">Descricao do aporte</label>
+      <input id="investimentoDescricao" maxlength="200" required>
+    </div>
+
+    <div class="campo-ajuda-wrap">
+      <label class="campo-ajuda-tag" for="investimentoTipo">Tipo de investimento</label>
+      <input id="investimentoTipo" list="investimentoTiposLista" maxlength="120" value="APORTE_SOCIO" required>
+      <datalist id="investimentoTiposLista"></datalist>
+    </div>
+
+    <div class="campo-ajuda-wrap">
+      <label class="campo-ajuda-tag" for="investimentoInvestidor">Investidor</label>
+      <input id="investimentoInvestidor" list="investimentoInvestidoresLista" maxlength="160" required>
+      <datalist id="investimentoInvestidoresLista"></datalist>
+    </div>
+
+    <div class="campo-ajuda-wrap">
+      <label class="campo-ajuda-tag" for="investimentoReferencia">Referencia</label>
+      <input id="investimentoReferencia" maxlength="160">
+    </div>
+
+    <div class="campo-ajuda-wrap">
+      <label class="campo-ajuda-tag" for="investimentoValorTotal">Valor total (R$)</label>
+      <input id="investimentoValorTotal" type="number" min="0.01" step="0.01" oninput="InvestimentosUI.atualizarParcelas()" required>
+    </div>
+
+    <div class="campo-ajuda-wrap">
+      <label class="campo-ajuda-tag" for="investimentoRecebidoPor">Recebido por</label>
+      <select id="investimentoRecebidoPor"></select>
+    </div>
+
+    <div class="campo-ajuda-wrap">
+      <label class="campo-ajuda-tag" for="investimentoData">Data do investimento</label>
+      <input id="investimentoData" type="date" onchange="InvestimentosUI.atualizarParcelas()" required>
+    </div>
+
+    <div class="campo-ajuda-wrap">
+      <label class="campo-ajuda-tag" for="investimentoFormaPagamento">Forma de recebimento</label>
+      <select id="investimentoFormaPagamento" onchange="InvestimentosUI.alterarFormaPagamento()"></select>
+    </div>
+
+    <div id="investimentoParcelasWrap" class="campo-ajuda-wrap hidden">
+      <label class="campo-ajuda-tag" for="investimentoParcelas">Parcelas</label>
+      <input id="investimentoParcelas" type="number" min="1" step="1" value="1" oninput="InvestimentosUI.atualizarParcelas()">
+    </div>
+
+    <div id="investimentoParcelasDetalheWrap" class="campo-ajuda-wrap hidden">
+      <span class="campo-ajuda-tag">Parcelas detalhadas</span>
+      <div id="investimentoParcelasDetalheLista" class="parcelas-detalhe-list"></div>
+    </div>
+
+    <div class="campo-ajuda-wrap">
+      <label class="campo-ajuda-tag" for="investimentoObservacao">Observacao</label>
+      <textarea id="investimentoObservacao" maxlength="500"></textarea>
+    </div>
+
+    <button id="btnSalvarInvestimento" type="button" onclick="InvestimentosController.salvar()">Salvar</button>
+    <button type="button" onclick="InvestimentosUI.fecharFormulario()">Cancelar</button>
+  </div>
+</div>
+
+<div id="modalRecebimentoInvestimento" class="modal hidden">
+  <div class="modal-content">
+    <button class="modal-close-square" type="button" onclick="InvestimentosController.cancelarRecebimento()" aria-label="Fechar">X</button>
+    <h3 id="recebimentoInvestimentoTitulo">Registrar recebimento do investimento</h3>
+
+    <div class="campo-ajuda-wrap">
+      <label class="campo-ajuda-tag" for="recebimentoInvestimentoData">Data do recebimento</label>
+      <input id="recebimentoInvestimentoData" type="date">
+    </div>
+
+    <div class="campo-ajuda-wrap">
+      <label class="campo-ajuda-tag" for="recebimentoInvestimentoValor">Valor recebido (R$)</label>
+      <input id="recebimentoInvestimentoValor" type="number" min="0.01" step="0.01">
+    </div>
+
+    <div id="recebimentoInvestimentoParcelaWrap" class="campo-ajuda-wrap hidden">
+      <label class="campo-ajuda-tag" for="recebimentoInvestimentoParcela">Parcela</label>
+      <select id="recebimentoInvestimentoParcela" onchange="InvestimentosUI.atualizarValorRecebimentoParcela()"></select>
+    </div>
+
+    <div class="campo-ajuda-wrap">
+      <label class="campo-ajuda-tag" for="recebimentoInvestimentoForma">Forma de recebimento</label>
+      <select id="recebimentoInvestimentoForma"></select>
+    </div>
+
+    <div class="campo-ajuda-wrap">
+      <label class="campo-ajuda-tag" for="recebimentoInvestimentoObservacao">Observacao</label>
+      <textarea id="recebimentoInvestimentoObservacao"></textarea>
+    </div>
+
+    <button id="btnConfirmarRecebimentoInvestimento" type="button" onclick="InvestimentosController.confirmarRecebimento()">Confirmar recebimento</button>
+    <button type="button" onclick="InvestimentosController.cancelarRecebimento()">Cancelar</button>
+  </div>
+</div>

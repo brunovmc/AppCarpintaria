@@ -48,20 +48,40 @@ function obterContextoComprovantesRecebimentosAtual_(statusFiltro) {
 
 function montarCatalogoRecebimentos_() {
   const vendas = listarVendas(true);
+  const investimentos = typeof listarInvestimentosNoAmbienteAtual_ === 'function'
+    ? listarInvestimentosNoAmbienteAtual_(true)
+    : [];
   const origens = {};
   vendas.forEach(venda => {
     const id = String(venda.ID || '').trim();
     if (!id) return;
-    origens[id] = {
-      origem_tipo: 'VENDA',
+    origens[`${ORIGEM_TIPO_VENDA}|${id}`] = {
+      origem_tipo: ORIGEM_TIPO_VENDA,
       origem_id: id,
+      origem_classe: 'Venda',
       origem_rotulo: String(venda.item || 'Venda').trim() || 'Venda',
       cliente: String(venda.cliente || '').trim(),
-      referencia_venda: String(venda.referencia_venda || '').trim(),
+      referencia: String(venda.referencia_venda || '').trim(),
       recebido_por: String(venda.recebido_por || '').trim(),
       forma_pagamento: String(venda.forma_pagamento || '').trim(),
       data_origem: formatarDataYmdFinanceiroSafe(venda.data_venda || venda.criado_em),
       observacao: String(venda.observacao || '').trim()
+    };
+  });
+  investimentos.forEach(investimento => {
+    const id = String(investimento.ID || '').trim();
+    if (!id) return;
+    origens[`${ORIGEM_TIPO_INVESTIMENTO}|${id}`] = {
+      origem_tipo: ORIGEM_TIPO_INVESTIMENTO,
+      origem_id: id,
+      origem_classe: 'Investimento',
+      origem_rotulo: String(investimento.descricao || 'Investimento').trim() || 'Investimento',
+      cliente: String(investimento.investidor || '').trim(),
+      referencia: String(investimento.referencia_investimento || '').trim(),
+      recebido_por: String(investimento.recebido_por || '').trim(),
+      forma_pagamento: String(investimento.forma_pagamento || '').trim(),
+      data_origem: formatarDataYmdFinanceiroSafe(investimento.data_investimento || investimento.criado_em),
+      observacao: String(investimento.observacao || '').trim()
     };
   });
   const sheet = getSheet(ABA_PARCELAS_FINANCEIRAS);
@@ -69,12 +89,15 @@ function montarCatalogoRecebimentos_() {
   const todos = parcelas
     .filter(parcela =>
       String(parcela.ativo).toLowerCase() === 'true' &&
-      String(parcela.origem_tipo || '').trim().toUpperCase() === 'VENDA' &&
+      [ORIGEM_TIPO_VENDA, ORIGEM_TIPO_INVESTIMENTO].includes(
+        String(parcela.origem_tipo || '').trim().toUpperCase()
+      ) &&
       String(parcela.natureza || NATUREZA_RECEBIMENTO).trim().toUpperCase() === NATUREZA_RECEBIMENTO
     )
     .map(parcela => {
       const origemId = String(parcela.origem_id || '').trim();
-      const origem = origens[origemId];
+      const origemTipo = String(parcela.origem_tipo || '').trim().toUpperCase();
+      const origem = origens[`${origemTipo}|${origemId}`];
       if (!origem) return null;
       const previsto = round2Financeiro(parseNumeroBR(parcela.valor_previsto));
       const recebido = round2Financeiro(parseNumeroBR(parcela.valor_pago));
@@ -82,7 +105,7 @@ function montarCatalogoRecebimentos_() {
       const numero = Math.max(1, Math.floor(parseNumeroBR(parcela.parcela_numero) || 1));
       const total = Math.max(numero, Math.floor(parseNumeroBR(parcela.parcelas_total) || 1));
       const dataPrevista = formatarDataYmdFinanceiroSafe(parcela.data_prevista);
-      const identificacao = [origem.cliente, origem.referencia_venda, origem.origem_rotulo]
+      const identificacao = [origem.cliente, origem.referencia, origem.origem_rotulo]
         .filter(Boolean).join(' · ');
       return {
         ...origem,
@@ -93,8 +116,8 @@ function montarCatalogoRecebimentos_() {
         valor_previsto: previsto,
         valor_recebido: recebido,
         valor_pendente: pendente,
-        chave: `VENDA|${origemId}|${String(parcela.ID || '').trim()}`,
-        label: `${identificacao || 'Venda'} · parcela ${numero}/${total} · ${formatarMoedaRecebimento_(pendente)}`
+        chave: `${origemTipo}|${origemId}|${String(parcela.ID || '').trim()}`,
+        label: `${origem.origem_classe}: ${identificacao || origemId} · parcela ${numero}/${total} · ${formatarMoedaRecebimento_(pendente)}`
       };
     })
     .filter(Boolean);
@@ -113,17 +136,20 @@ function enriquecerComprovanteRecebimento_(item, pagamentos, catalogo) {
   const alocacoes = (Array.isArray(pagamentos) ? pagamentos : [])
     .filter(pagamento =>
       String(pagamento.comprovante_id || '').trim() === comprovanteId &&
-      String(pagamento.origem_tipo || '').trim().toUpperCase() === 'VENDA'
+      [ORIGEM_TIPO_VENDA, ORIGEM_TIPO_INVESTIMENTO].includes(
+        String(pagamento.origem_tipo || '').trim().toUpperCase()
+      )
     )
     .map(pagamento => {
       const parcela = catalogo.mapaPorParcela[String(pagamento.parcela_alvo_id || '').trim()] || null;
       const origemId = String(pagamento.origem_id || '').trim();
-      const origem = catalogo.origens[origemId] || {};
+      const origemTipo = String(pagamento.origem_tipo || '').trim().toUpperCase();
+      const origem = catalogo.origens[`${origemTipo}|${origemId}`] || {};
       return {
         pagamento_id: String(pagamento.ID || '').trim(),
-        origem_tipo: 'VENDA',
+        origem_tipo: origemTipo,
         origem_id: origemId,
-        origem_rotulo: [origem.cliente, origem.referencia_venda, origem.origem_rotulo]
+        origem_rotulo: [origem.origem_classe, origem.cliente, origem.referencia, origem.origem_rotulo]
           .filter(Boolean).join(' · ') || origemId,
         parcela_id: String(pagamento.parcela_alvo_id || '').trim(),
         parcela_numero: Number(parcela?.parcela_numero || 1),
@@ -172,9 +198,9 @@ function pontuarDestinoRecebimento_(comprovante, saldo, destino) {
     motivos.push('possivel recebimento parcial');
   }
   const referenciaComprovante = normalizarTextoRecebimento_(comprovante.referencia_transacao);
-  const referenciaVenda = normalizarTextoRecebimento_(destino.referencia_venda);
-  if (referenciaComprovante && referenciaVenda &&
-      (referenciaComprovante === referenciaVenda || referenciaComprovante.includes(referenciaVenda) || referenciaVenda.includes(referenciaComprovante))) {
+  const referenciaDestino = normalizarTextoRecebimento_(destino.referencia || destino.referencia_venda);
+  if (referenciaComprovante && referenciaDestino &&
+      (referenciaComprovante === referenciaDestino || referenciaComprovante.includes(referenciaDestino) || referenciaDestino.includes(referenciaComprovante))) {
     score += 35;
     motivos.push('mesma referencia');
   }
@@ -221,10 +247,14 @@ function alocarComprovanteRecebimentoAtual_(comprovanteId, payload) {
   if (String(comprovante.status || '').toUpperCase() === 'DESCARTADO') throw new Error('Comprovante descartado.');
   comprovante = persistirEdicaoComprovanteRecebimento_(comprovante, payload);
   const valor = round2Financeiro(parseNumeroBR(payload?.valor_alocado));
+  const origemTipo = normalizarOrigemTipoFinanceiro(payload?.origem_tipo || ORIGEM_TIPO_VENDA);
   const origemId = String(payload?.origem_id || '').trim();
   const parcelaId = String(payload?.parcela_id || payload?.parcela_alvo_id || '').trim();
   if (valor <= 0) throw new Error('Informe um valor maior que zero para o vinculo.');
-  if (!origemId || !parcelaId) throw new Error('Selecione uma venda e uma parcela valida.');
+  if (![ORIGEM_TIPO_VENDA, ORIGEM_TIPO_INVESTIMENTO].includes(origemTipo)) {
+    throw new Error('Selecione uma venda ou investimento valido.');
+  }
+  if (!origemId || !parcelaId) throw new Error('Selecione uma origem e uma parcela valida.');
   const clientRequestIdFornecido = normalizarClientRequestIdRecebimento_(payload?.client_request_id);
   if (clientRequestIdFornecido) {
     const existente = listarPagamentos(true).find(item =>
@@ -232,12 +262,12 @@ function alocarComprovanteRecebimentoAtual_(comprovanteId, payload) {
     );
     if (existente) {
       if (String(existente.comprovante_id || '').trim() !== String(comprovante.ID || '').trim() ||
-          String(existente.origem_tipo || '').trim().toUpperCase() !== 'VENDA' ||
+          String(existente.origem_tipo || '').trim().toUpperCase() !== origemTipo ||
           String(existente.origem_id || '').trim() !== origemId ||
           String(existente.parcela_alvo_id || '').trim() !== parcelaId) {
         throw new Error('Identificador da operacao ja utilizado por outro vinculo.');
       }
-      const pagamentoRecuperado = registrarPagamento('VENDA', origemId, {
+      const pagamentoRecuperado = registrarPagamento(origemTipo, origemId, {
         parcela_alvo_id: parcelaId,
         data_pagamento: existente.data_pagamento,
         valor_pago: existente.valor_pago,
@@ -258,13 +288,13 @@ function alocarComprovanteRecebimentoAtual_(comprovanteId, payload) {
   const resumo = enriquecerComprovanteRecebimento_(comprovante, listarPagamentos(true), catalogo);
   if (valor > resumo.saldo_nao_alocado + 0.009) throw new Error('Valor maior que o saldo disponivel do comprovante.');
   const destino = catalogo.mapaPorParcela[parcelaId];
-  if (!destino || destino.origem_id !== origemId) {
-    throw new Error('Parcela selecionada nao pertence a venda informada.');
+  if (!destino || destino.origem_id !== origemId || destino.origem_tipo !== origemTipo) {
+    throw new Error('Parcela selecionada nao pertence a origem informada.');
   }
   if (valor > destino.valor_pendente + 0.009) throw new Error('Valor maior que o saldo pendente da parcela.');
   const clientRequestId = clientRequestIdFornecido ||
     gerarClientRequestIdRecebimento_(comprovante.ID, origemId, parcelaId, resumo.saldo_nao_alocado, valor);
-  const pagamento = registrarPagamento('VENDA', origemId, {
+  const pagamento = registrarPagamento(origemTipo, origemId, {
     parcela_alvo_id: parcelaId,
     data_pagamento: payload?.data_recebimento || comprovante.data_recebimento,
     valor_pago: valor,
@@ -301,7 +331,9 @@ function desfazerAlocacaoComprovanteRecebimento(comprovanteId, pagamentoId, ambi
       );
       if (!pagamento ||
           String(pagamento.comprovante_id || '').trim() !== String(comprovanteId || '').trim() ||
-          String(pagamento.origem_tipo || '').trim().toUpperCase() !== 'VENDA') {
+          ![ORIGEM_TIPO_VENDA, ORIGEM_TIPO_INVESTIMENTO].includes(
+            String(pagamento.origem_tipo || '').trim().toUpperCase()
+          )) {
         throw new Error('Vinculo de recebimento nao encontrado.');
       }
       if (!removerPagamento_(pagamento.ID, { rollbackEmFalha: true })) {
@@ -396,6 +428,100 @@ function criarVendaEAlocarComprovanteRecebimentoAtual_(comprovanteId, vendaPaylo
         venda_id: venda.ID,
         erro: String(rollbackError)
       }));
+    }
+    throw error;
+  }
+}
+
+function criarInvestimentoEAlocarComprovanteRecebimento(comprovanteId, investimentoPayload, payload) {
+  const ambiente = payload?._db_env || payload?.ambiente || payload?.db_env || '';
+  return executarComAmbienteInboxRecebimentos_(ambiente, () =>
+    executarComLockRecebimento_(() => criarInvestimentoEAlocarComprovanteRecebimentoAtual_(
+      comprovanteId,
+      investimentoPayload,
+      payload
+    ))
+  );
+}
+
+function criarInvestimentoEAlocarComprovanteRecebimentoAtual_(comprovanteId, investimentoPayload, payload) {
+  assertCanWrite('Criacao de investimento a partir de recebimento');
+  let comprovante = obterInboxRecebimentoPorId_(comprovanteId);
+  if (!comprovante) throw new Error('Comprovante de recebimento nao encontrado.');
+  comprovante = persistirEdicaoComprovanteRecebimento_(comprovante, payload);
+  const clientRequestId = normalizarClientRequestIdRecebimento_(payload?.client_request_id) ||
+    gerarClientRequestIdRecebimento_(comprovante.ID, 'INVESTIMENTO', 'NOVA', comprovante.valor_total, payload?.valor_alocado);
+
+  const pagamentoExistente = listarPagamentos(true).find(item =>
+    String(item.client_request_id || '').trim() === clientRequestId
+  );
+  if (pagamentoExistente) {
+    if (String(pagamentoExistente.comprovante_id || '').trim() !== String(comprovante.ID || '').trim() ||
+        String(pagamentoExistente.origem_tipo || '').trim().toUpperCase() !== ORIGEM_TIPO_INVESTIMENTO) {
+      throw new Error('Identificador da operacao ja utilizado por outro recebimento.');
+    }
+    const investimentoExistente = listarInvestimentosNoAmbienteAtual_(true).find(item =>
+      String(item.ID || '').trim() === String(pagamentoExistente.origem_id || '').trim()
+    );
+    if (!investimentoExistente) throw new Error('O investimento da operacao repetida nao esta mais disponivel.');
+    return {
+      ok: true,
+      investimento: investimentoExistente,
+      pagamento: pagamentoExistente,
+      comprovante: atualizarEstadoComprovanteRecebimento_(comprovante.ID),
+      reutilizado: true
+    };
+  }
+
+  const resumo = enriquecerComprovanteRecebimento_(
+    comprovante,
+    listarPagamentos(true),
+    montarCatalogoRecebimentos_()
+  );
+  const totalInvestimento = round2Financeiro(parseNumeroBR(investimentoPayload?.valor_total_investimento));
+  const solicitado = round2Financeiro(parseNumeroBR(payload?.valor_alocado));
+  const valor = round2Financeiro(Math.min(
+    solicitado > 0 ? solicitado : resumo.saldo_nao_alocado,
+    resumo.saldo_nao_alocado,
+    totalInvestimento
+  ));
+  if (valor <= 0) throw new Error('Nao ha saldo disponivel para vincular ao novo investimento.');
+
+  const investimento = criarInvestimento({
+    ...(investimentoPayload || {}),
+    client_request_id: clientRequestId
+  }, { lockJaAdquirido: true });
+  if (!investimento?.ID) throw new Error('O investimento nao foi criado.');
+  try {
+    const pagamento = registrarPagamento(ORIGEM_TIPO_INVESTIMENTO, investimento.ID, {
+      distribuir_automaticamente: true,
+      data_pagamento: payload?.data_recebimento || comprovante.data_recebimento,
+      valor_pago: valor,
+      forma_pagamento: payload?.forma_pagamento || comprovante.forma_pagamento,
+      observacao: String(payload?.observacao || `Investimento criado pelo recebimento ${comprovante.ID}`).trim(),
+      comprovante_id: comprovante.ID,
+      client_request_id: clientRequestId
+    });
+    if (!pagamento?.ID) throw new Error('O recebimento do investimento nao foi persistido.');
+    return {
+      ok: true,
+      investimento: listarInvestimentosNoAmbienteAtual_(true).find(item => item.ID === investimento.ID) || investimento,
+      pagamento,
+      comprovante: atualizarEstadoComprovanteRecebimento_(comprovante.ID)
+    };
+  } catch (error) {
+    const pagamentoParcial = listarPagamentos(true).find(item =>
+      String(item.client_request_id || '').trim() === clientRequestId
+    );
+    if (pagamentoParcial) {
+      try { removerPagamento_(pagamentoParcial.ID, { rollbackEmFalha: false }); } catch (_) { /* sem acao */ }
+    }
+    try {
+      updateById(ABA_INVESTIMENTOS, 'ID', investimento.ID, { ativo: false }, INVESTIMENTOS_SCHEMA);
+      limparParcelasFinanceirasOrigem(ORIGEM_TIPO_INVESTIMENTO, investimento.ID);
+      limparCacheInvestimentos();
+    } catch (_) {
+      // A falha original e mais relevante; a rotina de integridade pode concluir o reparo.
     }
     throw error;
   }

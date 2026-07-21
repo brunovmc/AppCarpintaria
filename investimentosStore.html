@@ -1,0 +1,67 @@
+<script>
+  window.InvestimentosStore = (() => {
+    let itens = [];
+    let carregado = false;
+    let versao = 0;
+    let assinatura = '';
+    const DOMAIN = 'investimentos';
+    let ordenacao = window.AppListOrder?.get?.(DOMAIN) || { key: 'operation', direction: 'desc' };
+
+    function ordenar(lista) {
+      return window.AppListOrder?.sort
+        ? window.AppListOrder.sort(DOMAIN, lista, ordenacao)
+        : [...(Array.isArray(lista) ? lista : [])];
+    }
+    function persistir() { window.AppTabCache?.salvar?.(DOMAIN, itens); }
+    function atualizarAssinatura() {
+      assinatura = window.AppDataRevision?.signature?.(itens) || '';
+      versao += 1;
+      persistir();
+    }
+    function set(lista) {
+      const proximos = ordenar(lista);
+      const nova = window.AppDataRevision?.signature?.(proximos) || '';
+      if (carregado && nova && nova === assinatura) return false;
+      itens = proximos;
+      assinatura = nova;
+      carregado = true;
+      versao += 1;
+      persistir();
+      return true;
+    }
+    function get() { return ordenar(itens); }
+    function getById(id) { return itens.find(item => String(item.ID) === String(id)) || null; }
+    function clear() {
+      itens = []; carregado = false; assinatura = ''; versao += 1;
+      window.AppTabCache?.remover?.(DOMAIN);
+    }
+    function getSort() { return { ...ordenacao }; }
+    function getSortOptions() { return window.AppListOrder?.getOptions?.(DOMAIN) || []; }
+    function setSort(sortOrKey, direction) {
+      ordenacao = window.AppListOrder?.normalize?.(DOMAIN, sortOrKey, direction) || { key: sortOrKey, direction };
+      itens = ordenar(itens);
+      atualizarAssinatura();
+      window.AppListOrder?.save?.(DOMAIN, ordenacao);
+      return getSort();
+    }
+    function filter({ texto } = {}) {
+      const termo = String(texto || '').trim();
+      if (!termo) return get();
+      const inclui = window.AppSearch?.includesText || ((base, busca) => String(base || '').toLowerCase().includes(String(busca || '').toLowerCase()));
+      return ordenar(itens.filter(item =>
+        inclui(item.descricao, termo) || inclui(item.investidor, termo) ||
+        inclui(item.tipo_investimento, termo) || inclui(item.referencia_investimento, termo) ||
+        inclui(item.recebido_por, termo) || inclui(item.status_pagamento, termo)
+      ));
+    }
+    return {
+      set, get, getById, clear, filter,
+      isLoaded: () => carregado,
+      getVersion: () => versao,
+      getSort, getSortOptions, setSort,
+      add: item => { if (item?.ID) { itens.unshift(item); itens = ordenar(itens); atualizarAssinatura(); } },
+      update: (id, dados) => { const i = itens.findIndex(item => String(item.ID) === String(id)); if (i >= 0) { itens[i] = { ...itens[i], ...dados }; itens = ordenar(itens); atualizarAssinatura(); } },
+      remove: id => { itens = itens.filter(item => String(item.ID) !== String(id)); atualizarAssinatura(); }
+    };
+  })();
+</script>

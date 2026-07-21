@@ -1,7 +1,7 @@
 <script>
   window.DashboardController = (() => {
-    const STORAGE_PREFIX = 'app:dash:v3:executivo:';
-    const LEGACY_STORAGE_PREFIX = 'app:dash:v2:executivo:';
+    const STORAGE_PREFIX = 'app:dash:v4:executivo:';
+    const LEGACY_STORAGE_PREFIX = 'app:dash:v3:executivo:';
     // O snapshot continua utilizavel enquanto uma nova versao e buscada em
     // segundo plano. Este TTL representa apenas a janela em que nem sequer
     // precisamos revalidar o painel.
@@ -171,7 +171,7 @@
         const raw = window.localStorage?.getItem(storageKey(referencia, ambiente));
         if (!raw) return null;
         const parsed = JSON.parse(raw);
-        if (!parsed?.data || parsed.data.version !== 'v2') return null;
+        if (!parsed?.data || parsed.data.version !== 'v3') return null;
         if (!parsed.assinatura) parsed.assinatura = assinaturaPayload(parsed.data);
         cacheMemoria[chave] = parsed;
         return parsed;
@@ -309,9 +309,10 @@
       if (!f.cards) return;
       const definicoes = [
         { id: 'vendas', label: 'Vendas registradas', context: 'kpi_vendas', help: 'Negocios lancados no mes, independentemente do recebimento.' },
-        { id: 'recebimentos', label: 'Recebimentos realizados', context: 'kpi_recebimentos', help: 'Entradas efetivamente recebidas no mes.' },
+        { id: 'recebimentos', label: 'Recebimentos de vendas', context: 'kpi_recebimentos', help: 'Valores de clientes efetivamente recebidos no mes.' },
+        { id: 'aportes', label: 'Aportes recebidos', context: 'kpi_aportes', help: 'Capital colocado pelos socios; nao compoe o faturamento.' },
         { id: 'pagamentos', label: 'Pagamentos realizados', context: 'kpi_pagamentos', help: 'Saidas efetivamente pagas no mes.' },
-        { id: 'fluxo_liquido', label: 'Fluxo liquido realizado', context: 'kpi_fluxo', help: 'Recebimentos menos pagamentos; nao e saldo bancario.' }
+        { id: 'fluxo_liquido', label: 'Fluxo operacional realizado', context: 'kpi_fluxo', help: 'Recebimentos de vendas menos pagamentos; aportes ficam separados.' }
       ];
       f.cards.innerHTML = definicoes.map(def => {
         const kpi = payload?.kpis?.[def.id] || {};
@@ -332,14 +333,15 @@
       const f = refs();
       const posicao = payload?.posicao || {};
       const cards = [
-        { label: 'A receber', valor: posicao.receber_total, vencido: posicao.receber_vencido, context: 'posicao_receber', tone: 'receive' },
-        { label: 'A pagar', valor: posicao.pagar_total, vencido: posicao.pagar_vencido, context: 'posicao_pagar', tone: 'pay' }
+        { label: 'A receber', valor: posicao.receber_total, resumo: `Vencido: ${moeda(posicao.receber_vencido)}`, context: 'posicao_receber', tone: 'receive' },
+        { label: 'A pagar', valor: posicao.pagar_total, resumo: `Vencido: ${moeda(posicao.pagar_vencido)}`, context: 'posicao_pagar', tone: 'pay' },
+        { label: 'Aportes previstos', valor: posicao.aportes_previstos, resumo: 'Programados e ainda nao recebidos', context: 'posicao_aportes', tone: 'receive' }
       ];
       if (f.positionCards) {
         f.positionCards.innerHTML = cards.map(item => botaoDetalhe(`
           <span class="dashx-position-label">${escapar(item.label)}</span>
           <strong>${moeda(item.valor)}</strong>
-          <span class="dashx-position-overdue">Vencido: ${moeda(item.vencido)}</span>
+          <span class="dashx-position-overdue">${escapar(item.resumo)}</span>
           <span class="dashx-kpi-action">Ver titulos <span aria-hidden="true">&rarr;</span></span>
         `, item.context, {}, `dashx-position-card dashx-position-${item.tone}`)).join('');
       }
@@ -385,7 +387,9 @@
           <span class="dashx-section-kicker">Historico de aporte</span>
           <h4>Investimento acumulado</h4>
           <strong>${moeda(socios.investimento_acumulado)}</strong>
-          <p>Soma dos pagamentos classificados como investimento em todo o historico disponivel.</p>
+          <p>Total de aportes efetivamente recebidos em todo o historico disponivel.</p>
+          <div class="dashx-partner-balance"><span>Recursos utilizados</span><strong>${moeda(socios.recursos_investimento_utilizados)}</strong></div>
+          <div class="dashx-partner-balance"><span>Saldo gerencial</span><strong>${moeda(socios.saldo_investimento_gerencial)}</strong></div>
           ${botaoDetalhe('Ver composicao <span aria-hidden="true">&rarr;</span>', 'socio_acumulado', { socio: 'investimento', label: 'Investimento' }, 'dashx-text-action')}
         `;
       }
@@ -408,7 +412,7 @@
 
     function render(payload, options = {}) {
       const f = refs();
-      if (!payload || payload.version !== 'v2') {
+      if (!payload || payload.version !== 'v3') {
         mostrarEstadoErro('A resposta recebida nao corresponde a versao atual do painel.');
         return false;
       }
@@ -503,7 +507,7 @@
         context: 'dashboard.executivo',
         errorMessage: 'Erro ao carregar o painel financeiro'
       }).then(payload => {
-        if (!payload || payload.version !== 'v2') {
+        if (!payload || payload.version !== 'v3') {
           throw new Error('A resposta recebida nao corresponde a versao atual do painel.');
         }
         if (versaoAoIniciar !== versaoCacheSnapshots) {

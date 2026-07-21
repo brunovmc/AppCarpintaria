@@ -1,0 +1,281 @@
+<script>
+  window.InvestimentosUI = (() => {
+    let validacoes = { investidores: [], tiposInvestimento: [], pagosPor: [], formasPagamento: [] };
+    let detalhesId = '';
+
+    const byId = id => document.getElementById(id);
+    const esc = value => String(value ?? '')
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    const moeda = value => Number(value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+    const hoje = () => {
+      const d = new Date();
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    };
+    const exigeParcelas = value => window.AppDomainUtils?.formaExigeParcelas?.(value) === true;
+
+    function preencherSelect(select, lista, atual, placeholder = 'Selecione') {
+      if (!select) return;
+      const valores = [...new Set((Array.isArray(lista) ? lista : []).map(v => String(v || '').trim()).filter(Boolean))];
+      const valorAtual = String(atual || select.value || '').trim();
+      if (valorAtual && !valores.some(v => v.toUpperCase() === valorAtual.toUpperCase())) valores.unshift(valorAtual);
+      select.innerHTML = `<option value="">${esc(placeholder)}</option>` + valores.map(v =>
+        `<option value="${esc(v)}"${v.toUpperCase() === valorAtual.toUpperCase() ? ' selected' : ''}>${esc(v)}</option>`
+      ).join('');
+    }
+
+    function setValidacoes(dados = {}) {
+      validacoes = {
+        investidores: dados.investidores || [],
+        tiposInvestimento: dados.tiposInvestimento || [],
+        pagosPor: dados.pagosPor || [],
+        formasPagamento: dados.formasPagamento || []
+      };
+      const preencherDatalist = (id, lista) => {
+        const el = byId(id);
+        if (el) el.innerHTML = (lista || []).map(item => `<option value="${esc(item)}"></option>`).join('');
+      };
+      preencherDatalist('investimentoInvestidoresLista', validacoes.investidores);
+      preencherDatalist('investimentoTiposLista', validacoes.tiposInvestimento);
+      preencherSelect(byId('investimentoRecebidoPor'), validacoes.pagosPor, '');
+      preencherSelect(byId('investimentoFormaPagamento'), validacoes.formasPagamento, '');
+      preencherSelect(byId('recebimentoInvestimentoForma'), validacoes.formasPagamento, '');
+    }
+
+    function gerarParcelas(total, quantidade, dataBase) {
+      const qtd = Math.max(1, Math.floor(Number(quantidade || 1)));
+      const valorTotal = Number(total || 0);
+      const base = /^\d{4}-\d{2}-\d{2}$/.test(String(dataBase || ''))
+        ? new Date(`${dataBase}T00:00:00`)
+        : new Date();
+      const valorBase = qtd ? Number((valorTotal / qtd).toFixed(2)) : 0;
+      let acumulado = 0;
+      return Array.from({ length: qtd }, (_, indice) => {
+        const data = new Date(base.getFullYear(), base.getMonth() + indice, base.getDate());
+        const valor = indice === qtd - 1 ? Number((valorTotal - acumulado).toFixed(2)) : valorBase;
+        acumulado = Number((acumulado + valor).toFixed(2));
+        return {
+          numero: indice + 1,
+          data: `${data.getFullYear()}-${String(data.getMonth() + 1).padStart(2, '0')}-${String(data.getDate()).padStart(2, '0')}`,
+          valor
+        };
+      });
+    }
+
+    function lerParcelas() {
+      return [...(byId('investimentoParcelasDetalheLista')?.querySelectorAll('.parcela-detalhe-linha') || [])].map(linha => ({
+        numero: Number(linha.dataset.numero || 0),
+        data: String(linha.querySelector('[data-parcela-data]')?.value || '').trim(),
+        valor: Number(linha.querySelector('[data-parcela-valor]')?.value || 0)
+      }));
+    }
+
+    function atualizarParcelas(listaForcada) {
+      const forma = byId('investimentoFormaPagamento')?.value || '';
+      const mostrar = exigeParcelas(forma);
+      byId('investimentoParcelasWrap')?.classList.toggle('hidden', !mostrar);
+      byId('investimentoParcelasDetalheWrap')?.classList.toggle('hidden', !mostrar);
+      if (!mostrar) return;
+      const qtd = Math.max(1, Math.floor(Number(byId('investimentoParcelas')?.value || 1)));
+      const atuais = Array.isArray(listaForcada) ? listaForcada : lerParcelas();
+      const lista = atuais.length === qtd
+        ? atuais
+        : gerarParcelas(byId('investimentoValorTotal')?.value, qtd, byId('investimentoData')?.value);
+      const alvo = byId('investimentoParcelasDetalheLista');
+      if (alvo) alvo.innerHTML = lista.map((item, indice) => `
+        <div class="parcela-detalhe-linha" data-numero="${indice + 1}">
+          <span>${indice + 1}/${qtd}</span>
+          <input type="date" data-parcela-data value="${esc(item.data || '')}">
+          <input type="number" min="0.01" step="0.01" data-parcela-valor value="${esc(Number(item.valor || 0).toFixed(2))}">
+        </div>
+      `).join('');
+    }
+
+    function alterarFormaPagamento() {
+      const mostrar = exigeParcelas(byId('investimentoFormaPagamento')?.value || '');
+      if (!mostrar && byId('investimentoParcelas')) byId('investimentoParcelas').value = '1';
+      atualizarParcelas();
+    }
+
+    function resetFormulario() {
+      ['investimentoDescricao', 'investimentoInvestidor', 'investimentoReferencia', 'investimentoValorTotal', 'investimentoObservacao']
+        .forEach(id => { if (byId(id)) byId(id).value = ''; });
+      if (byId('investimentoTipo')) byId('investimentoTipo').value = validacoes.tiposInvestimento[0] || 'APORTE_SOCIO';
+      if (byId('investimentoData')) byId('investimentoData').value = hoje();
+      if (byId('investimentoParcelas')) byId('investimentoParcelas').value = '1';
+      preencherSelect(byId('investimentoRecebidoPor'), validacoes.pagosPor, '');
+      preencherSelect(byId('investimentoFormaPagamento'), validacoes.formasPagamento, '');
+      byId('investimentoParcelasWrap')?.classList.add('hidden');
+      byId('investimentoParcelasDetalheWrap')?.classList.add('hidden');
+      if (byId('investimentoParcelasDetalheLista')) byId('investimentoParcelasDetalheLista').innerHTML = '';
+    }
+
+    function preencherFormulario(item = {}, opcoes = {}) {
+      resetFormulario();
+      if (byId('investimentoFormTitulo')) byId('investimentoFormTitulo').textContent = opcoes.titulo || (opcoes.nova ? 'Novo investimento' : 'Editar investimento');
+      const campos = {
+        investimentoDescricao: item.descricao,
+        investimentoTipo: item.tipo_investimento,
+        investimentoInvestidor: item.investidor,
+        investimentoReferencia: item.referencia_investimento,
+        investimentoValorTotal: item.valor_total_investimento,
+        investimentoData: item.data_investimento,
+        investimentoParcelas: item.parcelas || 1,
+        investimentoObservacao: item.observacao
+      };
+      Object.keys(campos).forEach(id => { if (byId(id) && campos[id] !== undefined) byId(id).value = campos[id] ?? ''; });
+      preencherSelect(byId('investimentoRecebidoPor'), validacoes.pagosPor, item.recebido_por || '');
+      preencherSelect(byId('investimentoFormaPagamento'), validacoes.formasPagamento, item.forma_pagamento || '');
+      alterarFormaPagamento();
+      let detalhes = item.parcelas_detalhe;
+      if (!Array.isArray(detalhes)) {
+        try { detalhes = JSON.parse(item.parcelas_detalhe_json || '[]'); } catch (_) { detalhes = []; }
+      }
+      if (Array.isArray(detalhes) && detalhes.length) atualizarParcelas(detalhes);
+    }
+
+    function mostrarFormulario() {
+      byId('formularioInvestimento')?.classList.remove('hidden');
+      document.body.classList.add('modal-open');
+      setTimeout(() => byId('investimentoDescricao')?.focus?.(), 30);
+    }
+    function abrirFormularioNovo() {
+      window.InvestimentosController?.limparEdicao?.();
+      preencherFormulario({}, { nova: true });
+      mostrarFormulario();
+    }
+    function fecharFormulario() {
+      byId('formularioInvestimento')?.classList.add('hidden');
+      document.body.classList.remove('modal-open');
+    }
+
+    function estadoLocal(item) {
+      return window.AppEntityMutations?.getUiState?.(item, {
+        pendingLabels: { create: 'Criando', update: 'Atualizando', delete: 'Excluindo', receive: 'Registrando recebimento' }
+      }) || { blockActions: false };
+    }
+
+    function card(item) {
+      const local = estadoLocal(item);
+      const status = String(item.status_pagamento || 'PENDENTE').toUpperCase();
+      const statusLabel = status === 'PAGO' ? 'RECEBIDO' : (status === 'PENDENTE' ? 'A RECEBER' : status);
+      const id = esc(item.ID);
+      return `
+        <article class="card investimento-card" data-id="${id}"${item._localMutationId ? ` data-local-mutation-id="${esc(item._localMutationId)}"` : ''}>
+          <div class="card-resumo">
+            <div>
+              <span class="despesa-card-resumo-label">${esc(item.tipo_investimento || 'Aporte')}</span>
+              <strong>${esc(item.descricao || 'Investimento')}</strong>
+              <span>${esc(item.investidor || 'Investidor nao informado')}</span>
+            </div>
+            <div class="despesa-card-resumo-valores">
+              <strong>${esc(moeda(item.valor_total_investimento))}</strong>
+              <span>${esc(statusLabel)} · pendente ${esc(moeda(item.total_pendente))}</span>
+            </div>
+          </div>
+          ${window.AppListOrderUI?.cardDateHtml?.('investimentos', item, window.InvestimentosStore?.getSort?.()) || ''}
+          ${local.label ? `<div class="app-local-state"><strong>${esc(local.label)}</strong>${local.message ? `<span>${esc(local.message)}</span>` : ''}${local.canRetry ? `<button type="button" onclick="event.stopPropagation(); InvestimentosController.retry('${id}')">Tentar novamente</button>` : ''}</div>` : ''}
+          <div class="card-acoes">
+            <button type="button" class="btn-secundario" onclick="InvestimentosController.abrirDetalhes('${id}')">Detalhes</button>
+            <button type="button" onclick="InvestimentosController.registrarRecebimento('${id}')" ${local.blockActions || Number(item.total_pendente || 0) <= 0.009 ? 'disabled' : ''}>Registrar recebimento</button>
+          </div>
+        </article>
+      `;
+    }
+
+    function renderLista(lista, onDone) {
+      const alvo = byId('listaInvestimentos');
+      if (!alvo) { onDone?.(); return; }
+      const itens = Array.isArray(lista) ? lista : [];
+      alvo.innerHTML = itens.length ? itens.map(card).join('') : '<p class="lista-vazia">Nenhum investimento cadastrado.</p>';
+      onDone?.();
+    }
+
+    function abrirDetalhes(id) {
+      const item = InvestimentosStore.getById(id);
+      if (!item) return false;
+      detalhesId = String(id);
+      if (byId('modalDetalhesInvestimentoTitulo')) byId('modalDetalhesInvestimentoTitulo').textContent = item.descricao || 'Detalhes do investimento';
+      const local = estadoLocal(item);
+      const conteudo = byId('modalDetalhesInvestimentoConteudo');
+      if (conteudo) conteudo.innerHTML = `
+        <div class="detalhes-grid">
+          <div><span>Investidor</span><strong>${esc(item.investidor || '-')}</strong></div>
+          <div><span>Tipo</span><strong>${esc(item.tipo_investimento || '-')}</strong></div>
+          <div><span>Referencia</span><strong>${esc(item.referencia_investimento || '-')}</strong></div>
+          <div><span>Data</span><strong>${esc(window.AppListOrderUI?.formatDate?.(item.data_investimento)?.display || '-')}</strong></div>
+          <div><span>Total</span><strong>${esc(moeda(item.valor_total_investimento))}</strong></div>
+          <div><span>Recebido</span><strong>${esc(moeda(item.total_pago))}</strong></div>
+          <div><span>Pendente</span><strong>${esc(moeda(item.total_pendente))}</strong></div>
+          <div><span>Recebido por</span><strong>${esc(item.recebido_por || '-')}</strong></div>
+        </div>
+        ${item.observacao ? `<p>${esc(item.observacao)}</p>` : ''}
+        <details data-finance-history-disclosure open>
+          <summary>Parcelas e historico de recebimentos</summary>
+          <div data-finance-history-type="INVESTIMENTO" data-finance-history-id="${esc(item.ID)}"></div>
+        </details>
+        <div class="card-acoes">
+          <button type="button" onclick="InvestimentosController.registrarRecebimento('${esc(item.ID)}')" ${local.blockActions || Number(item.total_pendente || 0) <= 0.009 ? 'disabled' : ''}>Registrar recebimento</button>
+          <button type="button" class="btn-secundario" onclick="InvestimentosController.editar('${esc(item.ID)}')" ${local.blockActions ? 'disabled' : ''}>Editar</button>
+          <button type="button" class="btn-perigo" onclick="InvestimentosController.excluir('${esc(item.ID)}')" ${local.blockActions || Number(item.total_pago || 0) > 0.009 ? 'disabled' : ''}>Remover</button>
+        </div>
+      `;
+      byId('modalDetalhesInvestimento')?.classList.remove('hidden');
+      document.body.classList.add('modal-open');
+      window.AppFinanceHistoryUI?.loadWithin?.(conteudo);
+      return true;
+    }
+    function fecharDetalhes() {
+      detalhesId = '';
+      byId('modalDetalhesInvestimento')?.classList.add('hidden');
+      document.body.classList.remove('modal-open');
+    }
+    function atualizarDetalhes() { if (detalhesId) abrirDetalhes(detalhesId); }
+
+    function abrirRecebimento(item) {
+      if (!item) return false;
+      if (byId('recebimentoInvestimentoTitulo')) byId('recebimentoInvestimentoTitulo').textContent = `Receber: ${item.descricao || 'investimento'}`;
+      if (byId('recebimentoInvestimentoData')) byId('recebimentoInvestimentoData').value = hoje();
+      if (byId('recebimentoInvestimentoValor')) byId('recebimentoInvestimentoValor').value = Number(item.total_pendente || 0).toFixed(2);
+      preencherSelect(byId('recebimentoInvestimentoForma'), validacoes.formasPagamento, item.forma_pagamento || '');
+      if (byId('recebimentoInvestimentoObservacao')) byId('recebimentoInvestimentoObservacao').value = '';
+      const parcelas = (item.parcelas_detalhe || []).filter(p => Number(p.valor_pendente || 0) > 0.009);
+      const parcelado = Math.max(1, Number(item.parcelas || 1)) > 1;
+      const wrap = byId('recebimentoInvestimentoParcelaWrap');
+      wrap?.classList.toggle('hidden', !parcelado);
+      const select = byId('recebimentoInvestimentoParcela');
+      if (select) {
+        select.innerHTML = parcelas.map(p => `<option value="${esc(p.ID)}" data-pendente="${esc(p.valor_pendente)}">Parcela ${Number(p.parcela_numero || 1)}/${Number(p.parcelas_total || 1)} · ${esc(moeda(p.valor_pendente))}</option>`).join('');
+      }
+      byId('modalRecebimentoInvestimento')?.classList.remove('hidden');
+      document.body.classList.add('modal-open');
+      atualizarValorRecebimentoParcela();
+      return true;
+    }
+    function atualizarValorRecebimentoParcela() {
+      const option = byId('recebimentoInvestimentoParcela')?.selectedOptions?.[0];
+      const valor = Number(option?.dataset?.pendente || 0);
+      if (valor > 0 && byId('recebimentoInvestimentoValor')) byId('recebimentoInvestimentoValor').value = valor.toFixed(2);
+    }
+    function lerRecebimento() {
+      return {
+        data_pagamento: byId('recebimentoInvestimentoData')?.value || '',
+        valor_pago: Number(byId('recebimentoInvestimentoValor')?.value || 0),
+        parcela_alvo_id: byId('recebimentoInvestimentoParcelaWrap')?.classList.contains('hidden') ? '' : (byId('recebimentoInvestimentoParcela')?.value || ''),
+        forma_pagamento: byId('recebimentoInvestimentoForma')?.value || '',
+        observacao: byId('recebimentoInvestimentoObservacao')?.value || ''
+      };
+    }
+    function fecharRecebimento() {
+      byId('modalRecebimentoInvestimento')?.classList.add('hidden');
+      document.body.classList.remove('modal-open');
+    }
+
+    return {
+      setValidacoes, renderLista, abrirFormularioNovo, mostrarFormulario, fecharFormulario,
+      resetFormulario, preencherFormulario, lerParcelas, atualizarParcelas, alterarFormaPagamento,
+      abrirDetalhes, fecharDetalhes, atualizarDetalhes,
+      abrirRecebimento, fecharRecebimento, lerRecebimento, atualizarValorRecebimentoParcela
+    };
+  })();
+</script>

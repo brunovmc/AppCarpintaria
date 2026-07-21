@@ -3,6 +3,7 @@
     const GOOGLE_CHARTS_URL = 'https://www.gstatic.com/charts/loader.js';
     const CORES = {
       recebimentos: '#167d68',
+      aportes: '#755aa8',
       pagamentos: '#c9564a',
       vendas: '#326f8f',
       fluxo: '#233746',
@@ -234,28 +235,32 @@
 
     function desenharHistorico(payload, callbacks) {
       const lista = Array.isArray(payload?.historico_12_meses) ? payload.historico_12_meses : [];
-      if (!lista.some(item => Number(item.recebimentos || 0) !== 0 || Number(item.pagamentos || 0) !== 0)) {
+      if (!lista.some(item => Number(item.recebimentos || 0) !== 0 || Number(item.aportes || 0) !== 0 || Number(item.pagamentos || 0) !== 0)) {
         marcarFalhaGrafico('dashChartHistory', 'Nenhum recebimento ou pagamento realizado no intervalo.');
         return;
       }
       const data = new google.visualization.DataTable();
       data.addColumn('string', 'Mes');
-      data.addColumn('number', 'Recebimentos');
+      data.addColumn('number', 'Recebimentos de vendas');
+      data.addColumn('number', 'Aportes');
       data.addColumn('number', 'Pagamentos');
-      data.addColumn('number', 'Fluxo liquido');
+      data.addColumn('number', 'Fluxo operacional');
+      data.addColumn('number', 'Movimento total');
       data.addColumn('number', 'Media movel (3 meses)');
       data.addRows(lista.map(item => [
         mesCurto(item.mes), Number(item.recebimentos || 0),
-        Number(item.pagamentos || 0), Number(item.fluxo_liquido || 0), Number(item.media_movel_3 || 0)
+        Number(item.aportes || 0), Number(item.pagamentos || 0),
+        Number(item.fluxo_liquido || 0), Number(item.movimento_total || 0), Number(item.media_movel_3 || 0)
       ]));
-      formatarColunasMoeda(data, [1, 2, 3, 4]);
-      const series = ['mes', 'recebimentos', 'pagamentos', 'fluxo', 'media'];
+      formatarColunasMoeda(data, [1, 2, 3, 4, 5, 6]);
+      const series = ['mes', 'recebimentos', 'aportes', 'pagamentos', 'fluxo', 'movimento_total', 'media'];
       desenhar('dashChartHistory', google.visualization.ComboChart, data, opcoesBase({
-        colors: [CORES.recebimentos, CORES.pagamentos, CORES.fluxo, CORES.media],
+        colors: [CORES.recebimentos, CORES.aportes, CORES.pagamentos, CORES.fluxo, CORES.projecao, CORES.media],
         seriesType: 'bars',
         series: {
-          2: { type: 'line', lineWidth: 3, pointSize: 4 },
-          3: { type: 'line', lineWidth: 2, lineDashStyle: [5, 3], pointSize: 2 }
+          3: { type: 'line', lineWidth: 3, pointSize: 4 },
+          4: { type: 'line', lineWidth: 2, pointSize: 3 },
+          5: { type: 'line', lineWidth: 2, lineDashStyle: [5, 3], pointSize: 2 }
         },
         bar: { groupWidth: '64%' },
         vAxis: { format: 'short', gridlines: { color: '#e7edef' }, baseline: 0, baselineColor: '#7d9099' }
@@ -268,28 +273,32 @@
 
     function desenharProjecao(payload, callbacks) {
       const lista = Array.isArray(payload?.projecao_13_semanas) ? payload.projecao_13_semanas : [];
-      if (!lista.some(item => Number(item.recebimentos || 0) > 0 || Number(item.pagamentos || 0) > 0)) {
+      if (!lista.some(item => Number(item.recebimentos || 0) > 0 || Number(item.aportes || 0) > 0 || Number(item.pagamentos || 0) > 0)) {
         marcarFalhaGrafico('dashChartForecast', 'Nenhuma parcela futura encontrada.');
         return;
       }
       const data = new google.visualization.DataTable();
       data.addColumn('string', 'Semana');
-      data.addColumn('number', 'A receber');
+      data.addColumn('number', 'Vendas a receber');
+      data.addColumn('number', 'Aportes previstos');
       data.addColumn('number', 'A pagar');
-      data.addColumn('number', 'Liquido semanal');
+      data.addColumn('number', 'Fluxo operacional');
+      data.addColumn('number', 'Movimento total');
       data.addColumn('number', 'Acumulado projetado');
       data.addRows(lista.map((item, indice) => [
-        `S${indice + 1}`, Number(item.recebimentos || 0), Number(item.pagamentos || 0),
-        Number(item.liquido || 0), Number(item.acumulado || 0)
+        `S${indice + 1}`, Number(item.recebimentos || 0), Number(item.aportes || 0),
+        Number(item.pagamentos || 0), Number(item.liquido || 0),
+        Number(item.movimento_total || 0), Number(item.acumulado || 0)
       ]));
-      formatarColunasMoeda(data, [1, 2, 3, 4]);
-      const naturezas = ['', 'RECEBER', 'PAGAR', '', ''];
+      formatarColunasMoeda(data, [1, 2, 3, 4, 5, 6]);
+      const naturezas = ['', 'RECEBER', 'APORTE', 'PAGAR', '', '', ''];
       desenhar('dashChartForecast', google.visualization.ComboChart, data, opcoesBase({
-        colors: [CORES.recebimentos, CORES.pagamentos, CORES.neutra, CORES.projecao],
+        colors: [CORES.recebimentos, CORES.aportes, CORES.pagamentos, CORES.neutra, CORES.fluxo, CORES.projecao],
         seriesType: 'bars',
         series: {
-          2: { type: 'line', lineWidth: 2, lineDashStyle: [4, 3], pointSize: 3 },
-          3: { type: 'line', lineWidth: 3, pointSize: 4 }
+          3: { type: 'line', lineWidth: 2, lineDashStyle: [4, 3], pointSize: 3 },
+          4: { type: 'line', lineWidth: 2, pointSize: 3 },
+          5: { type: 'line', lineWidth: 3, pointSize: 4 }
         },
         bar: { groupWidth: '66%' },
         vAxis: { format: 'short', gridlines: { color: '#e7edef' }, baseline: 0, baselineColor: '#7d9099' }
@@ -299,7 +308,8 @@
           inicio: item.inicio,
           fim: item.fim,
           natureza: naturezas[selecao.column] || '',
-          acumulado: selecao.column === 4,
+          operacional: selecao.column === 4,
+          acumulado: selecao.column === 6,
           label: `S${selecao.row + 1} (${dataCurta(item.inicio)} a ${dataCurta(item.fim)})`
         });
       });
@@ -408,11 +418,11 @@
     function preencherFallbacks(payload) {
       const historico = Array.isArray(payload?.historico_12_meses) ? payload.historico_12_meses : [];
       preencherTabela('dashFallbackHistory', historico.map(item => `
-        <tr><td>${escapar(mesCurto(item.mes))}</td><td>${moeda(item.vendas)}</td><td>${moeda(item.recebimentos)}</td><td>${moeda(item.pagamentos)}</td><td>${moeda(item.fluxo_liquido)}</td><td>${moeda(item.media_movel_3)}</td></tr>
+        <tr><td>${escapar(mesCurto(item.mes))}</td><td>${moeda(item.vendas)}</td><td>${moeda(item.recebimentos)}</td><td>${moeda(item.aportes)}</td><td>${moeda(item.pagamentos)}</td><td>${moeda(item.fluxo_liquido)}</td><td>${moeda(item.movimento_total)}</td><td>${moeda(item.media_movel_3)}</td></tr>
       `).join(''));
       const projecao = Array.isArray(payload?.projecao_13_semanas) ? payload.projecao_13_semanas : [];
       preencherTabela('dashFallbackForecast', projecao.map(item => `
-        <tr><td>${dataCurta(item.inicio)} a ${dataCurta(item.fim)}</td><td>${moeda(item.recebimentos)}</td><td>${moeda(item.pagamentos)}</td><td>${moeda(item.liquido)}</td><td>${moeda(item.acumulado)}</td></tr>
+        <tr><td>${dataCurta(item.inicio)} a ${dataCurta(item.fim)}</td><td>${moeda(item.recebimentos)}</td><td>${moeda(item.aportes)}</td><td>${moeda(item.pagamentos)}</td><td>${moeda(item.liquido)}</td><td>${moeda(item.movimento_total)}</td><td>${moeda(item.acumulado)}</td></tr>
       `).join(''));
       const aging = Array.isArray(payload?.posicao?.aging) ? payload.posicao.aging : [];
       preencherTabela('dashFallbackAging', aging.map(item => `

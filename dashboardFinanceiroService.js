@@ -2,7 +2,7 @@ const DASHBOARD_EXECUTIVO_CACHE_SCOPE = 'DASHBOARD_EXECUTIVO_FINANCEIRO';
 const DASHBOARD_EXECUTIVO_CACHE_TTL_SEC = 120;
 const DASHBOARD_EXECUTIVO_CACHE_INDEX_SCOPE = `${DASHBOARD_EXECUTIVO_CACHE_SCOPE}:INDEX`;
 const DASHBOARD_EXECUTIVO_CACHE_INDEX_TTL_SEC = 21600;
-const DASHBOARD_EXECUTIVO_VERSION = 'v2';
+const DASHBOARD_EXECUTIVO_VERSION = 'v3';
 
 function getDashboardExecutivoCacheScope(referencia) {
   return `${DASHBOARD_EXECUTIVO_CACHE_SCOPE}:${String(referencia || '').trim()}`;
@@ -179,6 +179,26 @@ function criarMetaOrigemDashboardExecutivo(contexto, origemTipo, origemId) {
     };
   }
 
+  if (tipo === ORIGEM_TIPO_INVESTIMENTO) {
+    const item = contexto.investimentosPorId[id];
+    if (!item) return null;
+    const investidor = normalizarTextoDashboardExecutivo(item.investidor, 'Investidor nao informado');
+    const tipoInvestimento = normalizarTextoDashboardExecutivo(item.tipo_investimento, 'Aporte');
+    const referencia = normalizarTextoDashboardExecutivo(item.referencia_investimento, '');
+    return {
+      origem_tipo: tipo,
+      origem_id: id,
+      origem_aba: 'investimentos',
+      titulo: `Investimento: ${normalizarTextoDashboardExecutivo(item.descricao, id)}`,
+      detalhe: `${investidor} | ${tipoInvestimento}${referencia ? ` | Ref: ${referencia}` : ''}`,
+      categoria: tipoInvestimento,
+      item: normalizarTextoDashboardExecutivo(item.descricao, id),
+      pago_por: normalizarTextoDashboardExecutivo(item.recebido_por, ''),
+      fornecedor: '',
+      investidor
+    };
+  }
+
   if (tipo === ORIGEM_TIPO_ESTOQUE) {
     const item = contexto.estoquePorId[id];
     if (!item) return null;
@@ -302,6 +322,7 @@ function criarObrigacoesDashboardExecutivo(contexto) {
   // VENDAS nao possui vencimento no cabecalho da origem. Sem uma parcela
   // financeira, a data da venda nao deve ser tratada como vencimento.
   adicionarFallback(contexto.vendas, ORIGEM_TIPO_VENDA, 'data_vencimento');
+  adicionarFallback(contexto.investimentos, ORIGEM_TIPO_INVESTIMENTO, 'data_vencimento');
   return obrigacoes;
 }
 
@@ -314,6 +335,9 @@ function criarContextoDashboardExecutivo(forcarRecarregar) {
     compras: typeof listarCompras === 'function' ? listarCompras(force) : [],
     despesas: typeof listarDespesasGerais === 'function' ? listarDespesasGerais(force) : [],
     vendas: typeof listarVendas === 'function' ? listarVendas(force) : [],
+    investimentos: typeof listarInvestimentosNoAmbienteAtual_ === 'function'
+      ? listarInvestimentosNoAmbienteAtual_(force)
+      : [],
     pagamentos,
     estoque: typeof listarEstoque === 'function' ? listarEstoque(force) : [],
     producoes: typeof listarProducao === 'function' ? listarProducao(force) : []
@@ -322,6 +346,7 @@ function criarContextoDashboardExecutivo(forcarRecarregar) {
   contexto.comprasPorId = criarMapaDashboardExecutivo(contexto.compras, 'ID');
   contexto.despesasPorId = criarMapaDashboardExecutivo(contexto.despesas, 'ID');
   contexto.vendasPorId = criarMapaDashboardExecutivo(contexto.vendas, 'ID');
+  contexto.investimentosPorId = criarMapaDashboardExecutivo(contexto.investimentos, 'ID');
   contexto.estoquePorId = criarMapaDashboardExecutivo(contexto.estoque, 'ID');
   contexto.producoesPorId = criarMapaDashboardExecutivo(contexto.producoes, 'producao_id');
   contexto.parcelas = lerParcelasAtivasDashboardExecutivo(contexto);
@@ -398,8 +423,10 @@ function criarProjecaoDashboardExecutivo(obrigacoes, hoje) {
       inicio: formatarDataYmdFinanceiro(inicio),
       fim: formatarDataYmdFinanceiro(fim),
       recebimentos: 0,
+      aportes: 0,
       pagamentos: 0,
       liquido: 0,
+      movimento_total: 0,
       acumulado: 0
     });
   }
@@ -413,14 +440,17 @@ function criarProjecaoDashboardExecutivo(obrigacoes, hoje) {
     const data = inicioDoDiaFinanceiro(item.data_prevista);
     if (!data || data < hoje || data > limite) return;
     const indice = Math.min(12, Math.floor((data.getTime() - hoje.getTime()) / 86400000 / 7));
-    const campo = item.natureza === NATUREZA_RECEBIMENTO ? 'recebimentos' : 'pagamentos';
+    const campo = item.natureza === NATUREZA_RECEBIMENTO
+      ? (item.origem_tipo === ORIGEM_TIPO_INVESTIMENTO ? 'aportes' : 'recebimentos')
+      : 'pagamentos';
     semanas[indice][campo] = round2Financeiro(semanas[indice][campo] + item.valor);
   });
 
   let acumulado = 0;
   semanas.forEach(item => {
     item.liquido = round2Financeiro(item.recebimentos - item.pagamentos);
-    acumulado = round2Financeiro(acumulado + item.liquido);
+    item.movimento_total = round2Financeiro(item.liquido + item.aportes);
+    acumulado = round2Financeiro(acumulado + item.movimento_total);
     item.acumulado = acumulado;
   });
   return semanas;
@@ -463,7 +493,16 @@ function criarHistoricoDashboardExecutivo(contexto, referencia) {
   const porMes = {};
   for (let indice = 11; indice >= 0; indice -= 1) {
     const mes = deslocarMesDashboardExecutivo(referencia, -indice);
-    porMes[mes] = { mes, vendas: 0, recebimentos: 0, pagamentos: 0, fluxo_liquido: 0, media_movel_3: 0 };
+    porMes[mes] = {
+      mes,
+      vendas: 0,
+      recebimentos: 0,
+      aportes: 0,
+      pagamentos: 0,
+      fluxo_liquido: 0,
+      movimento_total: 0,
+      media_movel_3: 0
+    };
     meses.push(porMes[mes]);
   }
 
@@ -475,12 +514,15 @@ function criarHistoricoDashboardExecutivo(contexto, referencia) {
   contexto.eventos.forEach(item => {
     const mes = gerarChaveMesFinanceiro(item.data);
     if (!porMes[mes]) return;
-    const campo = item.natureza === NATUREZA_RECEBIMENTO ? 'recebimentos' : 'pagamentos';
+    const campo = item.natureza === NATUREZA_RECEBIMENTO
+      ? (item.origem_tipo === ORIGEM_TIPO_INVESTIMENTO ? 'aportes' : 'recebimentos')
+      : 'pagamentos';
     porMes[mes][campo] = round2Financeiro(porMes[mes][campo] + item.valor);
   });
 
   meses.forEach((item, indice) => {
     item.fluxo_liquido = round2Financeiro(item.recebimentos - item.pagamentos);
+    item.movimento_total = round2Financeiro(item.fluxo_liquido + item.aportes);
     const inicioMedia = Math.max(0, indice - 2);
     const janela = meses.slice(inicioMedia, indice + 1);
     item.media_movel_3 = round2Financeiro(
@@ -577,12 +619,22 @@ function criarCapitalDashboardExecutivo(contexto, hoje) {
 
 function criarSociosDashboardExecutivo(contexto, inicio, fim) {
   const totais = { bruno: 0, zizu: 0, investimento: 0 };
-  let investimentoAcumulado = 0;
+  let recursosInvestimentoUtilizados = 0;
+  let aportesAcumulados = 0;
+  let aportesPeriodo = 0;
   let naoClassificado = 0;
   contexto.eventos.forEach(evento => {
+    if (evento.origem_tipo === ORIGEM_TIPO_INVESTIMENTO && evento.natureza === NATUREZA_RECEBIMENTO) {
+      aportesAcumulados = round2Financeiro(aportesAcumulados + evento.valor);
+      const dataAporte = parseDataFinanceiro(evento.data);
+      if (dataAporte && dataAporte >= inicio && dataAporte < fim) {
+        aportesPeriodo = round2Financeiro(aportesPeriodo + evento.valor);
+      }
+      return;
+    }
     if (evento.natureza !== NATUREZA_PAGAMENTO) return;
     const rateio = calcularRateioLinhaPagoPorFinanceiro(evento.meta?.pago_por, evento.valor);
-    investimentoAcumulado = round2Financeiro(investimentoAcumulado + rateio.investimento);
+    recursosInvestimentoUtilizados = round2Financeiro(recursosInvestimentoUtilizados + rateio.investimento);
     const data = parseDataFinanceiro(evento.data);
     if (!data || data < inicio || data >= fim) return;
     const totalRateado = round2Financeiro(rateio.bruno + rateio.zizu + rateio.investimento);
@@ -604,7 +656,10 @@ function criarSociosDashboardExecutivo(contexto, inicio, fim) {
     zizu: totais.zizu,
     investimento: totais.investimento,
     nao_classificado: naoClassificado,
-    investimento_acumulado: investimentoAcumulado,
+    investimento_acumulado: aportesAcumulados,
+    aportes_periodo: aportesPeriodo,
+    recursos_investimento_utilizados: recursosInvestimentoUtilizados,
+    saldo_investimento_gerencial: round2Financeiro(aportesAcumulados - recursosInvestimentoUtilizados),
     itens
   };
 }
@@ -634,11 +689,17 @@ function obterDashboardExecutivoFinanceiro(referenciaYm, forcarRecarregar, ambie
   const atual = historico[historico.length - 1] || {};
   const anterior = historico[historico.length - 2] || {};
   const hoje = inicioDoDiaFinanceiro(new Date());
-  const aging = criarAgingDashboardExecutivo(contexto.obrigacoes, hoje);
+  const obrigacoesOperacionais = contexto.obrigacoes.filter(item =>
+    item.origem_tipo !== ORIGEM_TIPO_INVESTIMENTO
+  );
+  const aging = criarAgingDashboardExecutivo(obrigacoesOperacionais, hoje);
   const projecao = criarProjecaoDashboardExecutivo(contexto.obrigacoes, hoje);
 
   const receberTotal = round2Financeiro(contexto.obrigacoes
-    .filter(item => item.natureza === NATUREZA_RECEBIMENTO)
+    .filter(item => item.natureza === NATUREZA_RECEBIMENTO && item.origem_tipo === ORIGEM_TIPO_VENDA)
+    .reduce((acc, item) => acc + item.valor, 0));
+  const aportesPrevistos = round2Financeiro(contexto.obrigacoes
+    .filter(item => item.origem_tipo === ORIGEM_TIPO_INVESTIMENTO)
     .reduce((acc, item) => acc + item.valor, 0));
   const pagarTotal = round2Financeiro(contexto.obrigacoes
     .filter(item => item.natureza === NATUREZA_PAGAMENTO)
@@ -692,6 +753,10 @@ function obterDashboardExecutivoFinanceiro(referenciaYm, forcarRecarregar, ambie
         valor: round2Financeiro(atual.recebimentos),
         ...diferencaPercentualDashboardExecutivo(atual.recebimentos, anterior.recebimentos)
       },
+      aportes: {
+        valor: round2Financeiro(atual.aportes),
+        ...diferencaPercentualDashboardExecutivo(atual.aportes, anterior.aportes)
+      },
       pagamentos: {
         valor: round2Financeiro(atual.pagamentos),
         ...diferencaPercentualDashboardExecutivo(atual.pagamentos, anterior.pagamentos)
@@ -708,6 +773,7 @@ function obterDashboardExecutivoFinanceiro(referenciaYm, forcarRecarregar, ambie
       pagar_total: pagarTotal,
       receber_vencido: round2Financeiro(vencido.receber),
       pagar_vencido: round2Financeiro(vencido.pagar),
+      aportes_previstos: aportesPrevistos,
       aging
     },
     direcionadores: {
@@ -922,12 +988,19 @@ function obterDetalhesDashboardExecutivoFinanceiro(referenciaYm, contextoDetalhe
         eh_contagem: false
       } : null;
     }).filter(Boolean);
-  } else if (chave === 'kpi_recebimentos' || chave === 'kpi_pagamentos' || chave === 'kpi_fluxo') {
+  } else if (chave === 'kpi_recebimentos' || chave === 'kpi_aportes' || chave === 'kpi_pagamentos' || chave === 'kpi_fluxo') {
     const natureza = chave === 'kpi_recebimentos' ? NATUREZA_RECEBIMENTO : NATUREZA_PAGAMENTO;
-    titulo = chave === 'kpi_recebimentos'
-      ? 'Recebimentos realizados no mes'
-      : (chave === 'kpi_pagamentos' ? 'Pagamentos realizados no mes' : 'Fluxo financeiro realizado no mes');
-    const base = chave === 'kpi_fluxo' ? eventosDoMes : eventosPorNatureza(natureza);
+    if (chave === 'kpi_recebimentos') titulo = 'Recebimentos de vendas realizados no mes';
+    else if (chave === 'kpi_aportes') titulo = 'Aportes recebidos no mes';
+    else if (chave === 'kpi_pagamentos') titulo = 'Pagamentos realizados no mes';
+    else titulo = 'Fluxo financeiro operacional realizado no mes';
+    const base = chave === 'kpi_fluxo'
+      ? eventosDoMes.filter(item => item.origem_tipo !== ORIGEM_TIPO_INVESTIMENTO)
+      : (chave === 'kpi_aportes'
+        ? eventosDoMes.filter(item => item.origem_tipo === ORIGEM_TIPO_INVESTIMENTO)
+        : eventosPorNatureza(natureza).filter(item =>
+          chave !== 'kpi_recebimentos' || item.origem_tipo === ORIGEM_TIPO_VENDA
+        ));
     itens = base.map(item => criarLinhaEventoDashboardExecutivo(
       item,
       chave === 'kpi_fluxo' && item.natureza === NATUREZA_PAGAMENTO ? -item.valor : item.valor,
@@ -943,6 +1016,9 @@ function obterDetalhesDashboardExecutivoFinanceiro(referenciaYm, contextoDetalhe
     if (serie === 'vendas') {
       return obterDetalhesDashboardExecutivoFinanceiro(mes, 'kpi_vendas', {});
     }
+    if (serie === 'aportes') {
+      return obterDetalhesDashboardExecutivoFinanceiro(mes, 'kpi_aportes', {});
+    }
     const refInicial = serie === 'media'
       ? deslocarMesDashboardExecutivo(mes, -(janelaMedia - 1))
       : mes;
@@ -951,12 +1027,17 @@ function obterDetalhesDashboardExecutivoFinanceiro(referenciaYm, contextoDetalhe
       return !!refEvento && refEvento >= refInicial && refEvento <= mes;
     });
     itens = base
-      .filter(item => serie === 'recebimentos'
-        ? item.natureza === NATUREZA_RECEBIMENTO
-        : (serie === 'pagamentos' ? item.natureza === NATUREZA_PAGAMENTO : true))
+      .filter(item => {
+        if (serie === 'recebimentos') return item.origem_tipo === ORIGEM_TIPO_VENDA;
+        if (serie === 'aportes') return item.origem_tipo === ORIGEM_TIPO_INVESTIMENTO;
+        if (serie === 'pagamentos') return item.natureza === NATUREZA_PAGAMENTO;
+        if (serie === 'fluxo' || serie === 'media') return item.origem_tipo !== ORIGEM_TIPO_INVESTIMENTO;
+        if (serie === 'movimento_total') return true;
+        return true;
+      })
       .map(item => criarLinhaEventoDashboardExecutivo(
         item,
-        (serie === 'fluxo' || serie === 'media') && item.natureza === NATUREZA_PAGAMENTO
+        (serie === 'fluxo' || serie === 'media' || serie === 'movimento_total') && item.natureza === NATUREZA_PAGAMENTO
           ? -item.valor / (serie === 'media' ? janelaMedia : 1)
           : item.valor / (serie === 'media' ? janelaMedia : 1),
         serie === 'media'
@@ -970,12 +1051,18 @@ function obterDetalhesDashboardExecutivoFinanceiro(referenciaYm, contextoDetalhe
     const bucket = String(filtro.bucket || 'vencido').trim();
     titulo = `${natureza === NATUREZA_RECEBIMENTO ? 'Contas a receber' : 'Contas a pagar'} - ${normalizarTextoDashboardExecutivo(filtro.label, bucket)}`;
     itens = contexto.obrigacoes
-      .filter(item => item.natureza === natureza && bucketObrigacao(item) === bucket)
+      .filter(item => item.origem_tipo !== ORIGEM_TIPO_INVESTIMENTO && item.natureza === natureza && bucketObrigacao(item) === bucket)
       .map(criarLinhaObrigacaoDashboardExecutivo);
-  } else if (chave === 'posicao_receber' || chave === 'posicao_pagar') {
+  } else if (chave === 'posicao_receber' || chave === 'posicao_pagar' || chave === 'posicao_aportes') {
     const natureza = chave === 'posicao_receber' ? NATUREZA_RECEBIMENTO : NATUREZA_PAGAMENTO;
-    titulo = natureza === NATUREZA_RECEBIMENTO ? 'Posicao de contas a receber' : 'Posicao de contas a pagar';
-    itens = contexto.obrigacoes.filter(item => item.natureza === natureza).map(criarLinhaObrigacaoDashboardExecutivo);
+    titulo = chave === 'posicao_aportes'
+      ? 'Posicao de aportes previstos'
+      : (natureza === NATUREZA_RECEBIMENTO ? 'Posicao de contas a receber' : 'Posicao de contas a pagar');
+    itens = contexto.obrigacoes.filter(item => {
+      if (chave === 'posicao_aportes') return item.origem_tipo === ORIGEM_TIPO_INVESTIMENTO;
+      if (chave === 'posicao_receber') return item.origem_tipo === ORIGEM_TIPO_VENDA;
+      return item.natureza === natureza;
+    }).map(criarLinhaObrigacaoDashboardExecutivo);
   } else if (chave === 'projecao_semana') {
     const inicioSemana = filtro.acumulado
       ? hoje
@@ -989,8 +1076,10 @@ function obterDetalhesDashboardExecutivoFinanceiro(referenciaYm, contextoDetalhe
       .filter(item => {
         const data = inicioDoDiaFinanceiro(item.data_prevista);
         if (!data || !inicioSemana || !fimSemana || data < inicioSemana || data > fimSemana) return false;
-        if (naturezaFiltro === 'RECEBER') return item.natureza === NATUREZA_RECEBIMENTO;
+        if (naturezaFiltro === 'RECEBER') return item.origem_tipo === ORIGEM_TIPO_VENDA;
+        if (naturezaFiltro === 'APORTE') return item.origem_tipo === ORIGEM_TIPO_INVESTIMENTO;
         if (naturezaFiltro === 'PAGAR') return item.natureza === NATUREZA_PAGAMENTO;
+        if (filtro.operacional === true) return item.origem_tipo !== ORIGEM_TIPO_INVESTIMENTO;
         return true;
       })
       .map(item => {
@@ -1095,17 +1184,27 @@ function obterDetalhesDashboardExecutivoFinanceiro(referenciaYm, contextoDetalhe
       }).filter(Boolean);
   } else if (chave === 'socio' || chave === 'socio_acumulado') {
     const socio = String(filtro.socio || '').trim().toLowerCase();
-    titulo = chave === 'socio_acumulado'
-      ? `Historico de pagamentos atribuidos a ${normalizarTextoDashboardExecutivo(filtro.label, socio)}`
-      : `Pagamentos atribuidos a ${normalizarTextoDashboardExecutivo(filtro.label, socio)}`;
-    const eventosSocio = chave === 'socio_acumulado'
-      ? contexto.eventos.filter(evento => evento.natureza === NATUREZA_PAGAMENTO)
-      : eventosPorNatureza(NATUREZA_PAGAMENTO);
-    itens = eventosSocio.map(evento => {
-      const rateio = calcularRateioLinhaPagoPorFinanceiro(evento.meta?.pago_por, evento.valor);
-      const valor = round2Financeiro(rateio[socio] || 0);
-      return valor > 0 ? criarLinhaEventoDashboardExecutivo(evento, valor, 'Parcela atribuida') : null;
-    }).filter(Boolean);
+    if (chave === 'socio_acumulado' && socio === 'investimento') {
+      titulo = 'Historico de aportes recebidos';
+    } else if (chave === 'socio_acumulado') {
+      titulo = `Historico de pagamentos atribuidos a ${normalizarTextoDashboardExecutivo(filtro.label, socio)}`;
+    } else {
+      titulo = `Pagamentos atribuidos a ${normalizarTextoDashboardExecutivo(filtro.label, socio)}`;
+    }
+    if (chave === 'socio_acumulado' && socio === 'investimento') {
+      itens = contexto.eventos
+        .filter(evento => evento.origem_tipo === ORIGEM_TIPO_INVESTIMENTO)
+        .map(evento => criarLinhaEventoDashboardExecutivo(evento, evento.valor, 'Aporte recebido'));
+    } else {
+      const eventosSocio = chave === 'socio_acumulado'
+        ? contexto.eventos.filter(evento => evento.natureza === NATUREZA_PAGAMENTO)
+        : eventosPorNatureza(NATUREZA_PAGAMENTO);
+      itens = eventosSocio.map(evento => {
+        const rateio = calcularRateioLinhaPagoPorFinanceiro(evento.meta?.pago_por, evento.valor);
+        const valor = round2Financeiro(rateio[socio] || 0);
+        return valor > 0 ? criarLinhaEventoDashboardExecutivo(evento, valor, 'Parcela atribuida') : null;
+      }).filter(Boolean);
+    }
   } else {
     throw new Error('Contexto de detalhes do dashboard invalido.');
   }

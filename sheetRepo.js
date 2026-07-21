@@ -103,6 +103,7 @@ function invalidarCachesRelacionadosAba(sheetName) {
     aba === 'ESTOQUE' ||
     aba === 'COMPRAS' ||
     aba === 'VENDAS' ||
+    aba === 'INVESTIMENTOS' ||
     aba === 'DESPESAS_GERAIS' ||
     aba === 'PAGAMENTOS' ||
     aba === 'PARCELAS_FINANCEIRAS' ||
@@ -122,6 +123,10 @@ function invalidarCachesRelacionadosAba(sheetName) {
 
   if (aba === 'VENDAS' && typeof limparCacheVendas === 'function') {
     limparCacheVendas();
+  }
+
+  if (aba === 'INVESTIMENTOS' && typeof limparCacheInvestimentos === 'function') {
+    limparCacheInvestimentos();
   }
 
   if (aba === 'PRODUTOS' && typeof limparCacheProdutos === 'function') {
@@ -148,6 +153,9 @@ function invalidarCachesRelacionadosAba(sheetName) {
     }
     if (typeof limparCacheVendas === 'function') {
       limparCacheVendas();
+    }
+    if (typeof limparCacheInvestimentos === 'function') {
+      limparCacheInvestimentos();
     }
   }
 
