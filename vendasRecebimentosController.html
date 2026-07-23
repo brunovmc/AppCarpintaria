@@ -429,6 +429,9 @@
           <div><span>Saldo livre</span><strong>${escapeHtml(formatarMoeda(saldo))}</strong></div>
         </div>
         ${montarAlertas(item)}
+        <details class="work-queue-review">
+          <summary><span>Revisar recebimento</span></summary>
+          <div class="work-queue-review__body">
         <details class="despesas-inbox-dados" ${status === 'ERRO' ? 'open' : ''}>
           <summary>Dados do recebimento</summary>
           <div class="despesa-inbox-grid">
@@ -458,6 +461,8 @@
             <button type="button" class="btn-perigo" onclick="VendasRecebimentosController.descartar('${escapeHtml(id)}')" ${alocado > 0.009 ? 'disabled' : ''}>Descartar</button>
           </div>
         ` : '<div class="despesas-inbox-concluido">Recebimento totalmente conciliado.</div>'}
+          </div>
+        </details>
       `;
       return card;
     }

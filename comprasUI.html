@@ -858,8 +858,8 @@
     }
 
     function montarCardResumo(i) {
-      const div = document.createElement('div');
-      div.className = 'card card-ficha';
+      const div = document.createElement('article');
+      div.className = 'card card-ficha record-card record-card--compra';
       const jaAdicionada = compraJaAdicionadaAoEstoque(i);
       if (jaAdicionada) div.classList.add('card-adicionado-estoque');
       div.dataset.id = i.ID;
@@ -867,33 +867,57 @@
       const localState = obterEstadoLocalCompra(i);
       if (localState.status) div.classList.add(`card-local-${localState.status}`);
       if (i?._localDeleted) div.classList.add('card-local-delete');
-      const isMadeira = String(i.tipo || '').toUpperCase() === 'MADEIRA';
       const documentoGerenciado = String(i.financeiro_somente).toLowerCase() === 'true';
-      const status = documentoGerenciado
-        ? 'Documento confirmado · estoque gerenciado por item'
-        : (jaAdicionada ? 'Ja adicionada ao estoque' : 'Pendente para estoque');
+      const estoqueStatus = documentoGerenciado
+        ? 'Gerenciado por item'
+        : (jaAdicionada ? 'Adicionada ao estoque' : 'Pendente para estoque');
+      const statusPagamento = String(i.status_pagamento || 'PENDENTE').toUpperCase();
+      const pagamentoStatusLabel = statusPagamento === 'PAGO'
+        ? 'Pago'
+        : (statusPagamento === 'PARCIAL'
+          ? 'Parcialmente pago'
+          : (statusPagamento === 'PENDENTE' ? 'Pagamento pendente' : statusPagamento));
+      const pagamentoStatusClasse = statusPagamento === 'PAGO'
+        ? 'success'
+        : (statusPagamento === 'PARCIAL' || statusPagamento === 'PENDENTE' ? 'warning' : 'neutral');
       const valorTotal = Number(i.total_previsto || (Number(i.quantidade || 0) * Number(i.valor_unit || 0)));
       const itemLabel = escapeHtml(i.item || '-');
       const categoriaLabel = escapeHtml(i.categoria || '-');
+      const fornecedorLabel = escapeHtml(i.fornecedor || 'Fornecedor nao informado');
       const quantidadeLabel = escapeHtml(i.quantidade || 0);
       const unidadeLabel = escapeHtml(i.unidade || '');
-      const comprimentoLabel = escapeHtml(i.comprimento_cm || '-');
-      const larguraLabel = escapeHtml(i.largura_cm || '-');
-      const espessuraLabel = escapeHtml(i.espessura_cm || '-');
-      const statusLabel = escapeHtml(status);
+      const estoqueStatusLabel = escapeHtml(estoqueStatus);
       const tipoTag = montarTipoTag(i.tipo);
       const topoStyle = montarEstiloTopoCard(i.tipo);
 
       div.innerHTML = `
-        <div class="card-ficha-topo"${topoStyle}>${itemLabel}</div>
-        <div class="card-ficha-corpo">
-          <div class="card-resumo">
-            ${tipoTag} > ${categoriaLabel}<br>
-            ${quantidadeLabel} ${unidadeLabel}
-            ${isMadeira ? `<br><span>(${comprimentoLabel} x ${larguraLabel} x ${espessuraLabel}) cm</span>` : ''}
-            <br><span>${statusLabel}</span>
-            ${window.AppListOrderUI?.cardDateHtml('compras', i, window.ComprasStore?.getSort?.()) || ''}
-            <div class="card-resumo-valor">Valor: ${formatarMoeda(valorTotal)}</div>
+        <div class="card-ficha-topo record-card__header"${topoStyle}>
+          <div class="record-card__heading">
+            <div class="record-card__eyebrow">${tipoTag} <span class="record-card__category">${categoriaLabel}</span></div>
+            <h3 class="record-card__title">${itemLabel}</h3>
+            <span class="record-card__subtitle">${fornecedorLabel}</span>
+          </div>
+          <div class="record-card__value">
+            <span class="record-card__value-label">Valor total</span>
+            <strong>${formatarMoeda(valorTotal)}</strong>
+          </div>
+        </div>
+        <div class="card-ficha-corpo record-card__body">
+          <div class="card-resumo record-card__summary">
+            <span class="record-card__status record-card__status--${pagamentoStatusClasse}">${escapeHtml(pagamentoStatusLabel)}</span>
+            <dl class="record-card__meta">
+              <div class="record-card__meta-item">
+                <dt class="record-card__meta-label">Quantidade</dt>
+                <dd class="record-card__meta-value">${quantidadeLabel} ${unidadeLabel}</dd>
+              </div>
+              <div class="record-card__meta-item">
+                <dt class="record-card__meta-label">Estoque</dt>
+                <dd class="record-card__meta-value">${estoqueStatusLabel}</dd>
+              </div>
+            </dl>
+            <div class="record-card__date">
+              ${window.AppListOrderUI?.cardDateHtml('compras', i, window.ComprasStore?.getSort?.()) || ''}
+            </div>
           </div>
           ${localState.label ? `
             <div class="optimistic-local-state-row">
@@ -902,7 +926,9 @@
             </div>
           ` : ''}
           ${localState.message ? `<div class="optimistic-local-message">${escapeHtml(localState.message)}</div>` : ''}
-          <button class="ver-mais">Ver mais</button>
+          <div class="record-card__actions">
+            <button type="button" class="ver-mais" aria-label="Ver detalhes da compra de ${escapeAttr(i.item || 'item')}">Ver detalhes</button>
+          </div>
         </div>
       `;
 

@@ -1,0 +1,154 @@
+<script>
+(() => {
+  const STORAGE_PREFIX = 'app.worklist.view.';
+
+  function safeStorageGet(key) {
+    try {
+      return window.sessionStorage?.getItem(key) || '';
+    } catch (error) {
+      return '';
+    }
+  }
+
+  function safeStorageSet(key, value) {
+    try {
+      window.sessionStorage?.setItem(key, value);
+    } catch (error) {
+      // A navegacao continua funcional mesmo quando o storage nao esta disponivel.
+    }
+  }
+
+  function countFromSummary(text) {
+    const normalized = String(text || '').trim();
+    const match = normalized.match(/\d+/);
+    if (match) return Math.max(0, Number(match[0]) || 0);
+    return /nenhum|sem pendencia/i.test(normalized) ? 0 : null;
+  }
+
+  function syncPendingCount(button) {
+    const sourceId = String(button?.dataset?.summarySource || '').trim();
+    const source = sourceId ? document.getElementById(sourceId) : null;
+    const counter = button?.querySelector('.worklist-switcher__count');
+    if (!source || !counter) return;
+
+    const count = countFromSummary(source.textContent);
+    if (count === null) {
+      counter.classList.add('hidden');
+      return;
+    }
+
+    counter.textContent = String(count);
+    counter.classList.remove('hidden');
+    button.classList.toggle('has-pending', count > 0);
+    button.setAttribute('aria-label', `Pendencias: ${count}`);
+  }
+
+  function setExternalContext(root, view) {
+    const pending = view === 'pending';
+    const topbarId = String(root.dataset.topbar || '').trim();
+    const topbar = topbarId ? document.getElementById(topbarId) : null;
+    topbar?.classList.toggle('worklist-context-hidden', pending);
+
+    const filterId = String(root.dataset.externalFilter || '').trim();
+    const filter = filterId ? document.getElementById(filterId) : null;
+    if (pending && filter) filter.classList.add('hidden');
+  }
+
+  function expandPendingQueue(root) {
+    const buttonId = String(root.dataset.expandButton || '').trim();
+    const button = buttonId ? document.getElementById(buttonId) : null;
+    if (!button || button.getAttribute('aria-expanded') === 'true') return;
+    window.setTimeout(() => button.click(), 0);
+  }
+
+  function selectView(root, requestedView, options = {}) {
+    if (!root) return;
+    const view = requestedView === 'pending' ? 'pending' : 'records';
+    const tabs = [...root.querySelectorAll('[data-worklist-view]')];
+    const panels = [...root.querySelectorAll('[data-worklist-panel]')];
+
+    tabs.forEach(tab => {
+      const active = tab.dataset.worklistView === view;
+      tab.classList.toggle('is-active', active);
+      tab.setAttribute('aria-selected', active ? 'true' : 'false');
+      tab.tabIndex = active ? 0 : -1;
+      if (active && options.focus) tab.focus();
+    });
+
+    panels.forEach(panel => {
+      const active = panel.dataset.worklistPanel === view;
+      panel.hidden = !active;
+      panel.setAttribute('aria-hidden', active ? 'false' : 'true');
+    });
+
+    root.dataset.activeWorklistView = view;
+    setExternalContext(root, view);
+    safeStorageSet(`${STORAGE_PREFIX}${root.dataset.worklist || 'default'}`, view);
+    if (view === 'pending') expandPendingQueue(root);
+
+    document.dispatchEvent(new CustomEvent('app:worklist-view-changed', {
+      detail: { tab: root.dataset.worklist || '', view }
+    }));
+  }
+
+  function bindKeyboard(root, tabs) {
+    tabs.forEach((tab, index) => {
+      tab.addEventListener('keydown', event => {
+        if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+        event.preventDefault();
+        let nextIndex = index;
+        if (event.key === 'ArrowLeft') nextIndex = (index - 1 + tabs.length) % tabs.length;
+        if (event.key === 'ArrowRight') nextIndex = (index + 1) % tabs.length;
+        if (event.key === 'Home') nextIndex = 0;
+        if (event.key === 'End') nextIndex = tabs.length - 1;
+        const next = tabs[nextIndex];
+        selectView(root, next?.dataset?.worklistView, { focus: true });
+      });
+    });
+  }
+
+  function initRoot(root) {
+    if (!root || root.dataset.worklistBound === 'true') return;
+    root.dataset.worklistBound = 'true';
+    const tabs = [...root.querySelectorAll('[data-worklist-view]')];
+    if (!tabs.length) return;
+
+    tabs.forEach(tab => {
+      tab.addEventListener('click', () => selectView(root, tab.dataset.worklistView));
+      syncPendingCount(tab);
+
+      const sourceId = String(tab.dataset.summarySource || '').trim();
+      const source = sourceId ? document.getElementById(sourceId) : null;
+      if (source && typeof MutationObserver !== 'undefined') {
+        new MutationObserver(() => syncPendingCount(tab)).observe(source, {
+          childList: true,
+          characterData: true,
+          subtree: true
+        });
+      }
+    });
+
+    bindKeyboard(root, tabs);
+    const saved = safeStorageGet(`${STORAGE_PREFIX}${root.dataset.worklist || 'default'}`);
+    selectView(root, saved === 'pending' ? 'pending' : 'records');
+  }
+
+  function init() {
+    document.querySelectorAll('[data-worklist]').forEach(initRoot);
+  }
+
+  window.AppWorklistUI = Object.freeze({
+    init,
+    select(tab, view) {
+      const root = document.querySelector(`[data-worklist="${String(tab || '').trim()}"]`);
+      selectView(root, view);
+    }
+  });
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => window.setTimeout(init, 0), { once: true });
+  } else {
+    window.setTimeout(init, 0);
+  }
+})();
+</script>

@@ -1,11 +1,22 @@
 <div id="ordenacaoProdutos" class="lista-ordenacao-slot"></div>
 <div id="listaProdutos"></div>
 
-<div id="modalDetalhesProdutos" class="modal hidden">
-  <div class="modal-content">
-    <button class="modal-close-square" onclick="ProdutosUI.fecharModalDetalhes()" aria-label="Fechar">X</button>
-    <h3 id="modalDetalhesProdutosTitulo">Detalhes do produto</h3>
-    <div id="modalDetalhesProdutosConteudo"></div>
+<div
+  id="modalDetalhesProdutos"
+  class="modal detail-workspace-modal hidden"
+  role="dialog"
+  aria-modal="true"
+  aria-labelledby="modalDetalhesProdutosTitulo"
+>
+  <div class="modal-content detail-workspace">
+    <header class="detail-workspace-header">
+      <div class="detail-workspace-heading">
+        <span class="detail-workspace-eyebrow">Produto</span>
+        <h3 id="modalDetalhesProdutosTitulo" class="detail-workspace-title">Detalhes do produto</h3>
+      </div>
+      <button class="modal-close-square detail-workspace-close" onclick="ProdutosUI.fecharModalDetalhes()" aria-label="Fechar">X</button>
+    </header>
+    <div id="modalDetalhesProdutosConteudo" class="detail-workspace-body"></div>
   </div>
 </div>
 

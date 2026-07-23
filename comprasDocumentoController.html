@@ -249,6 +249,9 @@
         </div>
         <div class="despesa-inbox-meta">Compra: <time${dataDocumento.datetime ? ` datetime="${escapeHtml(dataDocumento.datetime)}"` : ''}>${escapeHtml(dataDocumento.display)}</time> · ${arquivos || 'Arquivo original indisponivel'} · confianca ${Math.round(Number(doc.confianca || 0) * 100)}%</div>
         ${alertas.length ? `<div class="despesas-inbox-alertas">${alertas.map(a => `<span>${escapeHtml(a)}</span>`).join('')}</div>` : ''}
+        <details class="work-queue-review">
+          <summary><span>Revisar documento</span></summary>
+          <div class="work-queue-review__body">
         <div class="compra-documento-grid">
           ${campo(id, 'fornecedor', 'Fornecedor', doc.fornecedor)}
           ${campo(id, 'numero_documento', 'Numero da nota/recibo', doc.numero_documento)}
@@ -282,6 +285,8 @@
           <button type="button" data-doc-action="confirm" onclick="ComprasDocumentoController.confirmar('${id}')">Confirmar documento</button>
           ${possuiIntegracao ? '' : `<button type="button" data-doc-action="discard" onclick="ComprasDocumentoController.descartar('${id}')">Descartar</button>`}
         </div>
+          </div>
+        </details>
       </article>`;
     }
 

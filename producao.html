@@ -1,16 +1,27 @@
 <div id="miniDashboardProducao" class="producao-mini-dashboard"></div>
 <div id="topBarProducao" class="top-bar hidden">
   <input id="buscaProducao" type="text" placeholder="Buscar...">
-  <button id="btnFiltroProducao" type="button">Filtrar</button>
+  <button id="btnFiltroProducao" class="hidden" type="button">Filtrar</button>
 </div>
 <div id="ordenacaoProducao" class="lista-ordenacao-slot"></div>
 <div id="listaProducao"></div>
 
-<div id="modalDetalhesProducao" class="modal hidden">
-  <div class="modal-content">
-    <button class="modal-close-square" onclick="ProducaoUI.fecharModalDetalhes()" aria-label="Fechar">X</button>
-    <h3 id="modalDetalhesProducaoTitulo">Detalhes da producao</h3>
-    <div id="modalDetalhesProducaoConteudo"></div>
+<div
+  id="modalDetalhesProducao"
+  class="modal detail-workspace-modal hidden"
+  role="dialog"
+  aria-modal="true"
+  aria-labelledby="modalDetalhesProducaoTitulo"
+>
+  <div class="modal-content detail-workspace">
+    <header class="detail-workspace-header">
+      <div class="detail-workspace-heading">
+        <span class="detail-workspace-eyebrow">Ordem de producao</span>
+        <h3 id="modalDetalhesProducaoTitulo" class="detail-workspace-title">Detalhes da producao</h3>
+      </div>
+      <button class="modal-close-square detail-workspace-close" onclick="ProducaoUI.fecharModalDetalhes()" aria-label="Fechar">X</button>
+    </header>
+    <div id="modalDetalhesProducaoConteudo" class="detail-workspace-body"></div>
   </div>
 </div>
 

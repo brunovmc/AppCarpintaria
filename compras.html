@@ -1,3 +1,14 @@
+<div class="worklist-shell" data-worklist="compras" data-topbar="topBarCompras" data-external-filter="painelFiltroCompras" data-expand-button="btnToggleDocumentosCompra">
+  <div class="worklist-switcher" role="tablist" aria-label="Visualizacao de compras">
+    <button id="tabComprasRegistros" type="button" class="worklist-switcher__tab is-active" role="tab" aria-selected="true" aria-controls="panelComprasRegistros" data-worklist-view="records">
+      Registros
+    </button>
+    <button id="tabComprasPendencias" type="button" class="worklist-switcher__tab" role="tab" aria-selected="false" aria-controls="panelComprasPendencias" data-worklist-view="pending" data-summary-source="comprasDocumentosResumo">
+      Pendencias <span class="worklist-switcher__count" aria-hidden="true">0</span>
+    </button>
+  </div>
+
+  <section id="panelComprasRegistros" class="worklist-panel" role="tabpanel" aria-labelledby="tabComprasRegistros" data-worklist-panel="records">
 <div id="filtroTipoRapidoCompras" class="tipo-filtro-linha tipo-filtro-linha-loading" aria-busy="true">
   <span class="tipo-filtro-placeholder p1" aria-hidden="true"></span>
   <span class="tipo-filtro-placeholder p2" aria-hidden="true"></span>
@@ -6,6 +17,12 @@
   <span class="tipo-filtro-placeholder p5" aria-hidden="true"></span>
 </div>
 
+<div id="ordenacaoCompras" class="lista-ordenacao-slot"></div>
+<div id="listaCompras" class="lista-estavel-topo lista-loading" aria-busy="true"></div>
+<div id="listaControlesCompras" class="lista-controles"></div>
+  </section>
+
+  <section id="panelComprasPendencias" class="worklist-panel" role="tabpanel" aria-labelledby="tabComprasPendencias" data-worklist-panel="pending" hidden>
 <section id="comprasDocumentosInbox" class="despesas-inbox compras-documentos-inbox" aria-labelledby="comprasDocumentosInboxTitulo">
   <div class="despesas-inbox-topo">
     <div class="despesas-inbox-titulo">
@@ -32,10 +49,8 @@
     <div id="listaDocumentosCompra" class="despesas-inbox-list"></div>
   </div>
 </section>
-
-<div id="ordenacaoCompras" class="lista-ordenacao-slot"></div>
-<div id="listaCompras" class="lista-estavel-topo lista-loading" aria-busy="true"></div>
-<div id="listaControlesCompras" class="lista-controles"></div>
+  </section>
+</div>
 
 <div id="modalDetalhesCompras" class="modal hidden">
   <div class="modal-content">

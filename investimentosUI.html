@@ -158,26 +158,44 @@
     function card(item) {
       const local = estadoLocal(item);
       const status = String(item.status_pagamento || 'PENDENTE').toUpperCase();
-      const statusLabel = status === 'PAGO' ? 'RECEBIDO' : (status === 'PENDENTE' ? 'A RECEBER' : status);
+      const statusLabel = status === 'PAGO'
+        ? 'Recebido'
+        : (status === 'PARCIAL' ? 'Recebido parcialmente' : (status === 'PENDENTE' ? 'A receber' : status));
+      const statusClasse = status === 'PAGO'
+        ? 'success'
+        : (status === 'PARCIAL' || status === 'PENDENTE' ? 'warning' : 'neutral');
       const id = esc(item.ID);
       return `
-        <article class="card investimento-card" data-id="${id}"${item._localMutationId ? ` data-local-mutation-id="${esc(item._localMutationId)}"` : ''}>
-          <div class="card-resumo">
-            <div>
-              <span class="despesa-card-resumo-label">${esc(item.tipo_investimento || 'Aporte')}</span>
-              <strong>${esc(item.descricao || 'Investimento')}</strong>
-              <span>${esc(item.investidor || 'Investidor nao informado')}</span>
+        <article class="card card-ficha record-card record-card--investimento" data-id="${id}"${item._localMutationId ? ` data-local-mutation-id="${esc(item._localMutationId)}"` : ''}>
+          <div class="card-ficha-topo record-card__header">
+            <div class="record-card__heading">
+              <span class="record-card__eyebrow">${esc(item.tipo_investimento || 'Aporte')}</span>
+              <h3 class="record-card__title">${esc(item.descricao || 'Investimento')}</h3>
+              <span class="record-card__subtitle">${esc(item.investidor || 'Investidor nao informado')}</span>
             </div>
-            <div class="despesa-card-resumo-valores">
+            <div class="record-card__value">
+              <span class="record-card__value-label">Valor total</span>
               <strong>${esc(moeda(item.valor_total_investimento))}</strong>
-              <span>${esc(statusLabel)} · pendente ${esc(moeda(item.total_pendente))}</span>
             </div>
           </div>
-          ${window.AppListOrderUI?.cardDateHtml?.('investimentos', item, window.InvestimentosStore?.getSort?.()) || ''}
-          ${local.label ? `<div class="app-local-state"><strong>${esc(local.label)}</strong>${local.message ? `<span>${esc(local.message)}</span>` : ''}${local.canRetry ? `<button type="button" onclick="event.stopPropagation(); InvestimentosController.retry('${id}')">Tentar novamente</button>` : ''}</div>` : ''}
-          <div class="card-acoes">
-            <button type="button" class="btn-secundario" onclick="InvestimentosController.abrirDetalhes('${id}')">Detalhes</button>
-            <button type="button" onclick="InvestimentosController.registrarRecebimento('${id}')" ${local.blockActions || Number(item.total_pendente || 0) <= 0.009 ? 'disabled' : ''}>Registrar recebimento</button>
+          <div class="card-ficha-corpo record-card__body">
+            <div class="card-resumo record-card__summary">
+              <span class="record-card__status record-card__status--${statusClasse}">${esc(statusLabel)}</span>
+              <dl class="record-card__meta">
+                <div class="record-card__meta-item">
+                  <dt class="record-card__meta-label">Saldo a receber</dt>
+                  <dd class="record-card__meta-value">${esc(moeda(item.total_pendente))}</dd>
+                </div>
+              </dl>
+              <div class="record-card__date">
+                ${window.AppListOrderUI?.cardDateHtml?.('investimentos', item, window.InvestimentosStore?.getSort?.()) || ''}
+              </div>
+            </div>
+            ${local.label ? `<div class="app-local-state"><strong>${esc(local.label)}</strong>${local.message ? `<span>${esc(local.message)}</span>` : ''}${local.canRetry ? `<button type="button" onclick="event.stopPropagation(); InvestimentosController.retry('${id}')">Tentar novamente</button>` : ''}</div>` : ''}
+            <div class="card-acoes record-card__actions">
+              <button type="button" class="btn-secundario" aria-label="Ver detalhes de ${esc(item.descricao || 'investimento')}" onclick="InvestimentosController.abrirDetalhes('${id}')">Ver detalhes</button>
+              <button type="button" onclick="InvestimentosController.registrarRecebimento('${id}')" ${local.blockActions || Number(item.total_pendente || 0) <= 0.009 ? 'disabled' : ''}>Registrar recebimento</button>
+            </div>
           </div>
         </article>
       `;

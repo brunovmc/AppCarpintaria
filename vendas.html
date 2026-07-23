@@ -1,3 +1,26 @@
+<div class="worklist-shell" data-worklist="vendas" data-topbar="topBarVendas" data-expand-button="btnToggleInboxRecebimentos">
+  <div class="worklist-switcher" role="tablist" aria-label="Visualizacao de vendas">
+    <button id="tabVendasRegistros" type="button" class="worklist-switcher__tab is-active" role="tab" aria-selected="true" aria-controls="panelVendasRegistros" data-worklist-view="records">
+      Registros
+    </button>
+    <button id="tabVendasPendencias" type="button" class="worklist-switcher__tab" role="tab" aria-selected="false" aria-controls="panelVendasPendencias" data-worklist-view="pending" data-summary-source="recebimentosInboxResumo">
+      Pendencias <span class="worklist-switcher__count" aria-hidden="true">0</span>
+    </button>
+  </div>
+
+  <section id="panelVendasRegistros" class="worklist-panel" role="tabpanel" aria-labelledby="tabVendasRegistros" data-worklist-panel="records">
+<section class="despesas-cadastradas">
+  <div class="despesas-cadastradas-titulo">
+    <strong>Vendas cadastradas</strong>
+    <span>Pedidos, parcelas e recebimentos</span>
+  </div>
+  <div id="ordenacaoVendas" class="lista-ordenacao-slot"></div>
+  <div id="listaVendas"></div>
+</section>
+<div id="listaControlesVendas" class="lista-controles"></div>
+  </section>
+
+  <section id="panelVendasPendencias" class="worklist-panel" role="tabpanel" aria-labelledby="tabVendasPendencias" data-worklist-panel="pending" hidden>
 <div id="recebimentosInbox" class="despesas-inbox">
   <div class="despesas-inbox-topo">
     <div class="despesas-inbox-titulo">
@@ -30,16 +53,8 @@
     <div id="listaInboxRecebimentos" class="despesas-inbox-list"></div>
   </div>
 </div>
-
-<section class="despesas-cadastradas">
-  <div class="despesas-cadastradas-titulo">
-    <strong>Vendas cadastradas</strong>
-    <span>Pedidos, parcelas e recebimentos</span>
-  </div>
-  <div id="ordenacaoVendas" class="lista-ordenacao-slot"></div>
-  <div id="listaVendas"></div>
-</section>
-<div id="listaControlesVendas" class="lista-controles"></div>
+  </section>
+</div>
 
 <div id="modalDetalhesVendas" class="modal hidden">
   <div class="modal-content">

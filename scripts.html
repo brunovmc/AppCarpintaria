@@ -4,6 +4,7 @@
   ========================== */
   const ABAS_MENU_HAMBURGER = ['dashboard', 'despesas', 'estoque', 'compras', 'vendas', 'investimentos', 'produtos', 'producao'];
   const ABAS_APP = [...ABAS_MENU_HAMBURGER];
+  const ABAS_MOBILE_NAV_DIRETAS = ['dashboard', 'despesas', 'compras', 'producao'];
   const ABA_INICIAL_PADRAO = 'dashboard';
   const LAST_TAB_STORAGE_KEY = 'app:lasttab:v1';
   const QUICK_FILTER_STOCK_TYPE_KEY = 'app:quickfilter:v1:estoque:tipo';
@@ -12,6 +13,7 @@
   const DB_ENV_RECONCILE_STORAGE_KEY = 'app:db_env_reconcile:v1';
   let listenerFecharMenuNavbarAtivo = false;
   let listenerBloqueioDrawerAtivo = false;
+  let ultimoAcionadorMenuNavbar = null;
 
   function normalizarDbEnvFront(valor) {
     const env = String(valor || '').trim().toLowerCase();
@@ -390,6 +392,16 @@
     }
   };
 
+  const APP_PRIMARY_ACTION_LABELS = {
+    despesas: 'Nova despesa',
+    estoque: 'Novo item de estoque',
+    compras: 'Nova compra',
+    vendas: 'Nova venda',
+    investimentos: 'Novo investimento',
+    produtos: 'Novo produto',
+    producao: 'Nova producao'
+  };
+
   function normalizarNomeAba(valor) {
     const aba = String(valor || '').trim().toLowerCase();
     return ABAS_APP.includes(aba) ? aba : '';
@@ -398,6 +410,15 @@
   function obterApresentacaoAba(valor) {
     const aba = normalizarNomeAba(valor) || ABA_INICIAL_PADRAO;
     return APP_TAB_PRESENTATION[aba] || APP_TAB_PRESENTATION.dashboard;
+  }
+
+  function atualizarAcaoPrimaria(abaValor) {
+    const aba = normalizarNomeAba(abaValor) || ABA_INICIAL_PADRAO;
+    const botao = document.getElementById('btnAcaoPrimaria');
+    const label = document.getElementById('btnAcaoPrimariaLabel');
+    const rotulo = APP_PRIMARY_ACTION_LABELS[aba] || 'Adicionar';
+    if (label) label.textContent = rotulo;
+    if (botao) botao.setAttribute('aria-label', rotulo);
   }
 
   function obterAmbienteAtualVisual() {
@@ -468,7 +489,8 @@
     const alvo = bloqueado === true;
     const shell = document.querySelector('.app-shell');
     const bottomBar = document.querySelector('.bottom-bar');
-    [shell, bottomBar].forEach(el => {
+    const mobileBottomNav = document.getElementById('mobileBottomNav');
+    [shell, bottomBar, mobileBottomNav].forEach(el => {
       if (!el) return;
       if (alvo) {
         el.setAttribute('inert', '');
@@ -550,7 +572,7 @@
   }
 
   function atualizarEstadoNavbar(abaAtiva) {
-    const botoes = document.querySelectorAll('.navbar button[data-aba], #navbarMenu button[data-aba]');
+    const botoes = document.querySelectorAll('.navbar button[data-aba], #navbarMenu button[data-aba], #mobileBottomNav button[data-aba]');
     const alvo = String(abaAtiva || '').trim();
     botoes.forEach(btn => {
       const ehAtivo = String(btn.dataset.aba || '').trim() === alvo;
@@ -568,8 +590,23 @@
       btn.classList.toggle('active', ativoNoMenu);
       btn.setAttribute('aria-expanded', menuNavbarAberto() ? 'true' : 'false');
     }
+
+    const btnMais = document.getElementById('btnMobileNavMais');
+    if (btnMais) {
+      const ehGrupoAtivo = ABAS_APP.includes(alvo) && !ABAS_MOBILE_NAV_DIRETAS.includes(alvo);
+      const rotuloAtual = ehGrupoAtivo ? (obterApresentacaoAba(alvo)?.label || '') : '';
+      btnMais.classList.toggle('active', ehGrupoAtivo);
+      btnMais.setAttribute('aria-expanded', menuNavbarAberto() ? 'true' : 'false');
+      btnMais.setAttribute('aria-label', rotuloAtual ? `Abrir mais areas (atual: ${rotuloAtual})` : 'Abrir mais areas');
+      if (ehGrupoAtivo) {
+        btnMais.setAttribute('aria-current', 'page');
+      } else {
+        btnMais.removeAttribute('aria-current');
+      }
+    }
     atualizarRotuloBotaoHamburger(alvo);
     atualizarResumoWorkspace(alvo);
+    atualizarAcaoPrimaria(alvo);
   }
 
   function salvarFiltroRapidoNoCache(chave, valor) {
@@ -606,9 +643,13 @@
 
   function fecharMenuNavbar() {
     const { menu, btn, backdrop } = getNavbarHamburgerEls();
+    const estavaAberto = menuNavbarAberto();
+    const acionadorAnterior = ultimoAcionadorMenuNavbar;
     if (menu) menu.classList.add('hidden');
     if (backdrop) backdrop.classList.add('hidden');
     if (btn) btn.setAttribute('aria-expanded', 'false');
+    const btnMais = document.getElementById('btnMobileNavMais');
+    if (btnMais) btnMais.setAttribute('aria-expanded', 'false');
     if (document?.body) document.body.classList.remove('nav-drawer-open');
     setInteracaoPlanoDeFundoDrawer(false);
     desativarBloqueioInteracaoDrawer();
@@ -618,14 +659,22 @@
       document.removeEventListener('pointerdown', fecharMenuNavbarAoClicarFora, { capture: true });
       document.removeEventListener('keydown', fecharMenuNavbarPorTeclado);
     }
+
+    ultimoAcionadorMenuNavbar = null;
+    if (estavaAberto && acionadorAnterior?.isConnected && typeof acionadorAnterior.focus === 'function') {
+      window.requestAnimationFrame(() => acionadorAnterior.focus());
+    }
   }
 
-  function abrirMenuNavbar() {
+  function abrirMenuNavbar(acionador = null) {
     const { menu, btn, backdrop } = getNavbarHamburgerEls();
     if (!menu || !btn) return;
+    ultimoAcionadorMenuNavbar = acionador || document.activeElement || btn;
     menu.classList.remove('hidden');
     if (backdrop) backdrop.classList.remove('hidden');
     btn.setAttribute('aria-expanded', 'true');
+    const btnMais = document.getElementById('btnMobileNavMais');
+    if (btnMais) btnMais.setAttribute('aria-expanded', 'true');
     if (document?.body) document.body.classList.add('nav-drawer-open');
     setInteracaoPlanoDeFundoDrawer(true);
     ativarBloqueioInteracaoDrawer();
@@ -635,13 +684,18 @@
       document.addEventListener('pointerdown', fecharMenuNavbarAoClicarFora, { capture: true });
       document.addEventListener('keydown', fecharMenuNavbarPorTeclado);
     }
+
+    const primeiroDestino = menu.querySelector('button[data-aba]');
+    if (primeiroDestino && typeof primeiroDestino.focus === 'function') {
+      window.requestAnimationFrame(() => primeiroDestino.focus());
+    }
   }
 
-  function toggleMenuNavbar() {
+  function toggleMenuNavbar(acionador = null) {
     if (menuNavbarAberto()) {
       fecharMenuNavbar();
     } else {
-      abrirMenuNavbar();
+      abrirMenuNavbar(acionador);
     }
   }
 
@@ -668,7 +722,7 @@
     const { btn, backdrop } = getNavbarHamburgerEls();
     if (!btn) return;
     btn.addEventListener('click', () => {
-      toggleMenuNavbar();
+      toggleMenuNavbar(btn);
     });
     if (backdrop) {
       backdrop.addEventListener('pointerdown', evento => {
@@ -678,6 +732,23 @@
       backdrop.addEventListener('click', () => {
         fecharMenuNavbar();
       });
+    }
+  }
+
+  function initNavegacaoAdaptativa() {
+    document.querySelectorAll('#navbarMenu button[data-aba], #mobileBottomNav button[data-aba]')
+      .forEach(botao => {
+        botao.addEventListener('click', () => trocarAba(botao.dataset.aba));
+      });
+
+    const btnMais = document.getElementById('btnMobileNavMais');
+    if (btnMais) {
+      btnMais.addEventListener('click', () => toggleMenuNavbar(btnMais));
+    }
+
+    const btnAcaoPrimaria = document.getElementById('btnAcaoPrimaria');
+    if (btnAcaoPrimaria) {
+      btnAcaoPrimaria.addEventListener('click', acaoPrimaria);
     }
   }
 
@@ -3495,7 +3566,7 @@
         painel.classList.toggle('hidden', !bloqueado);
       }
 
-      const alvos = document.querySelectorAll('.navbar, .app-workspace-header, #appBootSkeleton, #appDbEnvBanner, #appSyncBanner, .top-bar, #painelFiltroEstoque, #painelFiltroCompras, .aba, .bottom-bar');
+      const alvos = document.querySelectorAll('.navbar, .app-workspace-header, #appBootSkeleton, #appDbEnvBanner, #appSyncBanner, .top-bar, #painelFiltroEstoque, #painelFiltroCompras, .aba, .bottom-bar, .mobile-bottom-nav');
       if (bloqueado) {
         alvos.forEach(el => {
           if (!el.classList.contains('hidden')) {
@@ -4762,6 +4833,7 @@
       };
       navegacaoEmVoo = contextoNavegacao;
       try {
+      window.AppWorklistUI?.select?.(aba, 'records');
       if (typeof trocarAba === 'function') {
         destinoTrocaInterna = aba;
         try {
@@ -7388,6 +7460,7 @@
       }));
 
       initNavbarHamburger();
+      initNavegacaoAdaptativa();
       registrarListenersFiltrosStore();
       initModalA11y();
       initCampoAjudaA11y();

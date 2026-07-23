@@ -672,8 +672,8 @@
     }
 
     function montarCardResumo(i) {
-      const div = document.createElement('div');
-      div.className = 'card card-ficha';
+      const div = document.createElement('article');
+      div.className = 'card card-ficha record-card record-card--estoque';
       div.dataset.id = i.ID;
       if (i?._localMutationId) div.dataset.localMutationId = String(i._localMutationId || '').trim();
       const localState = obterEstadoLocalEstoque(i);
@@ -686,9 +686,9 @@
       const precoVendaUnit = obterPrecoVendaUnitarioItem(i);
       const valorUnitExibicao = isProduto ? Number(precoVendaUnit ?? 0) : custoUnit;
       const valorTotalExibicao = quantidade * valorUnitExibicao;
-      const resumoValor = isProduto
-        ? `Valor venda unit.: ${formatarMoeda(valorUnitExibicao)} | Total: ${formatarMoeda(valorTotalExibicao)}`
-        : `Valor: ${formatarMoeda(valorTotalExibicao)}`;
+      const valorLabel = isProduto ? 'Valor de venda' : 'Valor em estoque';
+      const statusLabel = quantidade > 0 ? 'Disponível' : 'Sem estoque';
+      const statusClasse = quantidade > 0 ? 'success' : 'warning';
       const itemLabel = escapeHtml(i.item || '-');
       const categoriaLabel = escapeHtml(i.categoria || '-');
       const quantidadeLabel = escapeHtml(i.quantidade || 0);
@@ -700,14 +700,35 @@
       const topoStyle = montarEstiloTopoCard(i.tipo);
 
       div.innerHTML = `
-        <div class="card-ficha-topo"${topoStyle}>${itemLabel}</div>
-        <div class="card-ficha-corpo">
-          <div class="card-resumo">
-            ${tipoTag} - ${categoriaLabel}<br>
-            ${quantidadeLabel} ${unidadeLabel}
-            ${isMadeira ? `<br><span>(${comprimentoLabel} x ${larguraLabel} x ${espessuraLabel}) cm</span>` : ''}
-            ${window.AppListOrderUI?.cardDateHtml('estoque', i, window.EstoqueStore?.getSort?.()) || ''}
-            <div class="card-resumo-valor">${resumoValor}</div>
+        <div class="card-ficha-topo record-card__header"${topoStyle}>
+          <div class="record-card__heading">
+            <div class="record-card__eyebrow">${tipoTag}</div>
+            <h3 class="record-card__title">${itemLabel}</h3>
+            <span class="record-card__subtitle">${categoriaLabel}</span>
+          </div>
+          <div class="record-card__value">
+            <span class="record-card__value-label">Quantidade</span>
+            <strong>${quantidadeLabel} ${unidadeLabel}</strong>
+          </div>
+        </div>
+        <div class="card-ficha-corpo record-card__body">
+          <div class="card-resumo record-card__summary">
+            <span class="record-card__status record-card__status--${statusClasse}">${statusLabel}</span>
+            <dl class="record-card__meta">
+              <div class="record-card__meta-item">
+                <dt class="record-card__meta-label">${valorLabel}</dt>
+                <dd class="record-card__meta-value">${formatarMoeda(valorTotalExibicao)}</dd>
+              </div>
+              ${isMadeira ? `
+                <div class="record-card__meta-item">
+                  <dt class="record-card__meta-label">Medidas</dt>
+                  <dd class="record-card__meta-value">${comprimentoLabel} x ${larguraLabel} x ${espessuraLabel} cm</dd>
+                </div>
+              ` : ''}
+            </dl>
+            <div class="record-card__date">
+              ${window.AppListOrderUI?.cardDateHtml('estoque', i, window.EstoqueStore?.getSort?.()) || ''}
+            </div>
           </div>
           ${localState.label ? `
             <div class="optimistic-local-state-row">
@@ -716,7 +737,9 @@
             </div>
           ` : ''}
           ${localState.message ? `<div class="optimistic-local-message">${escapeHtml(localState.message)}</div>` : ''}
-          <button class="ver-mais">Ver mais</button>
+          <div class="record-card__actions">
+            <button type="button" class="ver-mais" aria-label="Ver detalhes de ${escapeAttr(i.item || 'item')}">Ver detalhes</button>
+          </div>
         </div>
       `;
 
