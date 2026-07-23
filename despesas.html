@@ -1,4 +1,19 @@
+<div class="worklist-shell" data-worklist="despesas" data-topbar="topBarDespesas" data-external-filter="painelFiltroDespesasLista" data-expand-button="btnToggleInboxDespesas">
+  <div class="worklist-switcher" role="tablist" aria-label="Visualizacao de despesas">
+    <button id="tabDespesasRegistros" type="button" class="worklist-switcher__tab is-active" role="tab" aria-selected="true" aria-controls="panelDespesasRegistros" data-worklist-view="records">
+      Registros
+    </button>
+    <button id="tabDespesasPendencias" type="button" class="worklist-switcher__tab" role="tab" aria-selected="false" aria-controls="panelDespesasPendencias" data-worklist-view="pending" data-summary-source="despesasInboxResumo">
+      Pendencias <span class="worklist-switcher__count" aria-hidden="true">0</span>
+    </button>
+  </div>
+
+  <section id="panelDespesasRegistros" class="worklist-panel" role="tabpanel" aria-labelledby="tabDespesasRegistros" data-worklist-panel="records">
 <div id="painelFiltroDespesasLista" class="hidden despesas-filtros despesas-filtros-topo">
+  <div class="filter-sheet-header">
+    <strong>Filtros de despesas</strong>
+    <button type="button" onclick="DespesasController.fecharPainelFiltros()">Concluir</button>
+  </div>
   <div class="despesas-filtros-grid">
     <div class="campo-ajuda-wrap">
       <span class="campo-ajuda-tag">Status</span>
@@ -32,6 +47,21 @@
   <button id="btnLimparFiltrosDespesas" type="button">Limpar filtros</button>
 </div>
 
+<section class="despesas-cadastradas">
+  <div class="despesas-cadastradas-titulo">
+    <strong>Despesas cadastradas</strong>
+    <span>Historico financeiro</span>
+  </div>
+
+  <div id="ordenacaoDespesas" class="lista-ordenacao-slot"></div>
+  <div id="despesasResumoLista" class="despesas-resumo-linha hidden"></div>
+
+  <div id="listaDespesasGerais"></div>
+  <div id="listaControlesDespesas" class="lista-controles"></div>
+</section>
+  </section>
+
+  <section id="panelDespesasPendencias" class="worklist-panel" role="tabpanel" aria-labelledby="tabDespesasPendencias" data-worklist-panel="pending" hidden>
 <div id="despesasInbox" class="despesas-inbox">
   <div class="despesas-inbox-topo">
     <div class="despesas-inbox-titulo">
@@ -66,19 +96,8 @@
     <div id="listaInboxDespesas" class="despesas-inbox-list"></div>
   </div>
 </div>
-
-<section class="despesas-cadastradas">
-  <div class="despesas-cadastradas-titulo">
-    <strong>Despesas cadastradas</strong>
-    <span>Historico financeiro</span>
-  </div>
-
-  <div id="ordenacaoDespesas" class="lista-ordenacao-slot"></div>
-  <div id="despesasResumoLista" class="despesas-resumo-linha hidden"></div>
-
-  <div id="listaDespesasGerais"></div>
-  <div id="listaControlesDespesas" class="lista-controles"></div>
-</section>
+  </section>
+</div>
 
 <div id="formularioDespesaGeral" class="modal hidden">
   <div class="modal-content form-modal-content">

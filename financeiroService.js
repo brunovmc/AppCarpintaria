@@ -3,6 +3,7 @@ const ABA_PAGAMENTOS = 'PAGAMENTOS';
 const ABA_PARCELAS_FINANCEIRAS = 'PARCELAS_FINANCEIRAS';
 const ABA_COMPRAS_FINANCEIRO = 'COMPRAS';
 const ABA_VENDAS_FINANCEIRO = 'VENDAS';
+const ABA_INVESTIMENTOS_FINANCEIRO = 'INVESTIMENTOS';
 const ABA_PRODUTOS_FINANCEIRO = 'PRODUTOS';
 
 const DESPESAS_GERAIS_CACHE_SCOPE = 'DESPESAS_GERAIS_LISTA_ATIVAS';
@@ -17,6 +18,7 @@ const DASHBOARD_FINANCEIRO_CACHE_TTL_SEC = 120;
 const ORIGEM_TIPO_COMPRA = 'COMPRA';
 const ORIGEM_TIPO_DESPESA = 'DESPESA_GERAL';
 const ORIGEM_TIPO_VENDA = 'VENDA';
+const ORIGEM_TIPO_INVESTIMENTO = 'INVESTIMENTO';
 const ORIGEM_TIPO_ESTOQUE = 'ESTOQUE';
 const ORIGEM_TIPO_PRODUCAO = 'PRODUCAO';
 const NATUREZA_PAGAMENTO = 'PAGAMENTO';
@@ -534,7 +536,12 @@ function salvarCacheDashboardFinanceiro(payload) {
 
 function normalizarOrigemTipoFinanceiro(origemTipo) {
   const tipo = String(origemTipo || '').trim().toUpperCase();
-  if (tipo === ORIGEM_TIPO_COMPRA || tipo === ORIGEM_TIPO_DESPESA || tipo === ORIGEM_TIPO_VENDA) {
+  if (
+    tipo === ORIGEM_TIPO_COMPRA ||
+    tipo === ORIGEM_TIPO_DESPESA ||
+    tipo === ORIGEM_TIPO_VENDA ||
+    tipo === ORIGEM_TIPO_INVESTIMENTO
+  ) {
     return tipo;
   }
   throw new Error('Origem de pagamento invalida.');
@@ -550,7 +557,7 @@ function normalizarNaturezaFinanceiro(natureza) {
 
 function getNaturezaOrigemFinanceiro(origemTipo) {
   const tipo = normalizarOrigemTipoFinanceiro(origemTipo);
-  if (tipo === ORIGEM_TIPO_VENDA) return NATUREZA_RECEBIMENTO;
+  if (tipo === ORIGEM_TIPO_VENDA || tipo === ORIGEM_TIPO_INVESTIMENTO) return NATUREZA_RECEBIMENTO;
   return NATUREZA_PAGAMENTO;
 }
 
@@ -566,6 +573,10 @@ function getTotalPrevistoDespesaFinanceiro(despesa) {
 
 function getTotalPrevistoVendaFinanceiro(venda) {
   return round2Financeiro(Math.max(0, parseNumeroBR(venda?.valor_total_venda)));
+}
+
+function getTotalPrevistoInvestimentoFinanceiro(investimento) {
+  return round2Financeiro(Math.max(0, parseNumeroBR(investimento?.valor_total_investimento)));
 }
 
 function getStatusPagamentoFinanceiro(totalPrevisto, totalPago) {
@@ -723,6 +734,14 @@ function enriquecerVendasComResumoPagamento(listaVendas) {
     listaVendas,
     ORIGEM_TIPO_VENDA,
     getTotalPrevistoVendaFinanceiro
+  );
+}
+
+function enriquecerInvestimentosComResumoPagamento(listaInvestimentos) {
+  return enriquecerListaComPagamentosFinanceiro(
+    listaInvestimentos,
+    ORIGEM_TIPO_INVESTIMENTO,
+    getTotalPrevistoInvestimentoFinanceiro
   );
 }
 
@@ -915,6 +934,8 @@ function montarOrigemPagamentoPreCarregadaFinanceiro(origemTipo, origemId, orige
       totalPrevisto = getTotalPrevistoCompraFinanceiro(item);
     } else if (tipo === ORIGEM_TIPO_VENDA) {
       totalPrevisto = getTotalPrevistoVendaFinanceiro(item);
+    } else if (tipo === ORIGEM_TIPO_INVESTIMENTO) {
+      totalPrevisto = getTotalPrevistoInvestimentoFinanceiro(item);
     } else {
       totalPrevisto = getTotalPrevistoDespesaFinanceiro(item);
     }
@@ -937,7 +958,7 @@ function gerarParcelasFinanceirasOrigem(origemTipo, origemId, origemPreCarregada
     : obterOrigemPagamentoFinanceiro(origemTipo, origemId);
   const item = origem.item || {};
   const parcelas = Math.max(1, Math.floor(parseNumeroBR(item.parcelas) || 1));
-  const dataInicio = item.data_pagamento || item.data_venda || item.comprado_em || item.data_competencia || new Date();
+  const dataInicio = item.data_pagamento || item.data_venda || item.data_investimento || item.comprado_em || item.data_competencia || new Date();
   const detalhesPersistidos = desserializarParcelasDetalheFinanceiro(item.parcelas_detalhe_json);
 
   limparParcelasFinanceirasOrigem(origem.tipo, origem.id);
@@ -1942,6 +1963,22 @@ function obterOrigemPagamentoFinanceiro(origemTipo, origemId) {
     };
   }
 
+  if (tipo === ORIGEM_TIPO_INVESTIMENTO) {
+    const sheet = getSheet(ABA_INVESTIMENTOS_FINANCEIRO);
+    if (!sheet) throw new Error('Aba INVESTIMENTOS nao encontrada.');
+    const investimento = rowsToObjects(sheet).find(i => i.ID === id);
+    if (!investimento || String(investimento.ativo).toLowerCase() !== 'true') {
+      throw new Error('Investimento de origem nao encontrado ou inativo.');
+    }
+    return {
+      tipo,
+      id,
+      item: investimento,
+      total_previsto: getTotalPrevistoInvestimentoFinanceiro(investimento),
+      natureza: getNaturezaOrigemFinanceiro(tipo)
+    };
+  }
+
   const sheet = getSheet(ABA_DESPESAS_GERAIS);
   if (!sheet) throw new Error('Aba DESPESAS_GERAIS nao encontrada.');
   const despesa = rowsToObjects(sheet).find(i => i.ID === id);
@@ -2011,6 +2048,9 @@ function montarOrigemHistoricoFinanceiro_(origem) {
   } else if (tipo === ORIGEM_TIPO_VENDA) {
     rotulo = String(item.item || origem?.id || '').trim();
     dataOperacao = formatarDataYmdFinanceiroSafe(item.data_venda);
+  } else if (tipo === ORIGEM_TIPO_INVESTIMENTO) {
+    rotulo = String(item.descricao || origem?.id || '').trim();
+    dataOperacao = formatarDataYmdFinanceiroSafe(item.data_investimento);
   } else {
     rotulo = String(item.descricao || origem?.id || '').trim();
     dataOperacao = formatarDataYmdFinanceiroSafe(item.data_competencia);
@@ -2417,6 +2457,9 @@ function obterResumoDashboardFinanceiro(referenciaYm, forcarRecarregar) {
   const compras = (typeof listarCompras === 'function') ? listarCompras(!!forcarRecarregar) : [];
   const despesas = listarDespesasGerais(!!forcarRecarregar);
   const vendas = (typeof listarVendas === 'function') ? listarVendas(!!forcarRecarregar) : [];
+  const investimentos = (typeof listarInvestimentosNoAmbienteAtual_ === 'function')
+    ? listarInvestimentosNoAmbienteAtual_(!!forcarRecarregar)
+    : [];
   const pagamentos = listarPagamentos(!!forcarRecarregar);
   const estoque = (typeof listarEstoque === 'function') ? listarEstoque(!!forcarRecarregar) : [];
   const producoes = (typeof listarProducao === 'function') ? listarProducao(!!forcarRecarregar) : [];
@@ -2438,6 +2481,8 @@ function obterResumoDashboardFinanceiro(referenciaYm, forcarRecarregar) {
   despesas.forEach(i => { despesasPorId[String(i.ID || '').trim()] = i; });
   const vendasPorId = {};
   vendas.forEach(i => { vendasPorId[String(i.ID || '').trim()] = i; });
+  const investimentosPorId = {};
+  investimentos.forEach(i => { investimentosPorId[String(i.ID || '').trim()] = i; });
 
   const eventosFinanceirosValidos = pagamentos.filter(p => {
     let tipo = '';
@@ -2452,6 +2497,7 @@ function obterResumoDashboardFinanceiro(referenciaYm, forcarRecarregar) {
     if (tipo === ORIGEM_TIPO_COMPRA) return !!comprasPorId[origemId];
     if (tipo === ORIGEM_TIPO_DESPESA) return !!despesasPorId[origemId];
     if (tipo === ORIGEM_TIPO_VENDA) return !!vendasPorId[origemId];
+    if (tipo === ORIGEM_TIPO_INVESTIMENTO) return !!investimentosPorId[origemId];
     return false;
   });
 
@@ -2534,6 +2580,7 @@ function obterResumoDashboardFinanceiro(referenciaYm, forcarRecarregar) {
     if (tipo === ORIGEM_TIPO_COMPRA) return !!comprasPorId[origemId];
     if (tipo === ORIGEM_TIPO_DESPESA) return !!despesasPorId[origemId];
     if (tipo === ORIGEM_TIPO_VENDA) return !!vendasPorId[origemId];
+    if (tipo === ORIGEM_TIPO_INVESTIMENTO) return !!investimentosPorId[origemId];
     return false;
   };
   const sheetParcelas = getSheet(ABA_PARCELAS_FINANCEIRAS);
@@ -2752,6 +2799,7 @@ function getAbaOrigemDashboardFinanceiro(origemTipo) {
   if (tipo === ORIGEM_TIPO_COMPRA) return 'compras';
   if (tipo === ORIGEM_TIPO_DESPESA) return 'despesas';
   if (tipo === ORIGEM_TIPO_VENDA) return 'vendas';
+  if (tipo === ORIGEM_TIPO_INVESTIMENTO) return 'investimentos';
   if (tipo === ORIGEM_TIPO_ESTOQUE) return 'estoque';
   if (tipo === ORIGEM_TIPO_PRODUCAO) return 'producao';
   return '';
@@ -2808,6 +2856,9 @@ function obterComposicaoCardDashboardFinanceiro(referenciaYm, cardKey, forcarRec
   const compras = (typeof listarCompras === 'function') ? listarCompras(!!forcarRecarregar) : [];
   const despesas = listarDespesasGerais(!!forcarRecarregar);
   const vendas = (typeof listarVendas === 'function') ? listarVendas(!!forcarRecarregar) : [];
+  const investimentos = (typeof listarInvestimentosNoAmbienteAtual_ === 'function')
+    ? listarInvestimentosNoAmbienteAtual_(!!forcarRecarregar)
+    : [];
   const pagamentos = listarPagamentos(!!forcarRecarregar);
   const estoque = (typeof listarEstoque === 'function') ? listarEstoque(!!forcarRecarregar) : [];
   const producoes = (typeof listarProducao === 'function') ? listarProducao(!!forcarRecarregar) : [];
@@ -2829,6 +2880,8 @@ function obterComposicaoCardDashboardFinanceiro(referenciaYm, cardKey, forcarRec
   despesas.forEach(i => { despesasPorId[String(i.ID || '').trim()] = i; });
   const vendasPorId = {};
   vendas.forEach(i => { vendasPorId[String(i.ID || '').trim()] = i; });
+  const investimentosPorId = {};
+  investimentos.forEach(i => { investimentosPorId[String(i.ID || '').trim()] = i; });
   const estoquePorId = {};
   estoque.forEach(i => { estoquePorId[String(i.ID || '').trim()] = i; });
   const producoesPorId = {};
@@ -2881,6 +2934,20 @@ function obterComposicaoCardDashboardFinanceiro(referenciaYm, cardKey, forcarRec
       };
     }
 
+    if (tipo === ORIGEM_TIPO_INVESTIMENTO) {
+      const item = investimentosPorId[id];
+      if (!item) return null;
+      return {
+        origem_tipo: tipo,
+        origem_id: id,
+        origem_aba: getAbaOrigemDashboardFinanceiro(tipo),
+        titulo: `Investimento: ${String(item.descricao || id).trim()}`,
+        detalhe: `${String(item.investidor || 'SEM_INVESTIDOR').trim()} | ${String(item.tipo_investimento || 'APORTE').trim()}`,
+        pago_por: String(item.recebido_por || '').trim(),
+        fornecedor: ''
+      };
+    }
+
     if (tipo === ORIGEM_TIPO_ESTOQUE) {
       const item = estoquePorId[id];
       if (!item) return null;
@@ -2926,6 +2993,7 @@ function obterComposicaoCardDashboardFinanceiro(referenciaYm, cardKey, forcarRec
     if (tipo === ORIGEM_TIPO_COMPRA) return !!comprasPorId[origemId];
     if (tipo === ORIGEM_TIPO_DESPESA) return !!despesasPorId[origemId];
     if (tipo === ORIGEM_TIPO_VENDA) return !!vendasPorId[origemId];
+    if (tipo === ORIGEM_TIPO_INVESTIMENTO) return !!investimentosPorId[origemId];
     return false;
   });
 
@@ -2965,6 +3033,7 @@ function obterComposicaoCardDashboardFinanceiro(referenciaYm, cardKey, forcarRec
         if (i.origem_tipo === ORIGEM_TIPO_COMPRA) return !!comprasPorId[i.origem_id];
         if (i.origem_tipo === ORIGEM_TIPO_DESPESA) return !!despesasPorId[i.origem_id];
         if (i.origem_tipo === ORIGEM_TIPO_VENDA) return !!vendasPorId[i.origem_id];
+        if (i.origem_tipo === ORIGEM_TIPO_INVESTIMENTO) return !!investimentosPorId[i.origem_id];
         return false;
       });
   })();

@@ -349,7 +349,7 @@
     }
 
     function chaveDestino(destino) {
-      return `VENDA|${String(destino?.origem_id || '').trim()}|${String(destino?.parcela_id || '').trim()}`;
+      return `${String(destino?.origem_tipo || 'VENDA').trim().toUpperCase()}|${String(destino?.origem_id || '').trim()}|${String(destino?.parcela_id || '').trim()}`;
     }
 
     function montarOptionsDestino(item) {
@@ -359,7 +359,7 @@
         const sb = sugeridas.has(chaveDestino(b)) ? 0 : 1;
         return sa - sb || String(a.label || '').localeCompare(String(b.label || ''));
       });
-      return '<option value="">Selecione uma venda/parcela</option>' + ordenados.map(destino =>
+      return '<option value="">Selecione uma venda ou investimento</option>' + ordenados.map(destino =>
         `<option value="${escapeHtml(chaveDestino(destino))}">${escapeHtml(destino.label || '')}</option>`
       ).join('');
     }
@@ -429,6 +429,9 @@
           <div><span>Saldo livre</span><strong>${escapeHtml(formatarMoeda(saldo))}</strong></div>
         </div>
         ${montarAlertas(item)}
+        <details class="work-queue-review">
+          <summary><span>Revisar recebimento</span></summary>
+          <div class="work-queue-review__body">
         <details class="despesas-inbox-dados" ${status === 'ERRO' ? 'open' : ''}>
           <summary>Dados do recebimento</summary>
           <div class="despesa-inbox-grid">
@@ -454,9 +457,12 @@
           <div class="despesas-inbox-card-acoes">
             <button type="button" class="btn-secundario" onclick="VendasRecebimentosController.salvarRevisao('${escapeHtml(id)}')">Salvar revisao</button>
             <button type="button" class="btn-secundario" onclick="VendasRecebimentosController.criarVenda('${escapeHtml(id)}')">Criar venda e vincular</button>
+            <button type="button" class="btn-secundario" onclick="VendasRecebimentosController.criarInvestimento('${escapeHtml(id)}')">Criar investimento e vincular</button>
             <button type="button" class="btn-perigo" onclick="VendasRecebimentosController.descartar('${escapeHtml(id)}')" ${alocado > 0.009 ? 'disabled' : ''}>Descartar</button>
           </div>
         ` : '<div class="despesas-inbox-concluido">Recebimento totalmente conciliado.</div>'}
+          </div>
+        </details>
       `;
       return card;
     }
@@ -573,6 +579,7 @@
     function atualizarAposConciliacao() {
       const recarga = carregar(true);
       window.VendasController?.syncFromBackend?.();
+      window.InvestimentosController?.syncFromBackend?.();
       window.DashboardController?.invalidarCacheMeses?.();
       window.AppTabRefresh?.requestSync?.('dashboard', {
         delayMs: 420,
@@ -591,11 +598,11 @@
         const valor = parseNumero(getCard(id)?.querySelector('[data-campo="valor_alocado"]')?.value);
         if (!payload.data_recebimento) throw new Error('Informe a data do recebimento.');
         if (!payload.forma_pagamento) throw new Error('Selecione a forma de recebimento.');
-        if (!destino) throw new Error('Selecione uma venda ou parcela.');
+        if (!destino) throw new Error('Selecione uma venda, investimento ou parcela.');
         if (valor <= 0) throw new Error('Informe um valor valido para o vinculo.');
         payload = {
           ...payload,
-          origem_tipo: 'VENDA',
+          origem_tipo: destino.origem_tipo,
           origem_id: destino.origem_id,
           parcela_id: destino.parcela_id,
           valor_alocado: valor,
@@ -660,6 +667,24 @@
       }
     }
 
+    function criarInvestimento(id) {
+      if (!podeAlterar('Criacao de investimento bloqueada em modo somente leitura') || busyIds.has(id)) return;
+      try {
+        const item = getItem(id);
+        const payload = lerPayload(id);
+        if (!payload.data_recebimento) throw new Error('Informe a data do recebimento.');
+        if (!payload.forma_pagamento) throw new Error('Selecione a forma de recebimento.');
+        if (!window.InvestimentosController?.criarInvestimentoParaComprovanteRecebimento) {
+          throw new Error('Formulario de investimento indisponivel.');
+        }
+        InvestimentosController.criarInvestimentoParaComprovanteRecebimento(item, payload);
+      } catch (error) {
+        const detalhes = getCard(id)?.querySelector('.despesas-inbox-dados');
+        if (detalhes) detalhes.open = true;
+        mostrarToast(error?.message || 'Revise os dados antes de criar o investimento', 'erro');
+      }
+    }
+
     function desfazer(id, pagamentoId) {
       if (!podeAlterar('Remocao bloqueada em modo somente leitura') || busyIds.has(id)) return;
       if (!confirm('Desfazer este vinculo de recebimento?')) return;
@@ -709,6 +734,7 @@
       vincular,
       salvarRevisao,
       criarVenda,
+      criarInvestimento,
       desfazer,
       descartar
     };

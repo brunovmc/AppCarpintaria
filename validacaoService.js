@@ -12,6 +12,8 @@
  * G - DESPESAS
  * H - FORMA_PAGAMENTO
  * I - PAGO_POR
+ * J - INVESTIDOR
+ * K - TIPO_INVESTIMENTO
  * =========================
  */
 
@@ -82,7 +84,9 @@ function recarregarCacheValidacoes() {
     fornecedores: Array.isArray(dados?.fornecedores) ? dados.fornecedores.length : 0,
     categorias_despesas: Array.isArray(dados?.categoriasDespesas) ? dados.categoriasDespesas.length : 0,
     formas_pagamento: Array.isArray(dados?.formasPagamento) ? dados.formasPagamento.length : 0,
-    pagos_por: Array.isArray(dados?.pagosPor) ? dados.pagosPor.length : 0
+    pagos_por: Array.isArray(dados?.pagosPor) ? dados.pagosPor.length : 0,
+    investidores: Array.isArray(dados?.investidores) ? dados.investidores.length : 0,
+    tipos_investimento: Array.isArray(dados?.tiposInvestimento) ? dados.tiposInvestimento.length : 0
   };
 }
 
@@ -285,6 +289,8 @@ function obterValidacoes(forcarRecarregar, ambiente) {
       fornecedores: [],
       formasPagamento: [],
       pagosPor: [],
+      investidores: [],
+      tiposInvestimento: [],
       valorKwhPorFornecedor: {},
       categoriasPorTipo,
       vendavelPorTipoCategoria,
@@ -304,6 +310,8 @@ function obterValidacoes(forcarRecarregar, ambiente) {
       fornecedores: [],
       formasPagamento: [],
       pagosPor: [],
+      investidores: [],
+      tiposInvestimento: [],
       valorKwhPorFornecedor: {},
       categoriasPorTipo,
       vendavelPorTipoCategoria,
@@ -325,6 +333,8 @@ function obterValidacoes(forcarRecarregar, ambiente) {
   const idxDespesas = indiceColunaValidacao(headers, 'DESPESAS', 5);
   const idxFormaPagamento = indiceColunaValidacao(headers, 'FORMA_PAGAMENTO', headers.length > 6 ? 6 : 5);
   const idxPagoPor = indiceColunaValidacao(headers, 'PAGO_POR', 7);
+  const idxInvestidor = indiceColunaValidacao(headers, 'INVESTIDOR', -1);
+  const idxTipoInvestimento = indiceColunaValidacao(headers, 'TIPO_INVESTIMENTO', -1);
 
   const tipos = new Set();
   const unidades = new Set();
@@ -333,6 +343,8 @@ function obterValidacoes(forcarRecarregar, ambiente) {
   const fornecedores = new Set();
   const formasPagamento = new Set();
   const pagosPor = new Set();
+  const investidores = new Set();
+  const tiposInvestimento = new Set();
   const valorKwhPorFornecedor = {};
   const coresPorTipo = {};
 
@@ -346,6 +358,8 @@ function obterValidacoes(forcarRecarregar, ambiente) {
     const categoriaDespesa = linha[idxDespesas];
     const formaPagamento = linha[idxFormaPagamento];
     const pagoPor = linha[idxPagoPor];
+    const investidor = idxInvestidor >= 0 ? linha[idxInvestidor] : '';
+    const tipoInvestimento = idxTipoInvestimento >= 0 ? linha[idxTipoInvestimento] : '';
 
     if (tipo && tipo.toString().trim() !== '') {
       tipos.add(tipo);
@@ -387,6 +401,14 @@ function obterValidacoes(forcarRecarregar, ambiente) {
     if (pagoPor && pagoPor.toString().trim() !== '') {
       pagosPor.add(pagoPor);
     }
+
+    if (investidor && investidor.toString().trim() !== '') {
+      investidores.add(investidor);
+    }
+
+    if (tipoInvestimento && tipoInvestimento.toString().trim() !== '') {
+      tiposInvestimento.add(tipoInvestimento);
+    }
   });
 
   Object.keys(categoriasPorTipo).forEach(tipo => {
@@ -406,6 +428,8 @@ function obterValidacoes(forcarRecarregar, ambiente) {
     fornecedores: [...fornecedores],
     formasPagamento: [...formasPagamento],
     pagosPor: [...pagosPor],
+    investidores: [...investidores],
+    tiposInvestimento: [...tiposInvestimento],
     valorKwhPorFornecedor,
     categoriasPorTipo,
     vendavelPorTipoCategoria,

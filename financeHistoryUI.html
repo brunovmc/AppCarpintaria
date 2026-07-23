@@ -195,6 +195,7 @@
       const controllers = {
         COMPRA: window.ComprasController,
         VENDA: window.VendasController,
+        INVESTIMENTO: window.InvestimentosController,
         DESPESA_GERAL: window.DespesasController
       };
       const controller = controllers[type];
@@ -223,7 +224,7 @@
       const originType = String(button?.dataset?.financeOriginType || '').trim().toUpperCase();
       const originId = String(button?.dataset?.financeOriginId || '').trim();
       if (!paymentId || !originType || !originId) return;
-      const isReceipt = originType === 'VENDA';
+      const isReceipt = originType === 'VENDA' || originType === 'INVESTIMENTO';
       if (window.AppDomainUtils?.ensureWritable && !window.AppDomainUtils.ensureWritable(`Remocao de ${isReceipt ? 'recebimento' : 'pagamento'}`)) return;
       if (!window.confirm(`Remover este ${isReceipt ? 'recebimento' : 'pagamento'}? Os saldos e as parcelas serao recalculados.`)) return;
 

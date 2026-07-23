@@ -990,7 +990,7 @@
 
     function montarCardProducao(i) {
       const div = document.createElement('div');
-      div.className = 'card card-ficha';
+      div.className = 'card card-ficha record-card record-card--producao';
       div.dataset.id = i.producao_id;
       if (i?._localMutationId) div.dataset.localMutationId = String(i._localMutationId || '').trim();
       const localState = window.AppEntityMutations?.getUiState
@@ -1019,11 +1019,6 @@
       const qtdPlanejadaNum = Number(i.qtd_planejada || 0);
       const qtdProduzidaNum = Number(i.qtd_produzida_acumulada || 0);
       const qtdRestanteNum = Math.max(0, Number(i.qtd_restante ?? Math.max(0, qtdPlanejadaNum - qtdProduzidaNum)));
-      const podeAtualizarEstoque = !isProducaoConcluidaComEstoque(i) && qtdRestanteNum > 0;
-      const totalSaidasPrevistas = Number(i.saidas_previstas_total || 0);
-      const tiposSaida = Number(
-        i.saidas_previstas_tipos || (Array.isArray(i.saidas_previstas) ? i.saidas_previstas.length : 0)
-      );
       const etapasOrdenadas = Array.isArray(i.etapas)
         ? [...i.etapas].sort((a, b) => {
           const ordemA = Number(a?.ordem || 0);
@@ -1041,30 +1036,49 @@
       const etapaAtual = proximaEtapaPendente
         ? (String(proximaEtapaPendente.nome_etapa || '').trim() || '-')
         : (totalEtapas > 0 ? 'Concluida' : '-');
-      const resumoSaidas = totalSaidasPrevistas > 0
-        ? `${formatQuantidadeResumo(totalSaidasPrevistas)} saidas previstas${tiposSaida > 1 ? ` (${tiposSaida} tipos)` : ''}`
-        : 'Sem saidas previstas';
       const nomeLabel = escapeHtml(nome);
       const statusLabel = escapeHtml(i.status || '');
       const qtdPlanejada = escapeHtml(i.qtd_planejada || 0);
       const qtdProduzida = escapeHtml(formatQuantidadeResumo(qtdProduzidaNum));
       const qtdRestante = escapeHtml(formatQuantidadeResumo(qtdRestanteNum));
       const unidadeLabel = escapeHtml(unidade);
-      const resumoSaidasLabel = escapeHtml(resumoSaidas);
-      const etapasConcluidasLabel = escapeHtml(`Etapas concluidas: ${etapasConcluidas}/${totalEtapas}`);
-      const etapaAtualLabel = escapeHtml(`Etapa atual: ${etapaAtual}`);
+      const progressoPercentual = qtdPlanejadaNum > 0
+        ? Math.min(100, Math.max(0, (qtdProduzidaNum / qtdPlanejadaNum) * 100))
+        : 0;
+      const statusNormalizado = String(status || '').trim().toUpperCase();
+      const statusTone = statusNormalizado.includes('CONCL')
+        ? 'success'
+        : statusNormalizado.includes('ATRAS') || statusNormalizado.includes('CANCEL')
+          ? 'danger'
+          : statusNormalizado.includes('ANDAMENTO') || statusNormalizado.includes('PRODU')
+            ? 'warning'
+            : 'neutral';
+      const dataHtml = window.AppListOrderUI?.cardDateHtml('producao', i, window.ProducaoStore?.getSort?.()) || '';
 
       div.innerHTML = `
-        <div class="card-ficha-topo">${nomeLabel}</div>
-        <div class="card-ficha-corpo">
-          <div class="card-resumo">
-            ${statusLabel}<br>
-            ${qtdPlanejada} ${unidadeLabel}<br>
-            Produzido: ${qtdProduzida} | Restante: ${qtdRestante}<br>
-            ${etapasConcluidasLabel}<br>
-            ${etapaAtualLabel}<br>
-            ${resumoSaidasLabel}
-            ${window.AppListOrderUI?.cardDateHtml('producao', i, window.ProducaoStore?.getSort?.()) || ''}
+        <div class="card-ficha-topo record-card__header">
+          <div class="record-card__heading">
+            <span class="record-card__eyebrow">Ordem de producao</span>
+            <h3 class="record-card__title">${nomeLabel}</h3>
+            <span class="record-card__subtitle">${escapeHtml(etapaAtual === '-' ? 'Sem proxima etapa' : `Proxima etapa: ${etapaAtual}`)}</span>
+          </div>
+          <div class="record-card__value">
+            <span class="record-card__value-label">Produzido</span>
+            <strong>${qtdProduzida} / ${qtdPlanejada} ${unidadeLabel}</strong>
+          </div>
+        </div>
+        <div class="card-ficha-corpo record-card__body">
+          <div class="card-resumo record-card__summary">
+            <span class="record-card__status record-card__status--${statusTone}">${statusLabel || 'Sem status'}</span>
+            <dl class="record-card__meta">
+              <div class="record-card__meta-item"><dt class="record-card__meta-label">Restante</dt><dd class="record-card__meta-value">${qtdRestante} ${unidadeLabel}</dd></div>
+              <div class="record-card__meta-item"><dt class="record-card__meta-label">Etapas</dt><dd class="record-card__meta-value">${escapeHtml(`${etapasConcluidas}/${totalEtapas}`)}</dd></div>
+              <div class="record-card__meta-item"><dt class="record-card__meta-label">Custo previsto</dt><dd class="record-card__meta-value">${escapeHtml(custoPrevisto)}</dd></div>
+            </dl>
+            <div class="record-card__progress" role="progressbar" aria-label="Progresso da ordem" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(progressoPercentual)}">
+              <span style="--record-progress: ${progressoPercentual.toFixed(2)}%"></span>
+            </div>
+            <div class="record-card__date">${dataHtml}</div>
           </div>
           ${localState.label ? `
             <div class="optimistic-local-state-row">
@@ -1073,7 +1087,9 @@
             </div>
           ` : ''}
           ${localState.message ? `<div class="optimistic-local-message">${escapeHtml(localState.message)}</div>` : ''}
-          <button class="ver-mais">Ver mais</button>
+          <div class="record-card__actions">
+            <button class="ver-mais record-card__details-action">Abrir producao</button>
+          </div>
         </div>
       `;
 
@@ -1120,54 +1136,119 @@
       const labelEstoqueSafe = escapeHtml(labelEstoque);
 
       return `
-        <p><b>Produto:</b> ${produtoLabel}</p>
-        <p><b>Modelo:</b> ${receitaLabel}</p>
-        <p><b>Inicio:</b> ${inicioLabel}</p>
-        <p><b>Previsto:</b> ${previstoLabel}</p>
-        <p><b>Produzido:</b> ${escapeHtml(formatQuantidadeResumo(qtdProduzidaNum))} | <b>Restante:</b> ${escapeHtml(formatQuantidadeResumo(qtdRestanteNum))}</p>
-        <p><b>Custo previsto:</b> R$ ${custoPrevisto}</p>
-        ${localState.label ? `
-          <div class="optimistic-local-state-row">
-            <span class="optimistic-local-state optimistic-local-state-${escapeAttr(localState.status || 'pending')}">${escapeHtml(localState.label)}</span>
-            ${localState.canRetry ? `<button class="btn-retry-local" onclick='ProducaoController.retryProducaoMutation(${idJs})'>Tentar novamente</button>` : ''}
-          </div>
-        ` : ''}
-        ${localState.message ? `<div class="optimistic-local-message">${escapeHtml(localState.message)}</div>` : ''}
-        <p><b>Observacao:</b> ${observacaoLabel}</p>
-        ${estoqueAtualizado ? `<p><b>Estoque atualizado:</b> ${dataEstoqueAtualizadoLabel}</p>` : ''}
+        <article class="detail-workspace-content detail-workspace-content-producao">
+          <nav class="detail-workspace-nav" aria-label="Secoes da ordem de producao">
+            <a href="#producaoDetalhesResumo">Resumo</a>
+            <a href="#producaoDetalhesMateriais">Materiais</a>
+            <a href="#producaoDetalhesReservas">Reservas</a>
+            <a href="#producaoDetalhesSaidas">Saidas</a>
+            <a href="#producaoDetalhesChecklist">Checklist</a>
+          </nav>
 
-        <div class="bloco">
-          <p><b>Materiais reservados</b></p>
-          ${i.materiaisPrevistos ? renderMateriais(i.materiaisPrevistos) : '<p>Carregando materiais...</p>'}
-        </div>
+          <section
+            id="producaoDetalhesResumo"
+            class="detail-workspace-section detail-workspace-summary"
+            aria-labelledby="producaoDetalhesResumoTitulo"
+          >
+            <h4 id="producaoDetalhesResumoTitulo" class="detail-workspace-section-title">Resumo</h4>
+            <dl class="detail-workspace-summary-grid">
+              <div class="detail-workspace-summary-item">
+                <dt>Produto</dt>
+                <dd>${produtoLabel}</dd>
+              </div>
+              <div class="detail-workspace-summary-item">
+                <dt>Modelo</dt>
+                <dd>${receitaLabel}</dd>
+              </div>
+              <div class="detail-workspace-summary-item">
+                <dt>Inicio</dt>
+                <dd>${inicioLabel}</dd>
+              </div>
+              <div class="detail-workspace-summary-item">
+                <dt>Previsto</dt>
+                <dd>${previstoLabel}</dd>
+              </div>
+              <div class="detail-workspace-summary-item">
+                <dt>Produzido</dt>
+                <dd>${escapeHtml(formatQuantidadeResumo(qtdProduzidaNum))}</dd>
+              </div>
+              <div class="detail-workspace-summary-item">
+                <dt>Restante</dt>
+                <dd>${escapeHtml(formatQuantidadeResumo(qtdRestanteNum))}</dd>
+              </div>
+              <div class="detail-workspace-summary-item">
+                <dt>Custo previsto</dt>
+                <dd>R$ ${custoPrevisto}</dd>
+              </div>
+              ${estoqueAtualizado ? `
+                <div class="detail-workspace-summary-item">
+                  <dt>Estoque atualizado</dt>
+                  <dd>${dataEstoqueAtualizadoLabel}</dd>
+                </div>
+              ` : ''}
+              <div class="detail-workspace-summary-item detail-workspace-summary-item-wide">
+                <dt>Observacao</dt>
+                <dd>${observacaoLabel}</dd>
+              </div>
+            </dl>
+            ${localState.label ? `
+              <div class="optimistic-local-state-row">
+                <span class="optimistic-local-state optimistic-local-state-${escapeAttr(localState.status || 'pending')}">${escapeHtml(localState.label)}</span>
+                ${localState.canRetry ? `<button class="btn-retry-local" onclick='ProducaoController.retryProducaoMutation(${idJs})'>Tentar novamente</button>` : ''}
+              </div>
+            ` : ''}
+            ${localState.message ? `<div class="optimistic-local-message">${escapeHtml(localState.message)}</div>` : ''}
+          </section>
 
-        <div class="bloco">
-          <p><b>Entradas e reservas</b></p>
-          ${i.vinculosMateriais ? renderVinculos(i.vinculosMateriais, i.producao_id) : '<p>Carregando vinculos...</p>'}
-        </div>
+          <section
+            id="producaoDetalhesMateriais"
+            class="bloco detail-workspace-section"
+            aria-labelledby="producaoDetalhesMateriaisTitulo"
+          >
+            <h4 id="producaoDetalhesMateriaisTitulo" class="detail-workspace-section-title">Materiais reservados</h4>
+            ${i.materiaisPrevistos ? renderMateriais(i.materiaisPrevistos) : '<p>Carregando materiais...</p>'}
+          </section>
 
-        <div class="bloco">
-          <p><b>Saidas geradas</b></p>
-          ${saidasHtml}
-        </div>
+          <section
+            id="producaoDetalhesReservas"
+            class="bloco detail-workspace-section"
+            aria-labelledby="producaoDetalhesReservasTitulo"
+          >
+            <h4 id="producaoDetalhesReservasTitulo" class="detail-workspace-section-title">Entradas e reservas</h4>
+            ${i.vinculosMateriais ? renderVinculos(i.vinculosMateriais, i.producao_id) : '<p>Carregando vinculos...</p>'}
+          </section>
 
-        <div class="bloco">
-          <p><b>Checklist</b></p>
-          ${renderChecklist(i.etapas || [], i.producao_id)}
-          <div class="linha-etapa-add">
-            <input id="novaEtapa_${escapeAttr(i.producao_id)}" placeholder="Nova etapa">
-            <button class="btn-add-etapa" data-producao-id="${escapeAttr(i.producao_id)}">Adicionar etapa</button>
-          </div>
-        </div>
+          <section
+            id="producaoDetalhesSaidas"
+            class="bloco detail-workspace-section"
+            aria-labelledby="producaoDetalhesSaidasTitulo"
+          >
+            <h4 id="producaoDetalhesSaidasTitulo" class="detail-workspace-section-title">Saidas geradas</h4>
+            ${saidasHtml}
+          </section>
 
-        <div class="acoes">
-          <button
-            ${(podeAtualizarEstoque && !bloquearAcoes) ? '' : 'disabled'}
-            onclick='ProducaoController.abrirAtualizarEstoque(${idJs})'
-          >${labelEstoqueSafe}</button>
-          <button onclick='ProducaoController.editar(${idJs})' ${bloquearAcoes ? 'disabled' : ''}>Editar</button>
-          <button onclick='ProducaoController.excluir(${idJs})' ${bloquearAcoes ? 'disabled' : ''}>Excluir</button>
-        </div>
+          <section
+            id="producaoDetalhesChecklist"
+            class="bloco detail-workspace-section"
+            aria-labelledby="producaoDetalhesChecklistTitulo"
+          >
+            <h4 id="producaoDetalhesChecklistTitulo" class="detail-workspace-section-title">Checklist</h4>
+            ${renderChecklist(i.etapas || [], i.producao_id)}
+            <div class="linha-etapa-add">
+              <input id="novaEtapa_${escapeAttr(i.producao_id)}" placeholder="Nova etapa">
+              <button class="btn-add-etapa" data-producao-id="${escapeAttr(i.producao_id)}">Adicionar etapa</button>
+            </div>
+          </section>
+
+          <footer class="acoes detail-workspace-actions" aria-label="Acoes da ordem de producao">
+            <button
+              ${(podeAtualizarEstoque && !bloquearAcoes) ? '' : 'disabled'}
+              onclick='ProducaoController.abrirAtualizarEstoque(${idJs})'
+            >${labelEstoqueSafe}</button>
+            <button onclick='ProducaoController.editar(${idJs})' ${bloquearAcoes ? 'disabled' : ''}>Editar</button>
+            <button onclick='ProducaoController.excluir(${idJs})' ${bloquearAcoes ? 'disabled' : ''}>Excluir</button>
+          </footer>
+        </article>
       `;
     }
 

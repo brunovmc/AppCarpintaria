@@ -1,0 +1,369 @@
+<script>
+  window.InvestimentosController = (() => {
+    let iniciado = false;
+    let editandoId = '';
+    let recebimentoId = '';
+    let salvando = false;
+    let loadSeq = 0;
+    let listenerRegistrado = false;
+    let contextoComprovante = null;
+
+    const parse = value => {
+      const number = Number(String(value ?? '').replace(',', '.'));
+      return Number.isFinite(number) ? number : 0;
+    };
+    const round2 = value => Math.round(parse(value) * 100) / 100;
+    const ambiente = () => {
+      const ctx = window.AppDbEnv?.getContext?.() || {};
+      return String(ctx.effective_env || ctx.selected_env || 'prod').toLowerCase() === 'dev' ? 'dev' : 'prod';
+    };
+    const podeAlterar = mensagem => !window.AppDomainUtils?.ensureWritable || window.AppDomainUtils.ensureWritable(mensagem);
+    const limparMeta = item => window.AppEntityMutations?.limparMeta?.(item) || { ...(item || {}) };
+
+    function statusFinanceiro(total, recebido) {
+      const pendente = round2(Math.max(0, total - recebido));
+      return pendente <= 0.009 ? 'PAGO' : (recebido > 0.009 ? 'PARCIAL' : 'PENDENTE');
+    }
+
+    function montarOtimista(dados, base, id) {
+      const recebido = round2(base?.total_pago || 0);
+      const total = round2(dados.valor_total_investimento);
+      return {
+        ...(base || {}),
+        ...dados,
+        ID: id,
+        valor_total_investimento: total,
+        total_previsto: total,
+        total_pago: recebido,
+        total_pendente: round2(Math.max(0, total - recebido)),
+        status_pagamento: statusFinanceiro(total, recebido),
+        parcelas_detalhe: base?.parcelas_detalhe || [],
+        criado_em: base?.criado_em || new Date().toISOString().slice(0, 16).replace('T', ' '),
+        ativo: true
+      };
+    }
+
+    function aplicarRecebimento(item, dados) {
+      const total = round2(item?.valor_total_investimento || item?.total_previsto);
+      const recebido = round2((item?.total_pago || 0) + dados.valor_pago);
+      return {
+        ...item,
+        total_pago: recebido,
+        total_pendente: round2(Math.max(0, total - recebido)),
+        status_pagamento: statusFinanceiro(total, recebido),
+        data_ultimo_pagamento: dados.data_pagamento,
+        forma_ultimo_pagamento: dados.forma_pagamento,
+        quantidade_pagamentos: Number(item?.quantidade_pagamentos || 0) + 1
+      };
+    }
+
+    function mutacoesAtivas() {
+      return (window.AppOptimistic?.list?.() || []).filter(entry =>
+        String(entry.scope || '') === 'investimento' &&
+        String(entry.meta?.domain || '') === 'investimento'
+      );
+    }
+    function reconciliar(lista) {
+      return window.AppEntityMutations?.mergeFetchedList
+        ? window.AppEntityMutations.mergeFetchedList(lista, mutacoesAtivas(), { domain: 'investimento', idKey: 'ID' })
+        : lista;
+    }
+    function render(onDone) {
+      if (typeof window.aplicarBuscaInvestimentos === 'function') return window.aplicarBuscaInvestimentos(onDone);
+      InvestimentosUI.renderLista(InvestimentosStore.get(), onDone);
+    }
+    function persistir(lista, onDone) {
+      const alterou = InvestimentosStore.set(lista || []) !== false;
+      if (!alterou && InvestimentosStore.isLoaded()) {
+        onDone?.();
+        return false;
+      }
+      window.dispatchEvent?.(new CustomEvent('app:store:loaded', { detail: { tab: 'investimentos' } }));
+      if (window.AppTabRefresh?.shouldRender?.('investimentos') === false) {
+        window.AppTabRefresh?.markRenderPending?.('investimentos');
+        onDone?.();
+        return true;
+      }
+      render(() => {
+        window.AppTabRefresh?.notifyRendered?.('investimentos', { changed: true });
+        InvestimentosUI.atualizarDetalhes?.();
+        onDone?.();
+      });
+      return true;
+    }
+
+    function resolverSucesso(detail, helpers = {}) {
+      const result = detail?.result || {};
+      const action = String(detail?.entry?.meta?.action || '');
+      if (action === 'receive') return result.investimentoAtualizado || helpers.limparMeta?.(detail.entry.meta.optimistic_item);
+      if (action === 'create') return result?.ID ? result : helpers.limparMeta?.(detail.entry.meta.optimistic_item);
+      if (action === 'update') return result?.ID ? result : helpers.limparMeta?.(detail.entry.meta.optimistic_item);
+      return helpers.limparMeta?.(detail.entry.meta.optimistic_item);
+    }
+
+    function tratarMutacao(detail) {
+      const entry = detail?.entry;
+      if (!entry || String(entry.scope || '') !== 'investimento' || String(entry.meta?.domain || '') !== 'investimento') return;
+      if (!window.AppEntityMutations?.applyEntryToList) return;
+      const lista = window.AppEntityMutations.applyEntryToList(InvestimentosStore.get(), detail, {
+        domain: 'investimento', idKey: 'ID', resolveSuccessItem: resolverSucesso
+      });
+      persistir(lista);
+      if (String(detail.type || '').toLowerCase() === 'success') {
+        window.DashboardController?.invalidarCacheMeses?.();
+        window.AppTabRefresh?.markDirty?.('dashboard');
+        setTimeout(() => syncFromBackend(null, '', { force: true }), 500);
+      } else if (String(detail.type || '').toLowerCase() === 'error') {
+        mostrarToast(`${detail.errorMessage || 'Falha ao sincronizar investimento'}. Use "Tentar novamente".`, 'erro');
+      }
+    }
+
+    function registrarListener() {
+      if (listenerRegistrado) return;
+      window.addEventListener('app:optimistic-mutation', event => tratarMutacao(event.detail || {}));
+      listenerRegistrado = true;
+    }
+
+    function carregarValidacoes() {
+      const loader = window.AppValidacoes?.get
+        ? window.AppValidacoes.get({ maxAgeMs: 1000 * 60 * 60 * 12 })
+        : Promise.resolve({ data: window.AppValidacoesCache || {} });
+
+      Promise.resolve(loader)
+        .then(({ data }) => {
+          InvestimentosUI.setValidacoes(data || {});
+        })
+        .catch(() => {
+          InvestimentosUI.setValidacoes({});
+          mostrarToast('Nao foi possivel carregar as opcoes do formulario de investimentos.', 'erro');
+        });
+    }
+
+    function hidratarCache() {
+      const cache = window.AppTabCache?.ler?.('investimentos');
+      if (!Array.isArray(cache)) return false;
+      persistir(reconciliar(cache));
+      return true;
+    }
+
+    function carregar(forcar = false, onDone, ambienteSolicitado = '', options = {}) {
+      const seq = ++loadSeq;
+      const dirty = window.AppTabRefresh?.getDirtyGeneration?.('investimentos') || 0;
+      const exibindoCache = !forcar && options.hydrate !== false && hidratarCache();
+      window.AppRequest.runner()
+        .withSuccessHandler(lista => {
+          if (seq !== loadSeq) return onDone?.('superseded');
+          window.AppTabRefresh?.reportResult?.('investimentos', true, dirty);
+          persistir(reconciliar(lista), () => onDone?.(true));
+        })
+        .withFailureHandler(error => {
+          if (seq !== loadSeq) return onDone?.('superseded');
+          window.AppTabRefresh?.reportResult?.('investimentos', false, dirty);
+          if (!exibindoCache) mostrarToast(error?.message || 'Erro ao carregar investimentos', 'erro');
+          onDone?.(false);
+        })
+        .listarInvestimentos(!!forcar, ambienteSolicitado || ambiente());
+    }
+
+    function init() {
+      if (iniciado) return;
+      iniciado = true;
+      registrarListener();
+      window.AppOptimistic?.process?.();
+      window.AppListOrderUI?.mount?.({
+        containerId: 'ordenacaoInvestimentos', domain: 'investimentos', adapter: InvestimentosStore, onChange: render
+      });
+      carregarValidacoes();
+      carregar();
+    }
+
+    function lerFormulario() {
+      const value = id => document.getElementById(id)?.value || '';
+      return {
+        descricao: String(value('investimentoDescricao')).trim(),
+        tipo_investimento: String(value('investimentoTipo')).trim(),
+        investidor: String(value('investimentoInvestidor')).trim(),
+        referencia_investimento: String(value('investimentoReferencia')).trim(),
+        valor_total_investimento: round2(value('investimentoValorTotal')),
+        recebido_por: String(value('investimentoRecebidoPor')).trim(),
+        data_investimento: String(value('investimentoData')).trim(),
+        forma_pagamento: String(value('investimentoFormaPagamento')).trim(),
+        parcelas: Math.max(1, Math.floor(parse(value('investimentoParcelas')) || 1)),
+        parcelas_detalhe: InvestimentosUI.lerParcelas?.() || [],
+        observacao: String(value('investimentoObservacao')).trim()
+      };
+    }
+
+    function validar(dados) {
+      if (!dados.descricao) throw new Error('Informe a descricao do investimento.');
+      if (!dados.tipo_investimento) throw new Error('Informe o tipo de investimento.');
+      if (!dados.investidor) throw new Error('Informe o investidor.');
+      if (dados.valor_total_investimento <= 0) throw new Error('Informe um valor maior que zero.');
+      if (!dados.data_investimento) throw new Error('Informe a data do investimento.');
+      if (window.AppDomainUtils?.formaExigeParcelas?.(dados.forma_pagamento)) {
+        if (dados.parcelas_detalhe.length !== dados.parcelas) throw new Error('Revise as parcelas detalhadas.');
+        if (dados.parcelas_detalhe.some(p => !p.data || Number(p.valor || 0) <= 0)) throw new Error('Preencha data e valor de todas as parcelas.');
+      } else {
+        dados.parcelas = 1;
+        dados.parcelas_detalhe = [];
+      }
+    }
+
+    function salvar() {
+      if (!podeAlterar('Salvamento bloqueado em modo somente leitura') || salvando) return;
+      let dados;
+      try { dados = lerFormulario(); validar(dados); } catch (error) { mostrarToast(error.message, 'erro'); return; }
+      if (contextoComprovante && !editandoId) return salvarDoComprovante(dados);
+      const editando = !!editandoId;
+      const alvoId = editandoId;
+      const anterior = editando ? InvestimentosStore.getById(alvoId) : null;
+      const idOtimista = editando ? alvoId : (window.AppEntityMutations?.tempId?.('INV_TMP') || `INV_TMP_${Date.now()}`);
+      const otimista = montarOtimista(dados, anterior, idOtimista);
+      salvando = true;
+      try {
+        window.AppOptimistic.enqueue({
+          scope: 'investimento',
+          handler: editando ? 'investimento.update' : 'investimento.create',
+          entityKey: `investimento:${idOtimista}`,
+          payload: dados,
+          meta: {
+            domain: 'investimento', action: editando ? 'update' : 'create', source: 'investimentos',
+            target_id: editando ? alvoId : '', temp_id: editando ? '' : idOtimista,
+            before_item: anterior ? limparMeta(anterior) : null,
+            optimistic_item: limparMeta(otimista)
+          }
+        });
+        editandoId = '';
+        InvestimentosUI.fecharFormulario();
+        mostrarToast(editando ? 'Alteracao aplicada localmente. Sincronizando...' : 'Investimento criado localmente. Sincronizando...');
+      } catch (error) {
+        mostrarToast(error?.message || 'Erro ao enfileirar investimento', 'erro');
+      } finally { salvando = false; }
+    }
+
+    function editar(id) {
+      if (!podeAlterar('Edicao bloqueada em modo somente leitura')) return;
+      const item = InvestimentosStore.getById(id);
+      if (!item) return mostrarToast('Investimento nao encontrado', 'erro');
+      editandoId = String(id); contextoComprovante = null;
+      InvestimentosUI.fecharDetalhes();
+      InvestimentosUI.preencherFormulario(item);
+      InvestimentosUI.mostrarFormulario();
+    }
+
+    function excluir(id) {
+      if (!podeAlterar('Exclusao bloqueada em modo somente leitura')) return;
+      const item = InvestimentosStore.getById(id);
+      if (!item || !confirm('Deseja remover este investimento?')) return;
+      try {
+        window.AppOptimistic.enqueue({
+          scope: 'investimento', handler: 'investimento.delete', entityKey: `investimento:${id}`,
+          payload: { id: String(id) },
+          meta: { domain: 'investimento', action: 'delete', source: 'investimentos', target_id: String(id), before_item: limparMeta(item), optimistic_item: limparMeta(item) }
+        });
+        InvestimentosUI.fecharDetalhes();
+        mostrarToast('Exclusao aplicada localmente. Sincronizando...');
+      } catch (error) { mostrarToast(error?.message || 'Erro ao excluir investimento', 'erro'); }
+    }
+
+    function registrarRecebimento(id) {
+      if (!podeAlterar('Recebimento bloqueado em modo somente leitura')) return;
+      const item = InvestimentosStore.getById(id);
+      if (!item || Number(item.total_pendente || 0) <= 0.009) return;
+      recebimentoId = String(id);
+      InvestimentosUI.fecharDetalhes();
+      InvestimentosUI.abrirRecebimento(item);
+    }
+
+    function confirmarRecebimento() {
+      if (!recebimentoId || salvando) return;
+      const dados = InvestimentosUI.lerRecebimento();
+      if (!dados.data_pagamento || !dados.forma_pagamento || dados.valor_pago <= 0) {
+        return mostrarToast('Informe data, forma e valor do recebimento.', 'erro');
+      }
+      const anterior = InvestimentosStore.getById(recebimentoId);
+      const otimista = aplicarRecebimento(anterior, dados);
+      const id = recebimentoId;
+      salvando = true;
+      try {
+        window.AppOptimistic.enqueue({
+          scope: 'investimento', handler: 'investimento.receive', entityKey: `investimento:${id}`,
+          payload: dados,
+          meta: { domain: 'investimento', action: 'receive', source: 'investimentos', target_id: id, before_item: limparMeta(anterior), optimistic_item: limparMeta(otimista) }
+        });
+        recebimentoId = '';
+        InvestimentosUI.fecharRecebimento();
+        mostrarToast('Recebimento aplicado localmente. Sincronizando...');
+      } catch (error) { mostrarToast(error?.message || 'Erro ao registrar recebimento', 'erro'); }
+      finally { salvando = false; }
+    }
+    function cancelarRecebimento() { recebimentoId = ''; InvestimentosUI.fecharRecebimento(); }
+    function abrirDetalhes(id) { return InvestimentosUI.abrirDetalhes(id); }
+    function limparEdicao() { editandoId = ''; contextoComprovante = null; }
+    function retry(id) {
+      const mutationId = InvestimentosStore.getById(id)?._localMutationId;
+      if (mutationId) window.AppOptimistic?.retry?.(mutationId);
+    }
+
+    function criarInvestimentoParaComprovanteRecebimento(comprovante, payloadRevisado) {
+      if (!podeAlterar('Criacao de investimento bloqueada em modo somente leitura')) return;
+      init();
+      const item = { ...(comprovante || {}), ...(payloadRevisado || {}) };
+      if (!item.ID) return mostrarToast('Comprovante de recebimento invalido', 'erro');
+      contextoComprovante = {
+        comprovante: item,
+        client_request_id: `RECINV_${String(item.ID).slice(-12)}_${globalThis.crypto?.randomUUID?.() || Date.now()}`.replace(/[^a-zA-Z0-9_-]+/g, '').slice(0, 112)
+      };
+      editandoId = '';
+      if (typeof trocarAba === 'function') trocarAba('investimentos');
+      setTimeout(() => {
+        InvestimentosUI.preencherFormulario({
+          descricao: item.descricao || `Aporte de ${item.pagador_nome || 'socio'}`,
+          tipo_investimento: window.AppValidacoesCache?.tiposInvestimento?.[0] || 'APORTE_SOCIO',
+          investidor: item.pagador_nome || '',
+          referencia_investimento: item.referencia_transacao || '',
+          valor_total_investimento: Number(item.saldo_nao_alocado || item.valor_total || 0),
+          recebido_por: item.recebido_por || '', data_investimento: item.data_recebimento || '',
+          forma_pagamento: item.forma_pagamento || '', parcelas: 1,
+          observacao: item.observacao || ''
+        }, { nova: true, titulo: 'Novo investimento a partir do recebimento' });
+        InvestimentosUI.mostrarFormulario();
+      }, 80);
+    }
+
+    function salvarDoComprovante(dados) {
+      const contexto = contextoComprovante;
+      const comprovante = contexto?.comprovante || {};
+      const saldo = Math.max(0, Number(comprovante.valor_total || 0) - Number(comprovante.valor_alocado || 0));
+      salvando = true;
+      const payload = {
+        ...comprovante,
+        valor_alocado: Math.min(saldo, Number(dados.valor_total_investimento || 0)),
+        client_request_id: contexto.client_request_id,
+        _db_env: ambiente()
+      };
+      window.AppRequest.call('criarInvestimentoEAlocarComprovanteRecebimento', [comprovante.ID, dados, payload], {
+        context: 'investimentos.recebimentos.create', errorMessage: 'Erro ao criar investimento e vincular recebimento'
+      }).then(resultado => {
+        if (!resultado?.ok || !resultado?.investimento?.ID) throw new Error('Investimento nao confirmado pelo servidor.');
+        contextoComprovante = null;
+        InvestimentosUI.fecharFormulario();
+        syncFromBackend();
+        window.VendasRecebimentosController?.carregar?.(true);
+        window.DashboardController?.invalidarCacheMeses?.();
+        mostrarToast('Investimento criado e recebimento vinculado.');
+      }).catch(error => mostrarToast(error?.message || 'Erro ao criar investimento pelo comprovante', 'erro'))
+        .finally(() => { salvando = false; });
+    }
+
+    function syncFromBackend(onDone, ambienteSolicitado = '', options = {}) {
+      carregar(options.force === true, onDone, ambienteSolicitado || ambiente(), { hydrate: false });
+    }
+
+    return {
+      init, isLoaded: () => InvestimentosStore.isLoaded(), salvar, editar, excluir, abrirDetalhes,
+      registrarRecebimento, confirmarRecebimento, cancelarRecebimento,
+      criarInvestimentoParaComprovanteRecebimento, limparEdicao, retry, syncFromBackend
+    };
+  })();
+</script>

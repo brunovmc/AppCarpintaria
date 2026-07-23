@@ -233,6 +233,10 @@ function executarOperacaoOtimistaAutorizada_(nome, args) {
     case 'atualizarVenda': return atualizarVenda(args[0], args[1]);
     case 'deletarVenda': return deletarVenda(args[0]);
     case 'registrarRecebimentoVenda': return registrarRecebimentoVenda(args[0], args[1]);
+    case 'criarInvestimento': return criarInvestimento(args[0]);
+    case 'atualizarInvestimento': return atualizarInvestimento(args[0], args[1]);
+    case 'deletarInvestimento': return deletarInvestimento(args[0]);
+    case 'registrarRecebimentoInvestimento': return registrarRecebimentoInvestimento(args[0], args[1]);
     case 'criarItemEstoque': return criarItemEstoque(args[0]);
     case 'atualizarItemEstoque': return atualizarItemEstoque(args[0], args[1]);
     case 'deletarItemEstoque': return deletarItemEstoque(args[0]);
@@ -758,6 +762,7 @@ function limparCachesAposSyncBancoDados_() {
       if (typeof limparCacheEstoque === 'function') limparCacheEstoque();
       if (typeof limparCacheCompras === 'function') limparCacheCompras();
       if (typeof limparCacheVendas === 'function') limparCacheVendas();
+      if (typeof limparCacheInvestimentos === 'function') limparCacheInvestimentos();
       if (typeof limparCacheProdutos === 'function') limparCacheProdutos();
       if (typeof limparCacheProducao === 'function') limparCacheProducao();
       if (typeof limparCacheDespesasGerais === 'function') limparCacheDespesasGerais();

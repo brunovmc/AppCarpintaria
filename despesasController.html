@@ -759,6 +759,13 @@
       const podePagar = pendente > 0.009 && !bloquearAcoes;
       const statusVisual = obterStatusVisual(d);
       const statusClasse = obterClasseStatus(statusVisual);
+      const statusTone = statusClasse === 'pago'
+        ? 'success'
+        : statusClasse === 'vencido'
+          ? 'danger'
+          : statusClasse === 'parcial'
+            ? 'warning'
+            : 'neutral';
       const estadoClasse = localState.status ? `despesa-local-${localState.status}` : '';
       const estadoDeleteClasse = d?._localDeleted ? 'despesa-local-delete' : '';
       const rotuloExcluir = criacaoLocalComFalha ? 'Descartar' : 'Excluir';
@@ -769,19 +776,43 @@
         despesasSortAdapter.getSort()
       ) || '';
       const podeCarregarHistorico = !!despesaId && !/^DES_TMP/i.test(despesaId);
+      const valorTotal = Math.max(0, pago + pendente);
 
       const card = document.createElement('div');
-      card.className = `card card-ficha despesa-card despesa-card-${statusClasse} ${estadoClasse} ${estadoDeleteClasse}`.trim();
+      card.className = `card card-ficha despesa-card record-card despesa-card-${statusClasse} ${estadoClasse} ${estadoDeleteClasse}`.trim();
       card.dataset.id = String(d?.ID || '').trim();
       if (d?._localMutationId) card.dataset.localMutationId = String(d._localMutationId || '').trim();
       card.innerHTML = `
-        <div class="card-ficha-topo">${escapeHtml(d?.descricao || '-')}</div>
-        <div class="card-ficha-corpo">
-          <div class="despesa-card-header despesa-card-header-compact">
-            <span class="despesa-card-resumo-label">Despesa geral</span>
-            <span class="despesa-status-badge despesa-status-${statusClasse}">${escapeHtml(statusVisual)}</span>
+        <div class="card-ficha-topo record-card__header">
+          <div class="record-card__heading">
+            <span class="record-card__eyebrow">${escapeHtml(d?.categoria || 'Despesa geral')}</span>
+            <h3 class="record-card__title">${escapeHtml(d?.descricao || '-')}</h3>
+            <span class="record-card__subtitle">${escapeHtml(d?.fornecedor || 'Fornecedor nao informado')}</span>
           </div>
-          ${dataHtml}
+          <div class="record-card__value">
+            <span class="record-card__value-label">Valor total</span>
+            <strong>${formatarMoeda(valorTotal)}</strong>
+          </div>
+        </div>
+        <div class="card-ficha-corpo record-card__body">
+          <div class="card-resumo record-card__summary">
+            <span class="record-card__status record-card__status--${statusTone} despesa-status-badge despesa-status-${statusClasse}">${escapeHtml(statusVisual)}</span>
+            <dl class="record-card__meta">
+              <div class="record-card__meta-item">
+                <dt class="record-card__meta-label">Pendente</dt>
+                <dd class="record-card__meta-value">${formatarMoeda(pendente)}</dd>
+              </div>
+              <div class="record-card__meta-item">
+                <dt class="record-card__meta-label">Pago</dt>
+                <dd class="record-card__meta-value">${formatarMoeda(pago)}</dd>
+              </div>
+              <div class="record-card__meta-item">
+                <dt class="record-card__meta-label">Responsavel</dt>
+                <dd class="record-card__meta-value">${escapeHtml(d?.pago_por || '-')}</dd>
+              </div>
+            </dl>
+            <div class="record-card__date">${dataHtml}</div>
+          </div>
           ${localState.label ? `
             <div class="despesa-local-state-row">
               <span class="despesa-local-state despesa-local-state-${escapeHtml(localState.status || 'pending')}">${escapeHtml(localState.label)}</span>
@@ -791,31 +822,15 @@
           ` : ''}
           ${localState.message ? `<div class="despesa-local-message">${escapeHtml(localState.message)}</div>` : ''}
 
-          <div class="despesa-card-meta-area">
-            <div class="despesa-card-meta">
-              <span class="despesa-meta-item"><strong>Categoria:</strong> ${escapeHtml(d?.categoria || 'SEM_CATEGORIA')}</span>
-              <span class="despesa-meta-item"><strong>Fornecedor:</strong> ${escapeHtml(d?.fornecedor || 'SEM_FORNECEDOR')}</span>
-              <span class="despesa-meta-item"><strong>Pago por:</strong> ${escapeHtml(d?.pago_por || '-')}</span>
-            </div>
-
-            <div class="despesa-acoes-laterais">
-              <button class="despesa-btn-acao" onclick="DespesasController.editarDespesa('${escapeHtml(d?.ID)}')" ${bloquearAcoes ? 'disabled' : ''}>Editar</button>
-              <button class="despesa-btn-acao" onclick="DespesasController.excluirDespesa('${escapeHtml(d?.ID)}')" ${bloquearAcoes ? 'disabled' : ''}>${rotuloExcluir}</button>
-            </div>
-          </div>
-
-          <div class="despesa-card-valores">
-            <div class="despesa-valor-box despesa-valor-pendente">
-              <div class="despesa-valor-topo">
-                <span>Pendente</span>
-                ${podePagar ? `<button class="despesa-btn-inline" onclick="DespesasController.registrarPagamentoDespesa('${escapeHtml(d?.ID)}')">Registrar pagamento</button>` : ''}
+          <div class="record-card__actions">
+            ${podePagar ? `<button class="record-card__primary-action despesa-btn-inline" onclick="DespesasController.registrarPagamentoDespesa('${escapeHtml(d?.ID)}')">Registrar pagamento</button>` : ''}
+            <details class="record-card__overflow">
+              <summary>Mais acoes</summary>
+              <div class="record-card__overflow-menu">
+                <button class="despesa-btn-acao" onclick="DespesasController.editarDespesa('${escapeHtml(d?.ID)}')" ${bloquearAcoes ? 'disabled' : ''}>Editar</button>
+                <button class="despesa-btn-acao record-card__danger-action" onclick="DespesasController.excluirDespesa('${escapeHtml(d?.ID)}')" ${bloquearAcoes ? 'disabled' : ''}>${rotuloExcluir}</button>
               </div>
-              <strong>${formatarMoeda(pendente)}</strong>
-            </div>
-            <div class="despesa-valor-box despesa-valor-pago">
-              <span>Pago</span>
-              <strong>${formatarMoeda(pago)}</strong>
-            </div>
+            </details>
           </div>
           ${podeCarregarHistorico ? `
             <details class="finance-history-disclosure" data-finance-history-disclosure>
@@ -1516,6 +1531,9 @@
 
         ${montarAlertasInboxDespesa(item)}
 
+        <details class="work-queue-review">
+          <summary><span>Revisar comprovante</span></summary>
+          <div class="work-queue-review__body">
         <details class="despesas-inbox-dados" ${status === 'ERRO' ? 'open' : ''}>
           <summary>Dados do comprovante</summary>
           <div class="despesa-inbox-grid">
@@ -1636,6 +1654,8 @@
             <button type="button" class="btn-perigo" onclick="DespesasController.descartarInboxDespesa('${escapeHtml(id)}')" ${alocado > 0.009 ? 'disabled' : ''}>Descartar</button>
           </div>
         ` : '<div class="despesas-inbox-concluido">Comprovante totalmente conciliado.</div>'}
+          </div>
+        </details>
       `;
       return card;
     }

@@ -2,8 +2,9 @@
   /* =========================
      NAV / ABAS
   ========================== */
-  const ABAS_MENU_HAMBURGER = ['dashboard', 'despesas', 'estoque', 'compras', 'vendas', 'produtos', 'producao'];
+  const ABAS_MENU_HAMBURGER = ['dashboard', 'despesas', 'estoque', 'compras', 'vendas', 'investimentos', 'produtos', 'producao'];
   const ABAS_APP = [...ABAS_MENU_HAMBURGER];
+  const ABAS_MOBILE_NAV_DIRETAS = ['dashboard', 'despesas', 'compras', 'producao'];
   const ABA_INICIAL_PADRAO = 'dashboard';
   const LAST_TAB_STORAGE_KEY = 'app:lasttab:v1';
   const QUICK_FILTER_STOCK_TYPE_KEY = 'app:quickfilter:v1:estoque:tipo';
@@ -12,6 +13,7 @@
   const DB_ENV_RECONCILE_STORAGE_KEY = 'app:db_env_reconcile:v1';
   let listenerFecharMenuNavbarAtivo = false;
   let listenerBloqueioDrawerAtivo = false;
+  let ultimoAcionadorMenuNavbar = null;
 
   function normalizarDbEnvFront(valor) {
     const env = String(valor || '').trim().toLowerCase();
@@ -370,6 +372,12 @@
       title: 'Faturamento acompanhado de perto',
       subtitle: 'Consulte vendas, recebimentos e pendencias em uma tela mais objetiva.'
     },
+    investimentos: {
+      label: 'Investimentos',
+      eyebrow: 'Capital dos socios',
+      title: 'Aportes e recebimentos',
+      subtitle: 'Acompanhe os recursos colocados na empresa sem mistura-los ao faturamento operacional.'
+    },
     produtos: {
       label: 'Produtos',
       eyebrow: 'Catalogo de producao',
@@ -384,6 +392,16 @@
     }
   };
 
+  const APP_PRIMARY_ACTION_LABELS = {
+    despesas: 'Nova despesa',
+    estoque: 'Novo item de estoque',
+    compras: 'Nova compra',
+    vendas: 'Nova venda',
+    investimentos: 'Novo investimento',
+    produtos: 'Novo produto',
+    producao: 'Nova producao'
+  };
+
   function normalizarNomeAba(valor) {
     const aba = String(valor || '').trim().toLowerCase();
     return ABAS_APP.includes(aba) ? aba : '';
@@ -392,6 +410,15 @@
   function obterApresentacaoAba(valor) {
     const aba = normalizarNomeAba(valor) || ABA_INICIAL_PADRAO;
     return APP_TAB_PRESENTATION[aba] || APP_TAB_PRESENTATION.dashboard;
+  }
+
+  function atualizarAcaoPrimaria(abaValor) {
+    const aba = normalizarNomeAba(abaValor) || ABA_INICIAL_PADRAO;
+    const botao = document.getElementById('btnAcaoPrimaria');
+    const label = document.getElementById('btnAcaoPrimariaLabel');
+    const rotulo = APP_PRIMARY_ACTION_LABELS[aba] || 'Adicionar';
+    if (label) label.textContent = rotulo;
+    if (botao) botao.setAttribute('aria-label', rotulo);
   }
 
   function obterAmbienteAtualVisual() {
@@ -462,7 +489,8 @@
     const alvo = bloqueado === true;
     const shell = document.querySelector('.app-shell');
     const bottomBar = document.querySelector('.bottom-bar');
-    [shell, bottomBar].forEach(el => {
+    const mobileBottomNav = document.getElementById('mobileBottomNav');
+    [shell, bottomBar, mobileBottomNav].forEach(el => {
       if (!el) return;
       if (alvo) {
         el.setAttribute('inert', '');
@@ -544,7 +572,7 @@
   }
 
   function atualizarEstadoNavbar(abaAtiva) {
-    const botoes = document.querySelectorAll('.navbar button[data-aba], #navbarMenu button[data-aba]');
+    const botoes = document.querySelectorAll('.navbar button[data-aba], #navbarMenu button[data-aba], #mobileBottomNav button[data-aba]');
     const alvo = String(abaAtiva || '').trim();
     botoes.forEach(btn => {
       const ehAtivo = String(btn.dataset.aba || '').trim() === alvo;
@@ -562,8 +590,23 @@
       btn.classList.toggle('active', ativoNoMenu);
       btn.setAttribute('aria-expanded', menuNavbarAberto() ? 'true' : 'false');
     }
+
+    const btnMais = document.getElementById('btnMobileNavMais');
+    if (btnMais) {
+      const ehGrupoAtivo = ABAS_APP.includes(alvo) && !ABAS_MOBILE_NAV_DIRETAS.includes(alvo);
+      const rotuloAtual = ehGrupoAtivo ? (obterApresentacaoAba(alvo)?.label || '') : '';
+      btnMais.classList.toggle('active', ehGrupoAtivo);
+      btnMais.setAttribute('aria-expanded', menuNavbarAberto() ? 'true' : 'false');
+      btnMais.setAttribute('aria-label', rotuloAtual ? `Abrir mais areas (atual: ${rotuloAtual})` : 'Abrir mais areas');
+      if (ehGrupoAtivo) {
+        btnMais.setAttribute('aria-current', 'page');
+      } else {
+        btnMais.removeAttribute('aria-current');
+      }
+    }
     atualizarRotuloBotaoHamburger(alvo);
     atualizarResumoWorkspace(alvo);
+    atualizarAcaoPrimaria(alvo);
   }
 
   function salvarFiltroRapidoNoCache(chave, valor) {
@@ -600,9 +643,13 @@
 
   function fecharMenuNavbar() {
     const { menu, btn, backdrop } = getNavbarHamburgerEls();
+    const estavaAberto = menuNavbarAberto();
+    const acionadorAnterior = ultimoAcionadorMenuNavbar;
     if (menu) menu.classList.add('hidden');
     if (backdrop) backdrop.classList.add('hidden');
     if (btn) btn.setAttribute('aria-expanded', 'false');
+    const btnMais = document.getElementById('btnMobileNavMais');
+    if (btnMais) btnMais.setAttribute('aria-expanded', 'false');
     if (document?.body) document.body.classList.remove('nav-drawer-open');
     setInteracaoPlanoDeFundoDrawer(false);
     desativarBloqueioInteracaoDrawer();
@@ -612,14 +659,22 @@
       document.removeEventListener('pointerdown', fecharMenuNavbarAoClicarFora, { capture: true });
       document.removeEventListener('keydown', fecharMenuNavbarPorTeclado);
     }
+
+    ultimoAcionadorMenuNavbar = null;
+    if (estavaAberto && acionadorAnterior?.isConnected && typeof acionadorAnterior.focus === 'function') {
+      window.requestAnimationFrame(() => acionadorAnterior.focus());
+    }
   }
 
-  function abrirMenuNavbar() {
+  function abrirMenuNavbar(acionador = null) {
     const { menu, btn, backdrop } = getNavbarHamburgerEls();
     if (!menu || !btn) return;
+    ultimoAcionadorMenuNavbar = acionador || document.activeElement || btn;
     menu.classList.remove('hidden');
     if (backdrop) backdrop.classList.remove('hidden');
     btn.setAttribute('aria-expanded', 'true');
+    const btnMais = document.getElementById('btnMobileNavMais');
+    if (btnMais) btnMais.setAttribute('aria-expanded', 'true');
     if (document?.body) document.body.classList.add('nav-drawer-open');
     setInteracaoPlanoDeFundoDrawer(true);
     ativarBloqueioInteracaoDrawer();
@@ -629,13 +684,18 @@
       document.addEventListener('pointerdown', fecharMenuNavbarAoClicarFora, { capture: true });
       document.addEventListener('keydown', fecharMenuNavbarPorTeclado);
     }
+
+    const primeiroDestino = menu.querySelector('button[data-aba]');
+    if (primeiroDestino && typeof primeiroDestino.focus === 'function') {
+      window.requestAnimationFrame(() => primeiroDestino.focus());
+    }
   }
 
-  function toggleMenuNavbar() {
+  function toggleMenuNavbar(acionador = null) {
     if (menuNavbarAberto()) {
       fecharMenuNavbar();
     } else {
-      abrirMenuNavbar();
+      abrirMenuNavbar(acionador);
     }
   }
 
@@ -662,7 +722,7 @@
     const { btn, backdrop } = getNavbarHamburgerEls();
     if (!btn) return;
     btn.addEventListener('click', () => {
-      toggleMenuNavbar();
+      toggleMenuNavbar(btn);
     });
     if (backdrop) {
       backdrop.addEventListener('pointerdown', evento => {
@@ -672,6 +732,23 @@
       backdrop.addEventListener('click', () => {
         fecharMenuNavbar();
       });
+    }
+  }
+
+  function initNavegacaoAdaptativa() {
+    document.querySelectorAll('#navbarMenu button[data-aba], #mobileBottomNav button[data-aba]')
+      .forEach(botao => {
+        botao.addEventListener('click', () => trocarAba(botao.dataset.aba));
+      });
+
+    const btnMais = document.getElementById('btnMobileNavMais');
+    if (btnMais) {
+      btnMais.addEventListener('click', () => toggleMenuNavbar(btnMais));
+    }
+
+    const btnAcaoPrimaria = document.getElementById('btnAcaoPrimaria');
+    if (btnAcaoPrimaria) {
+      btnAcaoPrimaria.addEventListener('click', acaoPrimaria);
     }
   }
 
@@ -806,6 +883,7 @@
       estoque: true,
       compras: true,
       vendas: true,
+      investimentos: true,
       produtos: true,
       producao: true
     };
@@ -1086,6 +1164,8 @@
         categoriasPorTipo: normalizarMapaCategorias(data.categoriasPorTipo),
         fornecedores: listaNormalizada(data.fornecedores),
         pagosPor: listaNormalizada(data.pagosPor),
+        investidores: listaNormalizada(data.investidores),
+        tiposInvestimento: listaNormalizada(data.tiposInvestimento),
         formasPagamento: listaNormalizada(data.formasPagamento),
         categoriasDespesas: listaNormalizada(data.categoriasDespesas)
       };
@@ -1101,6 +1181,8 @@
         categoriasPorTipo: data.categoriasPorTipo || {},
         fornecedores: data.fornecedores || [],
         pagosPor: data.pagosPor || [],
+        investidores: data.investidores || [],
+        tiposInvestimento: data.tiposInvestimento || [],
         formasPagamento: data.formasPagamento || [],
         categoriasDespesas: data.categoriasDespesas || []
       };
@@ -3336,6 +3418,42 @@
       });
     });
 
+    window.AppOptimistic.registerHandler('investimento.create', entry => {
+      const payload = { ...(entry.payload || {}) };
+      if (!String(payload.client_request_id || '').trim()) {
+        payload.client_request_id = String(entry.meta?.optimistic_item?.ID || entry.id || '').trim();
+      }
+      return chamarMutacaoOtimistaNoAmbiente(entry, 'criarInvestimento', [payload], {
+        context: 'optimistic.investimento.create',
+        errorMessage: 'Erro ao sincronizar novo investimento'
+      });
+    });
+
+    window.AppOptimistic.registerHandler('investimento.update', entry =>
+      chamarMutacaoOtimistaNoAmbiente(entry, 'atualizarInvestimento', [entry.meta?.target_id, entry.payload], {
+        context: 'optimistic.investimento.update',
+        errorMessage: 'Erro ao sincronizar alteracoes do investimento'
+      })
+    );
+
+    window.AppOptimistic.registerHandler('investimento.delete', entry =>
+      chamarMutacaoOtimistaNoAmbiente(entry, 'deletarInvestimento', [entry.meta?.target_id], {
+        context: 'optimistic.investimento.delete',
+        errorMessage: 'Erro ao sincronizar exclusao do investimento'
+      })
+    );
+
+    window.AppOptimistic.registerHandler('investimento.receive', entry => {
+      const payload = {
+        ...(entry.payload || {}),
+        client_request_id: String(entry.payload?.client_request_id || `INVREC_${entry.id || ''}`).slice(0, 120)
+      };
+      return chamarMutacaoOtimistaNoAmbiente(entry, 'registrarRecebimentoInvestimento', [entry.meta?.target_id, payload], {
+        context: 'optimistic.investimento.receive',
+        errorMessage: 'Erro ao sincronizar recebimento do investimento'
+      });
+    });
+
     window.AppOptimistic.registerHandler('estoque.create', entry => {
       if (!window.AppRequest?.call) {
         return Promise.reject(new Error('google.script.run indisponivel'));
@@ -3448,7 +3566,7 @@
         painel.classList.toggle('hidden', !bloqueado);
       }
 
-      const alvos = document.querySelectorAll('.navbar, .app-workspace-header, #appBootSkeleton, #appDbEnvBanner, #appSyncBanner, .top-bar, #painelFiltroEstoque, #painelFiltroCompras, .aba, .bottom-bar');
+      const alvos = document.querySelectorAll('.navbar, .app-workspace-header, #appBootSkeleton, #appDbEnvBanner, #appSyncBanner, .top-bar, #painelFiltroEstoque, #painelFiltroCompras, .aba, .bottom-bar, .mobile-bottom-nav');
       if (bloqueado) {
         alvos.forEach(el => {
           if (!el.classList.contains('hidden')) {
@@ -3803,6 +3921,7 @@
     estoque: 120000,
     compras: 120000,
     vendas: 120000,
+    investimentos: 120000,
     produtos: 120000,
     producao: 120000
   };
@@ -4046,6 +4165,8 @@
       compras: 'compras',
       venda: 'vendas',
       vendas: 'vendas',
+      investimento: 'investimentos',
+      investimentos: 'investimentos',
       estoque: 'estoque',
       produto: 'produtos',
       produtos: 'produtos',
@@ -4177,6 +4298,7 @@
       estoque: 'Estoque',
       compras: 'Compras',
       vendas: 'Vendas',
+      investimentos: 'Investimentos',
       despesas: 'Despesas',
       produtos: 'Produtos',
       producao: 'Producao'
@@ -4233,6 +4355,7 @@
         estoque: window.EstoqueController,
         compras: window.ComprasController,
         vendas: window.VendasController,
+        investimentos: window.InvestimentosController,
         despesas: window.DespesasController,
         produtos: window.ProdutosController,
         producao: window.ProducaoController
@@ -4303,6 +4426,13 @@
           state: buscaStateVendas,
           campos: { texto: 'buscaVendas' },
           aplicar: aplicarBuscaVendas
+        };
+      }
+      if (aba === 'investimentos') {
+        return {
+          state: buscaStateInvestimentos,
+          campos: { texto: 'buscaInvestimentos' },
+          aplicar: aplicarBuscaInvestimentos
         };
       }
       if (aba === 'produtos') {
@@ -4624,6 +4754,7 @@
         estoque: window.EstoqueUI,
         compras: window.ComprasUI,
         vendas: window.VendasUI,
+        investimentos: window.InvestimentosUI,
         produtos: window.ProdutosUI,
         producao: window.ProducaoUI
       };
@@ -4702,6 +4833,7 @@
       };
       navegacaoEmVoo = contextoNavegacao;
       try {
+      window.AppWorklistUI?.select?.(aba, 'records');
       if (typeof trocarAba === 'function') {
         destinoTrocaInterna = aba;
         try {
@@ -5217,6 +5349,12 @@
         labelSync: 'tab.vendas.sync',
         labelInit: 'tab.vendas.init'
       },
+      investimentos: {
+        sync: window.InvestimentosController?.syncFromBackend,
+        init: window.InvestimentosController?.init,
+        labelSync: 'tab.investimentos.sync',
+        labelInit: 'tab.investimentos.init'
+      },
       produtos: {
         sync: window.ProdutosController?.syncFromBackend,
         init: window.ProdutosController?.init,
@@ -5595,6 +5733,11 @@
         controller: () => window.VendasController,
         aplicar: onDone => window.aplicarBuscaVendas?.(onDone)
       },
+      investimentos: {
+        loaded: () => !!window.InvestimentosStore?.isLoaded?.(),
+        controller: () => window.InvestimentosController,
+        aplicar: onDone => window.aplicarBuscaInvestimentos?.(onDone)
+      },
       produtos: {
         loaded: () => !!window.ProdutosStore?.isLoaded?.(),
         controller: () => window.ProdutosController,
@@ -5688,6 +5831,7 @@
     const topEstoque = document.getElementById('topBarEstoque');
     const topCompras = document.getElementById('topBarCompras');
     const topVendas = document.getElementById('topBarVendas');
+    const topInvestimentos = document.getElementById('topBarInvestimentos');
     const topDespesas = document.getElementById('topBarDespesas');
     const topProdutos = document.getElementById('topBarProdutos');
     const topProducao = document.getElementById('topBarProducao');
@@ -5696,6 +5840,7 @@
     if (topEstoque) topEstoque.classList.toggle('hidden', nome !== 'estoque');
     if (topCompras) topCompras.classList.toggle('hidden', nome !== 'compras');
     if (topVendas) topVendas.classList.toggle('hidden', nome !== 'vendas');
+    if (topInvestimentos) topInvestimentos.classList.toggle('hidden', nome !== 'investimentos');
     if (topDespesas) topDespesas.classList.toggle('hidden', nome !== 'despesas');
     if (topProdutos) topProdutos.classList.toggle('hidden', nome !== 'produtos');
     if (topProducao) topProducao.classList.toggle('hidden', nome !== 'producao');
@@ -5738,6 +5883,8 @@
       } else if (window.VendasUI?.abrirFormulario) {
         VendasUI.abrirFormulario();
       }
+    } else if (abaAtiva.id === 'aba-investimentos') {
+      window.InvestimentosUI?.abrirFormularioNovo?.();
     } else if (abaAtiva.id === 'aba-produtos') {
       if (window.ProdutosUI?.abrirFormularioNovo) {
         ProdutosUI.abrirFormularioNovo();
@@ -5833,6 +5980,10 @@
     texto: ''
   };
 
+  const buscaStateInvestimentos = {
+    texto: ''
+  };
+
   const buscaStateDespesas = {
     texto: ''
   };
@@ -5909,6 +6060,11 @@
   function vendasEstaAtivo() {
     const abaVendas = document.getElementById('aba-vendas');
     return abaVendas && !abaVendas.classList.contains('hidden');
+  }
+
+  function investimentosEstaAtivo() {
+    const aba = document.getElementById('aba-investimentos');
+    return aba && !aba.classList.contains('hidden');
   }
 
   function despesasEstaAtivo() {
@@ -6093,6 +6249,23 @@
   }
 
   const aplicarBuscaVendasDebounced = debounce(aplicarBuscaVendas, 350);
+
+  function aplicarBuscaInvestimentos(onDone) {
+    const concluir = typeof onDone === 'function' ? onDone : null;
+    if (!investimentosEstaAtivo() || !window.InvestimentosStore || !window.InvestimentosUI || !InvestimentosStore.isLoaded()) {
+      concluir?.();
+      return;
+    }
+    const texto = (buscaStateInvestimentos.texto || '').trim();
+    const versaoStore = InvestimentosStore.getVersion?.();
+    if (devePularRenderBusca('investimentos', versaoStore, buildBuscaRenderKey([texto]))) {
+      concluir?.();
+      return;
+    }
+    InvestimentosUI.renderLista(InvestimentosStore.filter({ texto: texto || undefined }), concluir);
+  }
+
+  const aplicarBuscaInvestimentosDebounced = debounce(aplicarBuscaInvestimentos, 350);
 
   function aplicarBuscaDespesas(onDone) {
     const concluir = typeof onDone === 'function' ? onDone : null;
@@ -6411,11 +6584,13 @@
             ? !!window.ComprasStore?.isLoaded?.()
             : aba === 'vendas'
               ? !!window.VendasStore?.isLoaded?.()
-              : aba === 'produtos'
-                ? !!window.ProdutosStore?.isLoaded?.()
-                : aba === 'producao'
-                  ? !!window.ProducaoStore?.isLoaded?.()
-                  : true;
+              : aba === 'investimentos'
+                ? !!window.InvestimentosStore?.isLoaded?.()
+                : aba === 'produtos'
+                  ? !!window.ProdutosStore?.isLoaded?.()
+                  : aba === 'producao'
+                    ? !!window.ProducaoStore?.isLoaded?.()
+                    : true;
       if (!loaded) return false;
       const lifecycle = window.AppTabRefresh?.getState?.(aba);
       return Number(lifecycle?.renderRevision || 0) > 0;
@@ -6693,6 +6868,7 @@
     estoque: false,
     compras: false,
     vendas: false,
+    investimentos: false,
     despesas: false,
     produtos: false,
     producao: false
@@ -6746,6 +6922,10 @@
     }
     if (aba === 'vendas') {
       initBuscaVendas();
+      return;
+    }
+    if (aba === 'investimentos') {
+      initBuscaInvestimentos();
       return;
     }
     if (aba === 'despesas') {
@@ -6912,6 +7092,16 @@
         mostrarToast('Filtro avancado em breve');
       });
     }
+  }
+
+  function initBuscaInvestimentos() {
+    if (tabUiInfraInitState.investimentos) return;
+    tabUiInfraInitState.investimentos = true;
+    const input = document.getElementById('buscaInvestimentos');
+    input?.addEventListener('input', () => {
+      buscaStateInvestimentos.texto = input.value || '';
+      aplicarBuscaInvestimentosDebounced();
+    });
   }
 
   function initBuscaDespesas() {
@@ -7270,6 +7460,7 @@
       }));
 
       initNavbarHamburger();
+      initNavegacaoAdaptativa();
       registrarListenersFiltrosStore();
       initModalA11y();
       initCampoAjudaA11y();

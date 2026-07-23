@@ -464,8 +464,8 @@
     }
 
     function montarCardResumo(v) {
-      const div = document.createElement('div');
-      div.className = 'card card-ficha';
+      const div = document.createElement('article');
+      div.className = 'card card-ficha record-card record-card--venda';
       div.dataset.id = v.ID;
       if (v?._localMutationId) div.dataset.localMutationId = String(v._localMutationId || '').trim();
       const localState = window.AppEntityMutations?.getUiState
@@ -491,16 +491,42 @@
       const item = escapeHtml(v.item || '-');
       const cliente = escapeHtml(v.cliente || 'Cliente nao informado');
       const unidade = escapeHtml(v.unidade || '');
-      const status = escapeHtml(String(v.status_pagamento || 'PENDENTE').toUpperCase());
+      const statusPagamento = String(v.status_pagamento || 'PENDENTE').toUpperCase();
+      const statusLabel = statusPagamento === 'PAGO'
+        ? 'Recebido'
+        : (statusPagamento === 'PARCIAL' ? 'Recebido parcialmente' : (statusPagamento === 'PENDENTE' ? 'A receber' : statusPagamento));
+      const statusClasse = statusPagamento === 'PAGO'
+        ? 'success'
+        : (statusPagamento === 'PARCIAL' || statusPagamento === 'PENDENTE' ? 'warning' : 'neutral');
+      const quantidadeLabel = `${Number(v.quantidade || 0).toFixed(2)} ${unidade}`.trim();
       div.innerHTML = `
-        <div class="card-ficha-topo">${item}</div>
-        <div class="card-ficha-corpo">
-          <div class="card-resumo">
-            ${cliente}<br>
-            ${Number(v.quantidade || 0).toFixed(2)} ${unidade}<br>
-            ${formatarMoeda(v.valor_total_venda || 0)}<br>
-            ${status}
-            ${window.AppListOrderUI?.cardDateHtml('vendas', v, window.VendasStore?.getSort?.()) || ''}
+        <div class="card-ficha-topo record-card__header">
+          <div class="record-card__heading">
+            <span class="record-card__eyebrow">Venda</span>
+            <h3 class="record-card__title">${item}</h3>
+            <span class="record-card__subtitle">${cliente}</span>
+          </div>
+          <div class="record-card__value">
+            <span class="record-card__value-label">Valor total</span>
+            <strong>${formatarMoeda(v.valor_total_venda || 0)}</strong>
+          </div>
+        </div>
+        <div class="card-ficha-corpo record-card__body">
+          <div class="card-resumo record-card__summary">
+            <span class="record-card__status record-card__status--${statusClasse}">${escapeHtml(statusLabel)}</span>
+            <dl class="record-card__meta">
+              <div class="record-card__meta-item">
+                <dt class="record-card__meta-label">Quantidade</dt>
+                <dd class="record-card__meta-value">${quantidadeLabel}</dd>
+              </div>
+              <div class="record-card__meta-item">
+                <dt class="record-card__meta-label">Saldo a receber</dt>
+                <dd class="record-card__meta-value">${formatarMoeda(v.total_pendente || 0)}</dd>
+              </div>
+            </dl>
+            <div class="record-card__date">
+              ${window.AppListOrderUI?.cardDateHtml('vendas', v, window.VendasStore?.getSort?.()) || ''}
+            </div>
           </div>
           ${localState.label ? `
             <div class="optimistic-local-state-row">
@@ -509,7 +535,9 @@
             </div>
           ` : ''}
           ${localState.message ? `<div class="optimistic-local-message">${escapeHtml(localState.message)}</div>` : ''}
-          <button class="ver-mais">Ver mais</button>
+          <div class="record-card__actions">
+            <button type="button" class="ver-mais" aria-label="Ver detalhes da venda de ${escapeAttr(v.item || 'item')}">Ver detalhes</button>
+          </div>
         </div>
       `;
       return div;

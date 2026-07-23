@@ -933,7 +933,7 @@
     ========================== */
     function montarCardProduto(i) {
       const div = document.createElement('div');
-      div.className = 'card card-ficha';
+      div.className = 'card card-ficha record-card record-card--produto';
       div.dataset.id = i.produto_id;
       if (i?._localMutationId) div.dataset.localMutationId = String(i._localMutationId || '').trim();
       const localState = window.AppEntityMutations?.getUiState
@@ -968,24 +968,33 @@
       const saidasTotal = Number(i.modelo_saidas_total || saidasDoCache || 0);
       const etapasTotal = Number(i.modelo_etapas_total || 0);
       const nomeModelo = String(i.modelo_nome || (receitas[0]?.nome_receita || 'Modelo principal')).trim() || 'Modelo principal';
-      const resumoModelo = (entradasTotal + saidasTotal + etapasTotal) > 0
-        ? `Modelo: ${nomeModelo} | ${entradasTotal} entradas, ${saidasTotal} saidas, ${etapasTotal} etapas`
-        : 'Modelo: nao configurado';
       const precoVenda = parseNumero(i.preco_venda);
-      const resumoPrecoVenda = precoVenda > 0
-        ? `Preco venda: R$ ${formatNumero(precoVenda)}`
-        : 'Preco venda: nao informado';
+      const precoVendaLabel = precoVenda > 0 ? `R$ ${formatNumero(precoVenda)}` : 'Nao informado';
+      const modeloConfigurado = (entradasTotal + saidasTotal + etapasTotal) > 0;
       const nomeProduto = escapeHtml(i.nome_produto || i.produto_id);
-      const resumo = escapeHtml(resumoModelo);
-      const resumoPreco = escapeHtml(resumoPrecoVenda);
+      const dataHtml = window.AppListOrderUI?.cardDateHtml('produtos', i, window.ProdutosStore?.getSort?.()) || '';
 
       div.innerHTML = `
-        <div class="card-ficha-topo">${nomeProduto}</div>
-        <div class="card-ficha-corpo">
-          <div class="card-resumo">
-            ${resumo}<br>
-            ${resumoPreco}
-            ${window.AppListOrderUI?.cardDateHtml('produtos', i, window.ProdutosStore?.getSort?.()) || ''}
+        <div class="card-ficha-topo record-card__header">
+          <div class="record-card__heading">
+            <span class="record-card__eyebrow">Produto</span>
+            <h3 class="record-card__title">${nomeProduto}</h3>
+            <span class="record-card__subtitle">${escapeHtml(nomeModelo)}</span>
+          </div>
+          <div class="record-card__value">
+            <span class="record-card__value-label">Preco de venda</span>
+            <strong>${escapeHtml(precoVendaLabel)}</strong>
+          </div>
+        </div>
+        <div class="card-ficha-corpo record-card__body">
+          <div class="card-resumo record-card__summary">
+            <span class="record-card__status record-card__status--${modeloConfigurado ? 'success' : 'warning'}">${modeloConfigurado ? 'Modelo configurado' : 'Sem modelo'}</span>
+            <dl class="record-card__meta">
+              <div class="record-card__meta-item"><dt class="record-card__meta-label">Entradas</dt><dd class="record-card__meta-value">${escapeHtml(entradasTotal)}</dd></div>
+              <div class="record-card__meta-item"><dt class="record-card__meta-label">Saidas</dt><dd class="record-card__meta-value">${escapeHtml(saidasTotal)}</dd></div>
+              <div class="record-card__meta-item"><dt class="record-card__meta-label">Etapas</dt><dd class="record-card__meta-value">${escapeHtml(etapasTotal)}</dd></div>
+            </dl>
+            <div class="record-card__date">${dataHtml}</div>
           </div>
           ${localState.label ? `
             <div class="optimistic-local-state-row">
@@ -994,7 +1003,9 @@
             </div>
           ` : ''}
           ${localState.message ? `<div class="optimistic-local-message">${escapeHtml(localState.message)}</div>` : ''}
-          <button class="ver-mais">Ver mais</button>
+          <div class="record-card__actions">
+            <button class="ver-mais record-card__details-action">Abrir produto</button>
+          </div>
         </div>
       `;
 
@@ -1027,24 +1038,47 @@
         ? `R$ ${formatNumero(precoVenda)}`
         : 'Nao informado';
       return `
-        <p><b>Preco de venda:</b> ${escapeHtml(precoVendaLabel)}</p>
-        ${localState.label ? `
-          <div class="optimistic-local-state-row">
-            <span class="optimistic-local-state optimistic-local-state-${escapeAttr(localState.status || 'pending')}">${escapeHtml(localState.label)}</span>
-            ${localState.canRetry ? `<button class="btn-retry-local" onclick='ProdutosController.retryProdutoMutation(${idJs})'>Tentar novamente</button>` : ''}
-          </div>
-        ` : ''}
-        ${localState.message ? `<div class="optimistic-local-message">${escapeHtml(localState.message)}</div>` : ''}
+        <article class="detail-workspace-content detail-workspace-content-produto">
+          <nav class="detail-workspace-nav" aria-label="Secoes do produto">
+            <a href="#produtoDetalhesResumo">Resumo</a>
+            <a href="#produtoDetalhesModelos">Modelos</a>
+          </nav>
 
-        <div class="bloco">
-          <p><b>Modelo</b></p>
-          ${renderReceitas(receitas, receitasCarregadas, i.produto_id)}
-        </div>
+          <section
+            id="produtoDetalhesResumo"
+            class="detail-workspace-section detail-workspace-summary"
+            aria-labelledby="produtoDetalhesResumoTitulo"
+          >
+            <h4 id="produtoDetalhesResumoTitulo" class="detail-workspace-section-title">Resumo</h4>
+            <dl class="detail-workspace-summary-grid">
+              <div class="detail-workspace-summary-item">
+                <dt>Preco de venda</dt>
+                <dd>${escapeHtml(precoVendaLabel)}</dd>
+              </div>
+            </dl>
+            ${localState.label ? `
+              <div class="optimistic-local-state-row">
+                <span class="optimistic-local-state optimistic-local-state-${escapeAttr(localState.status || 'pending')}">${escapeHtml(localState.label)}</span>
+                ${localState.canRetry ? `<button class="btn-retry-local" onclick='ProdutosController.retryProdutoMutation(${idJs})'>Tentar novamente</button>` : ''}
+              </div>
+            ` : ''}
+            ${localState.message ? `<div class="optimistic-local-message">${escapeHtml(localState.message)}</div>` : ''}
+          </section>
 
-        <div class="acoes">
-          <button onclick='ProdutosController.editar(${idJs})' ${bloquearAcoes ? 'disabled' : ''}>Editar</button>
-          <button onclick='ProdutosController.excluir(${idJs})' ${bloquearAcoes ? 'disabled' : ''}>Excluir</button>
-        </div>
+          <section
+            id="produtoDetalhesModelos"
+            class="bloco detail-workspace-section"
+            aria-labelledby="produtoDetalhesModelosTitulo"
+          >
+            <h4 id="produtoDetalhesModelosTitulo" class="detail-workspace-section-title">Modelos</h4>
+            ${renderReceitas(receitas, receitasCarregadas, i.produto_id)}
+          </section>
+
+          <footer class="acoes detail-workspace-actions" aria-label="Acoes do produto">
+            <button onclick='ProdutosController.editar(${idJs})' ${bloquearAcoes ? 'disabled' : ''}>Editar</button>
+            <button onclick='ProdutosController.excluir(${idJs})' ${bloquearAcoes ? 'disabled' : ''}>Excluir</button>
+          </footer>
+        </article>
       `;
     }
 

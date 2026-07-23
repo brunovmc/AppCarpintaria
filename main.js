@@ -33,6 +33,47 @@ function deletarItemEstoqueAPI(id) {
   return deletarItemEstoque(id);
 }
 
+/**
+ * CONFIGURACAO TEMPORARIA — executar manualmente uma unica vez no editor do GAS.
+ * Cria a estrutura de investimentos em PROD e DEV sem remover ou reordenar
+ * colunas existentes. Depois da execucao validada, esta funcao pode ser removida.
+ */
+function configurarEstruturaInvestimentos() {
+  const ambientes = [DB_ENV_PROD, DB_ENV_DEV];
+  const resultados = [];
+  ambientes.forEach(ambiente => {
+    const resultado = executarComAmbienteBancoDados_(ambiente, () => {
+      const ss = getDataSpreadsheet({ skipAccessCheck: true, targetEnv: ambiente });
+      let investimentos = ss.getSheetByName(ABA_INVESTIMENTOS);
+      if (!investimentos) investimentos = ss.insertSheet(ABA_INVESTIMENTOS);
+      ensureSchema(investimentos, INVESTIMENTOS_SCHEMA);
+
+      let validacao = ss.getSheetByName('VALIDACAO');
+      if (!validacao) validacao = ss.insertSheet('VALIDACAO');
+      ensureSchema(validacao, ['INVESTIDOR', 'TIPO_INVESTIMENTO']);
+      SpreadsheetApp.flush();
+
+      limparCacheInvestimentos();
+      limparCacheValidacoes();
+      limparCacheDashboardFinanceiro();
+
+      return {
+        ambiente,
+        planilha_id: ss.getId(),
+        aba_investimentos: investimentos.getName(),
+        cabecalhos_investimentos: investimentos.getRange(
+          1, 1, 1, investimentos.getLastColumn()
+        ).getValues()[0],
+        cabecalhos_validacao: validacao.getRange(
+          1, 1, 1, validacao.getLastColumn()
+        ).getValues()[0]
+      };
+    });
+    resultados.push(resultado);
+  });
+  return { ok: true, ambientes: resultados };
+}
+
 function atualizarCachesManualmente() {
   const atualizadoEm = new Date();
   const referenciaAtual = Utilities.formatDate(
@@ -64,6 +105,10 @@ function atualizarCachesManualmente() {
       estoque: executar("recarregarCacheEstoque", recarregarCacheEstoque),
       compras: executar("recarregarCacheCompras", recarregarCacheCompras),
       vendas: executar("recarregarCacheVendas", recarregarCacheVendas),
+      investimentos: executar(
+        "recarregarCacheInvestimentos",
+        recarregarCacheInvestimentos,
+      ),
       produtos: executar("recarregarCacheProdutos", recarregarCacheProdutos),
       producao: executar("recarregarCacheProducao", recarregarCacheProducao),
       despesas_gerais: executar(
